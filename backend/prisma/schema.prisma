@@ -1,0 +1,183 @@
+// NSTR Patrol — Prisma schema
+// PostgreSQL + PostGIS
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Note: geometric fields (polygon, point) are stored as PostGIS geometries.
+// Prisma does not natively map PostGIS types; use String columns holding
+// WKT/GeoJSON and expose raw SQL queries (e.g. via $queryRaw / ST_* functions)
+// for spatial operations.
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  fullName     String
+  role         Role     @default(RANGER)
+  phone        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  devices   Device[]
+  patrols   Patrol[]
+  incidents Incident[]
+}
+
+enum Role {
+  ADMIN
+  RANGER
+}
+
+model Device {
+  id          String   @id @default(cuid())
+  userId      String
+  deviceName  String
+  deviceModel String
+  deviceId    String   @unique
+  pushToken   String?
+  lastSeenAt  DateTime?
+  createdAt   DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id])
+}
+
+model Forest {
+  id          String   @id @default(cuid())
+  name        String
+  code        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  boundaries ForestBoundary[]
+  grids      ForestGrid[]
+  patrols    Patrol[]
+}
+
+model ForestBoundary {
+  id        String  @id @default(cuid())
+  forestId  String
+  name      String
+  polygon   String // PostGIS polygon (WKT/GeoJSON)
+  createdAt DateTime @default(now())
+
+  forest Forest @relation(fields: [forestId], references: [id])
+}
+
+model ForestGrid {
+  id        String  @id @default(cuid())
+  forestId  String
+  gridCode  String
+  polygon   String // PostGIS polygon (WKT/GeoJSON)
+  createdAt DateTime @default(now())
+
+  forest       Forest       @relation(fields: [forestId], references: [id])
+  patrolPoints PatrolPoint[]
+}
+
+model Patrol {
+  id          String    @id @default(cuid())
+  userId      String
+  forestId    String
+  assignedAt  DateTime?
+  startedAt   DateTime?
+  endedAt     DateTime?
+  status      PatrolStatus @default(ASSIGNED)
+  syncStatus  SyncStatus   @default(PENDING)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id])
+  forest       Forest        @relation(fields: [forestId], references: [id])
+  points       PatrolPoint[]
+  sensorReadings SensorReading[]
+  incidents    Incident[]
+}
+
+enum PatrolStatus {
+  ASSIGNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+model PatrolPoint {
+  id        String   @id @default(cuid())
+  patrolId  String
+  gridId    String?
+  latitude  Float
+  longitude Float
+  altitude  Float?
+  speed     Float?
+  bearing   Float?
+  accuracy  Float?
+  point     String? // PostGIS point (WKT/GeoJSON)
+  timestamp DateTime
+  syncStatus SyncStatus @default(PENDING)
+  createdAt DateTime @default(now())
+
+  patrol Patrol        @relation(fields: [patrolId], references: [id])
+  grid   ForestGrid?   @relation(fields: [gridId], references: [id])
+
+  @@index([patrolId, timestamp])
+}
+
+model SensorReading {
+  id         String   @id @default(cuid())
+  patrolId   String
+  timestamp  DateTime
+  type       String // ACCELEROMETER | GYROSCOPE | MAGNETOMETER | STEP_COUNTER | BAROMETER
+  x          Float?
+  y          Float?
+  z          Float?
+  value      Float?
+  syncStatus SyncStatus @default(PENDING)
+  createdAt  DateTime @default(now())
+
+  patrol Patrol @relation(fields: [patrolId], references: [id])
+
+  @@index([patrolId, timestamp])
+}
+
+model Incident {
+  id        String   @id @default(cuid())
+  patrolId  String?
+  userId    String
+  type      String
+  title     String
+  description String?
+  latitude  Float?
+  longitude Float?
+  point     String? // PostGIS point
+  photos    String[] // MinIO/S3 object keys
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  patrol Patrol? @relation(fields: [patrolId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+}
+
+model SyncLog {
+  id           String   @id @default(cuid())
+  deviceId     String?
+  patrolId     String?
+  recordsCount Int
+  status       String
+  errorMessage String?
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+}

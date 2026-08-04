@@ -1,0 +1,74 @@
+<svg width="414" xmlns="http://www.w3.org/2000/svg" height="140" viewBox="1062 2332 414 140" style="-webkit-print-color-adjust::exact" xmlns:xlink="http://www.w3.org/1999/xlink" fill="none" version="1.1">
+  <style>
+  </style>
+  <g id="shape-0efa184a-387c-805a-8008-6e2db6bf62af">
+    <defs>
+      <clipPath id="frame-clip-0efa184a-387c-805a-8008-6e2db6bf62af-render-43209" class="frame-clip frame-clip-def">
+        <rect rx="8" ry="8" x="1098" y="2367" width="342" height="64" transform="matrix(1.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000)">
+        </rect>
+      </clipPath>
+    </defs>
+    <g class="frame-container-wrapper">
+      <g class="frame-container-blur">
+        <defs>
+          <filter id="filter-shadow-render-43209" x="-0.07894736842105263" y="-0.421875" width="1.1578947368421053" height="1.890625" filterUnits="objectBoundingBox" color-interpolation-filters="sRGB">
+            <feFlood flood-opacity="0" result="BackgroundImageFix">
+            </feFlood>
+            <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0">
+            </feColorMatrix>
+            <feOffset dx="0" dy="1">
+            </feOffset>
+            <feGaussianBlur stdDeviation="2">
+            </feGaussianBlur>
+            <feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.2 0">
+            </feColorMatrix>
+            <feBlend mode="normal" in2="BackgroundImageFix" result="filter_0efa184a-387c-805a-8008-6e2db6c53acb">
+            </feBlend>
+            <feBlend mode="normal" in="SourceGraphic" in2="filter_0efa184a-387c-805a-8008-6e2db6c53acb" result="shape">
+            </feBlend>
+          </filter>
+        </defs>
+        <g class="frame-container-shadows" filter="url(#filter-shadow-render-43209)">
+          <g clip-path="url(#frame-clip-0efa184a-387c-805a-8008-6e2db6bf62af-render-43209)" fill="none">
+            <g class="fills" id="fills-0efa184a-387c-805a-8008-6e2db6bf62af">
+              <rect rx="8" ry="8" x="1098" y="2367" width="342" height="64" transform="matrix(1.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000)" class="frame-background" style="fill:#ffffff;fill-opacity:1">
+              </rect>
+            </g>
+            <g class="frame-children">
+              <g id="shape-0efa184a-387c-805a-8008-6e2db6c894e6">
+                <g transform="matrix(1.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000)" class="text-container" x="1178.5" y="2390.5" width="181" height="17" rx="0" ry="0">
+                  <defs>
+                    <pattern patternUnits="objectBoundingBox" width="180.265625" height="16" id="fill-0-render-43210-0">
+                      <g>
+                        <rect width="180.265625" height="16" style="fill:#757575;fill-opacity:1">
+                        </rect>
+                      </g>
+                    </pattern>
+                  </defs>
+                  <g class="fills" id="fills-0efa184a-387c-805a-8008-6e2db6c894e6">
+                    <text x="1178.5" y="2406.5" dominant-baseline="ideographic" textLength="180.265625" lengthAdjust="spacingAndGlyphs" style="text-transform:none;font-family:Roboto;letter-spacing:normal;font-style:normal;font-weight:400;white-space:pre;font-size:14px;text-decoration:none;direction:ltr;fill:#757575;fill-opacity:1">No team members added yet</text>
+                  </g>
+                </g>
+              </g>
+            </g>
+          </g>
+        </g>
+      </g>
+    </g>
+  </g>
+  <g id="shape-0efa184a-387c-805a-8008-6e2db6c894e6">
+    <g transform="matrix(1.000000, 0.000000, 0.000000, 1.000000, 0.000000, 0.000000)" class="text-container" x="1178.5" y="2390.5" width="181" height="17" rx="0" ry="0">
+      <defs>
+        <pattern patternUnits="objectBoundingBox" width="180.265625" height="16" id="fill-0-render-43211-0">
+          <g>
+            <rect width="180.265625" height="16" style="fill:#757575;fill-opacity:1">
+            </rect>
+          </g>
+        </pattern>
+      </defs>
+      <g class="fills" id="fills-0efa184a-387c-805a-8008-6e2db6c894e6">
+        <text x="1178.5" y="2406.5" dominant-baseline="ideographic" textLength="180.265625" lengthAdjust="spacingAndGlyphs" style="text-transform:none;font-family:Roboto;letter-spacing:normal;font-style:normal;font-weight:400;white-space:pre;font-size:14px;text-decoration:none;direction:ltr;fill:#757575;fill-opacity:1">No team members added yet</text>
+      </g>
+    </g>
+  </g>
+</svg>
