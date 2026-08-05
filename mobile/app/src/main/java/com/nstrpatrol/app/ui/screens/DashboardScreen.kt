@@ -21,6 +21,11 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -30,6 +35,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.time.TimeIntegrityState
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.Background
@@ -41,6 +48,9 @@ import com.nstrpatrol.app.ui.theme.PaleForest
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
 fun DashboardScreen(
@@ -48,8 +58,25 @@ fun DashboardScreen(
     onStartPatrol: () -> Unit,
     onQuickCapture: () -> Unit,
     onSos: () -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    timeState: TimeIntegrityState,
+    patrolTimer: PatrolTimer
 ) {
+    var tick by remember { mutableLongStateOf(0L) }
+    LaunchedEffect(patrolTimer.running.value) {
+        if (patrolTimer.running.value) {
+            while (true) {
+                tick++
+                kotlinx.coroutines.delay(1000)
+            }
+        }
+    }
+    val satTimeText = timeState.satelliteUtcMillis?.let {
+        SimpleDateFormat("EEE, dd MMM yyyy · HH:mm:ss z", Locale.US).format(Date(it))
+    }
+    tick // read to trigger recomposition on each tick while the timer runs
+    val durationText = if (patrolTimer.running.value) patrolTimer.elapsedFormatted() else "3h 12m"
+
     NstrScaffold(
         title = "Dashboard",
         subtitle = "Good day, Ranger K.",
@@ -59,6 +86,47 @@ fun DashboardScreen(
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(16.dp))
+
+        if (timeState.tamperDetected) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(ErrorRed.copy(alpha = 0.12f))
+                    .border(1.dp, ErrorRed, RoundedCornerShape(8.dp))
+                    .padding(horizontal = 14.dp, vertical = 12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Filled.Warning,
+                        contentDescription = null,
+                        tint = ErrorRed,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(
+                        text = "Time tampering detected",
+                        color = ErrorRed,
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = if (timeState.gnssTimeAvailable)
+                        "Device clock differs from satellite time by ${timeState.divergenceSeconds}s."
+                    else
+                        "Device auto-time is off. Real time comes from GNSS satellites.",
+                    color = TextPrimary,
+                    fontSize = 12.sp
+                )
+                if (satTimeText != null) {
+                    Spacer(Modifier.height(4.dp))
+                    Text(text = "Satellite time: $satTimeText", color = TextSecondary, fontSize = 11.sp)
+                }
+            }
+            Spacer(Modifier.height(12.dp))
+        }
 
         // Assigned patrol banner
         Column(
@@ -86,7 +154,11 @@ fun DashboardScreen(
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatCard(label = "Total dist. covered", value = "12.4 km", modifier = Modifier.weight(1f))
-            StatCard(label = "Patrol duration", value = "3h 12m", modifier = Modifier.weight(1f))
+            StatCard(
+                label = "Patrol duration",
+                value = durationText,
+                modifier = Modifier.weight(1f)
+            )
         }
 
         Spacer(Modifier.height(12.dp))

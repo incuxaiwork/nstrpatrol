@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -26,7 +27,8 @@ import com.nstrpatrol.app.ui.navigation.BottomTab
 @Composable
 fun SightingScreen(
     onBack: () -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    onOpenCamera: (String) -> Unit = {}
 ) {
     var signType by remember { mutableStateOf<String?>(null) }
     var speciesType by remember { mutableStateOf<String?>(null) }
@@ -34,6 +36,8 @@ fun SightingScreen(
     var ageOfTracks by remember { mutableStateOf<String?>(null) }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
+    val photoSlot = "sighting"
+    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
 
     val titles = mapOf(
         "sign" to "Sign Type",
@@ -59,7 +63,12 @@ fun SightingScreen(
             Spacer(Modifier.height(12.dp))
             FieldLabel(text = "Sighting Photo", required = true)
             Spacer(Modifier.height(8.dp))
-            PhotoPlaceholder(actionText = "Take photo", hint = "Open camera to capture the impact")
+            PhotoPlaceholder(
+                actionText = "Take photo",
+                hint = "Open camera to capture the impact",
+                photoPath = photoPath,
+                onClick = { onOpenCamera(photoSlot) }
+            )
 
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = "Sighting details")

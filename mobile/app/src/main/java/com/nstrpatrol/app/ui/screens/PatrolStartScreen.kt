@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.OptionSheet
@@ -43,7 +44,8 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 fun PatrolStartScreen(
     onSave: () -> Unit,
     onBack: () -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    onOpenCamera: (String) -> Unit = {}
 ) {
     var patrolType by remember { mutableStateOf<String?>(null) }
     var patrolMethod by remember { mutableStateOf<String?>(null) }
@@ -54,6 +56,8 @@ fun PatrolStartScreen(
     var armUsed by remember { mutableStateOf<String?>(null) }
     var memberCount by remember { mutableIntStateOf(0) }
     var openSheet by remember { mutableStateOf<String?>(null) }
+    val photoSlot = "patrol_start"
+    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
 
     Box {
         NstrScaffold(
@@ -68,7 +72,9 @@ fun PatrolStartScreen(
             Spacer(Modifier.height(8.dp))
             PhotoPlaceholder(
                 actionText = "Take photo",
-                hint = "Add a photo of your patrolling team"
+                hint = "Add a photo of your patrolling team",
+                photoPath = photoPath,
+                onClick = { onOpenCamera(photoSlot) }
             )
 
             Spacer(Modifier.height(16.dp))

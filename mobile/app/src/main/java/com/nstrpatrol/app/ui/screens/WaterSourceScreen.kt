@@ -13,6 +13,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -27,7 +28,8 @@ import com.nstrpatrol.app.ui.navigation.BottomTab
 @Composable
 fun WaterSourceScreen(
     onBack: () -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    onOpenCamera: (String) -> Unit = {}
 ) {
     var sourceType by remember { mutableStateOf<String?>(null) }
     var dry by remember { mutableStateOf("Yes") }
@@ -41,6 +43,8 @@ fun WaterSourceScreen(
     var species by remember { mutableStateOf<String?>(null) }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
+    val photoSlot = "water_source"
+    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
 
     val titles = mapOf(
         "source_type" to "Water Source Type",
@@ -72,7 +76,12 @@ fun WaterSourceScreen(
             Spacer(Modifier.height(12.dp))
             FieldLabel(text = "Water Source Photo", required = true)
             Spacer(Modifier.height(8.dp))
-            PhotoPlaceholder(actionText = "Take photo", hint = "Open camera to capture the impact")
+            PhotoPlaceholder(
+                actionText = "Take photo",
+                hint = "Open camera to capture the impact",
+                photoPath = photoPath,
+                onClick = { onOpenCamera(photoSlot) }
+            )
 
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = "Water source")

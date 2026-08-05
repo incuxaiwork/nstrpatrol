@@ -72,7 +72,7 @@ The API contract is fully decoupled — each project defines and consumes its ow
 | Gyroscope   | rotation, orientation, motion smoothing         |
 | Magnetometer | heading, north orientation                     |
 | Step counter | steps, distance estimation                     |
-| Barometer   | elevation changes (optional)                   |
+| Barometer   | elevation changes (optional)                    |
 
 ### Offline patrol flow
 

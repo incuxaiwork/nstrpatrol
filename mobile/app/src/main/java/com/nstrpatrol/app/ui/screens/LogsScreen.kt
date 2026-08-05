@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.LogsData
+import com.nstrpatrol.app.time.TimeIntegrityState
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.navigation.BottomTab
@@ -33,9 +34,15 @@ import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import com.nstrpatrol.app.ui.theme.WarningAmber
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 @Composable
-fun LogsScreen(onTabSelected: (BottomTab) -> Unit) {
+fun LogsScreen(
+    onTabSelected: (BottomTab) -> Unit,
+    timeState: TimeIntegrityState
+) {
     NstrScaffold(
         title = "Logs",
         subtitle = "All field logs & alerts",
@@ -45,7 +52,12 @@ fun LogsScreen(onTabSelected: (BottomTab) -> Unit) {
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             LogStat(value = "124", label = "Total logs", valueColor = ForestGreen, modifier = Modifier.weight(1f))
-            LogStat(value = "3", label = "Open alerts", valueColor = ErrorRed, modifier = Modifier.weight(1f))
+            LogStat(
+                value = if (timeState.tamperDetected) "3" else "2",
+                label = "Open alerts",
+                valueColor = ErrorRed,
+                modifier = Modifier.weight(1f)
+            )
             LogStat(value = "98%", label = "Synced", valueColor = ForestGreen, modifier = Modifier.weight(1f))
         }
 
@@ -60,7 +72,22 @@ fun LogsScreen(onTabSelected: (BottomTab) -> Unit) {
                 .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
                 .background(Surface)
         ) {
-            LogsData.entries.forEachIndexed { index, entry ->
+            val entries = if (timeState.tamperDetected) {
+                val stamp = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+                listOf(
+                    LogsData.LogEntry(
+                        title = if (timeState.gnssTimeAvailable)
+                            "Time tampering detected (clock vs satellite differs ${timeState.divergenceSeconds}s)"
+                        else
+                            "Time tampering detected (device auto-time off)",
+                        time = "Now $stamp",
+                        level = "alert"
+                    )
+                ) + LogsData.entries
+            } else {
+                LogsData.entries
+            }
+            entries.forEachIndexed { index, entry ->
                 if (index > 0) {
                     Box(
                         Modifier

@@ -36,7 +36,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.AutoDetails
+import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.ui.components.NstrScaffold
+import com.nstrpatrol.app.ui.components.PhotoPlaceholder
 import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SectionHeader
@@ -55,10 +57,13 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 @Composable
 fun ReportsScreen(
     onOpenCategory: (String) -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    onOpenCamera: (String) -> Unit = {}
 ) {
     var severity by remember { mutableStateOf("Low") }
     var description by remember { mutableStateOf("") }
+    val photoSlot = "reports"
+    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
 
     NstrScaffold(
         title = "Reports",
@@ -183,23 +188,12 @@ fun ReportsScreen(
             fontWeight = FontWeight.Medium
         )
         Spacer(Modifier.height(8.dp))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(66.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
-                .background(Surface)
-                .clickable { },
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = "Tap to add photos",
-                color = TextSecondary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
+        PhotoPlaceholder(
+            actionText = "Tap to add photos",
+            hint = "Open camera to capture the observation",
+            photoPath = photoPath,
+            onClick = { onOpenCamera(photoSlot) }
+        )
 
         Spacer(Modifier.height(20.dp))
         SectionHeader(text = "Auto-captured details", color = TextSecondary)

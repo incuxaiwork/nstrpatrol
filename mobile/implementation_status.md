@@ -111,7 +111,7 @@ store + map/grid source).
 ### 7.2 Dashboard (Home tab)
 - Flow: tab root / after login.
 - UI: large title + avatar, assigned-patrol banner, stat cards (distance 12.4 km, duration 3h 12m), Logs & alerts card, quick actions (Start Patrol, Sync Queue, SOS, Quick Capture, 2× future).
-- Data: mock values.
+- Data: mock values; **Patrol duration stat → live `PatrolTimer` count-up (10.3)**; **time-tamper warning banner when `TrustedTimeManager.tamperDetected` (10.3)**.
 - API: `[ ]` none — needs patrol summary endpoint.
 - Working: `[x]` quick actions navigate correctly; SOS opens SOS screen.
 
@@ -132,55 +132,56 @@ store + map/grid source).
 ### 7.5 Logs
 - Flow: Dashboard → "Logs & alerts".
 - UI: stat chips (Total logs 124, Open alerts 3, Synced 98%), recent-activity list with level dots.
-- Data: `LogsData.entries` (mock).
+- Data: `LogsData.entries` (mock); **prepends an `alert` entry when time tampering is detected (10.3)**.
 - API: `[ ]` none — needs logs/alerts endpoint + sync status.
 - Working: `[x]` renders; entry taps not wired.
 
 ### 7.6 Patrol Start
 - Flow: Dashboard → "Start Patrol".
 - UI: patrol-type selector, member name, team leader, designation display, member-count stepper, photo placeholder, save button.
-- Data: `Options` (mock picker lists), local form state.
+- Data: `Options` (mock picker lists), local form state; **photo slot via CameraX (10.1); SAVE DETAILS starts `PatrolTimer` with trusted start (10.3)**.
 - API: `[ ]` none — needs patrol create endpoint.
 - Working: `[x]` form renders, pickers open; `Save` pops back (not persisted).
 
 ### 7.7 Reports (list/new report)
 - Flow: tab root; category cards navigate to the 4 category forms.
 - UI: category cards (4 Material icons), severity selector (Low/Medium/High with colors always visible; selected = solid fill + check + border), description field, add-photo box, auto-captured details card (GPS, timestamp, officer, badge, beat, accuracy, saved), Save Draft + Submit Report buttons.
-- Data: `AutoDetails` (mock); severity/description local state.
+- Data: `AutoDetails` (mock); severity/description local state; **photo slot via CameraX (10.1)**.
 - API: `[ ]` none — needs report create + auto-capture endpoint.
 - Working: `[x]` category navigation + severity colors verified; submit/draft are no-ops.
 
 ### 7.8 Human Impact form
 - Flow: Reports → "Human Impact".
 - UI: photo placeholder, Human Impact Type (required), Action Taken (required), Time Elapsed (optional), remarks; sheet pickers.
-- Data: `Options` lists.
+- Data: `Options` lists; **photo slot via CameraX (10.1)**.
 - API: `[ ]` none.
 - Working: `[x]` renders; required markers shown.
 
 ### 7.9 Animal Mortality form
 - Flow: Reports → "Animal Mortality".
 - UI: photo placeholder, sex segmented control, count steppers (Adult / Sub-adult / Young male & female), remarks.
-- Data: `Options` lists; steppers local state.
+- Data: `Options` lists; steppers local state; **photo slot via CameraX (10.1)**.
 - API: `[ ]` none.
 - Working: `[x]` steppers + segmented control render.
 
 ### 7.10 Sighting form (Direct & Indirect)
 - Flow: Reports → "Sightings".
 - UI: photo placeholder, sighting fields + pickers.
-- Data: `Options` lists.
+- Data: `Options` lists; **photo slot via CameraX (10.1)**.
 - API: `[ ]` none.
 - Working: `[x]` renders.
 
 ### 7.11 Water Source form
 - Flow: Reports → "Water Source".
 - UI: photo placeholder, radio rows (Yes/No) + 7 selectors (Dry, Percent Filled, Quality, Unwanted Human Presence, Human Sign Observed, Animal Presence, Animal Sign Observed).
-- Data: `Options` lists.
+- Data: `Options` lists; **photo slot via CameraX (10.1)**.
 - API: `[ ]` none.
 - Working: `[x]` renders.
 
 ### 7.12 Quick Capture
 - Flow: Dashboard → "Quick Capture".
 - UI: photo placeholder, Sign Type selector, remarks, Save Details (no-op).
+- Capturing: `[ ]` Implementing the device camera usage to capture and store images with GeoLocation + Timestamp (date + time) — see 10.1 (CameraX photo capture).
 - Data: `Options` lists.
 - API: `[ ]` none.
 - Working: `[x]` renders.
@@ -327,6 +328,43 @@ Core of the offline-first model:
 - Stored locally first (local file path on the Incident/patrol photo row); upload when syncing:
   `POST /api/uploads` — multipart photo upload → MinIO/S3 key; keys stored on Incident.photos (String[]).
 
+## 10. On-device features — photo capture + trusted time (no DB)
+
+Client-side features that can be built **before** any database/backend wiring. These are
+the step-by-step features currently being implemented.
+
+### 10.1 Photo capture (CameraX)
+
+- `[x]` CameraX deps (camera-core / camera2 / lifecycle / view) + `CAMERA` permission in manifest.
+- `[x]` `PhotoStore` (no DB) — saves captured photos to app-internal `filesDir/captures/`, keyed by form slot.
+- `[x]` `CameraScreen` — full-screen CameraX `PreviewView` + capture button; runtime CAMERA permission; `popBack` on capture.
+- `[x]` `Route.Camera` added to navigation + wired in `MainActivity`.
+- `[x]` `PhotoPlaceholder` upgraded: shows captured thumbnail + "Retake" when a photo exists, else dotted placeholder; tap opens camera.
+- `[x]` Wire photo slots into the 7 screens: Quick Capture, Reports, Patrol Start, Human Impact, Animal Mortality, Sighting, Water Source.
+  - Verified on emulator: captures saved per slot (`quick_capture_*.jpg`, `reports_*.jpg`, `sighting_*.jpg`), thumbnail + Retake shown after capture.
+
+### 10.2 Trusted time (GNSS satellite time — anti-cheat)
+
+Two methods considered for stopping rangers faking timings:
+1. **BE-verified start** — ranger's device verifies patrol start against the backend, then timer runs (needs DB/API; deferred to sync phase).
+2. **GNSS satellite time** (chosen, fully client-side) — read true UTC from the GPS receiver and anchor all timestamps to it.
+
+- `[x]` `ACCESS_FINE_LOCATION` / `ACCESS_COARSE_LOCATION` permissions in manifest.
+- `[x]` `TrustedTimeManager` — parses `$GPRMC` NMEA via `LocationManager`; computes `gnssUtcMillis`.
+- `[x]` Monotonic-clock anchoring: `trustedUtc = anchorUtc + (elapsedRealtime − anchorElapsed)` so time keeps ticking correctly even if the ranger changes the device clock.
+- `[x]` Tamper detection: `AUTO_TIME` off, device-clock vs trusted-time divergence > 60 s, `ACTION_TIME_CHANGED`/`TIMEZONE`/`DATE` broadcast receivers.
+- `[x]` Fallback when no GNSS fix (e.g. emulator/indoors): anchor to device time, expose `gnssTimeAvailable=false`.
+- `[x]` Expose `StateFlow<TimeIntegrityState>` consumed by UI.
+
+### 10.3 Patrol timer + tamper alerts
+
+- `[x]` `PatrolTimer` — records trusted start time + start `elapsedRealtime`; elapsed formatted from the monotonic clock (cannot be cheated).
+- `[x]` Patrol Start "SAVE DETAILS" starts the timer with the trusted start.
+- `[x]` Dashboard "Patrol duration" stat card shows live count-up instead of mock `3h 12m`.
+- `[x]` Dashboard warning banner when `tamperDetected` (device clock differs from satellite time).
+- `[x]` Logs screen prepends an `alert` entry when tampering is detected.
+  - Verified on emulator: `settings put global auto_time 0` → banner + Logs alert entry appear; restore `auto_time 1` → banner clears; Patrol Start save → duration counts up (3s → 14s → 28s).
+
 ---
 
 ## Backlog & next tasks
@@ -342,7 +380,8 @@ Core of the offline-first model:
 - `[ ]` Verify screens on a range of devices (e.g., small 390dp and large screens).
 - `[ ]` Release build + R8 shrinking check.
 - `[ ]` Add unit tests (navigation, mock data) and Compose UI tests.
+- `[ ]` BE-verified patrol start anchor (method 1 of anti-cheat) once sync exists.
 
 ---
 
-*Last updated: 2026-08-05. Architecture note added 2026-08-05: offline-first (SQLite primary, Postgres sync target).*
+*Last updated: 2026-08-05. Architecture note added 2026-08-05: offline-first (SQLite primary, Postgres sync target). Section 10 added 2026-08-05: on-device photo capture + GNSS trusted-time plan.*

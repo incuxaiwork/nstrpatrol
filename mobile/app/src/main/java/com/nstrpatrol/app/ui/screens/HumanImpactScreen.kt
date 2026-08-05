@@ -15,6 +15,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -28,13 +29,16 @@ import com.nstrpatrol.app.ui.navigation.BottomTab
 @Composable
 fun HumanImpactScreen(
     onBack: () -> Unit,
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    onOpenCamera: (String) -> Unit = {}
 ) {
     var impactType by remember { mutableStateOf<String?>(null) }
     var actionTaken by remember { mutableStateOf<String?>(null) }
     var timeElapsed by remember { mutableStateOf<String?>(null) }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
+    val photoSlot = "human_impact"
+    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
 
     val titles = mapOf(
         "impact" to "Human Impact Type",
@@ -58,7 +62,12 @@ fun HumanImpactScreen(
             Spacer(Modifier.height(12.dp))
             FieldLabel(text = "Human Impact Photo", required = true)
             Spacer(Modifier.height(8.dp))
-            PhotoPlaceholder(actionText = "Take photo", hint = "Open camera to capture the impact")
+            PhotoPlaceholder(
+                actionText = "Take photo",
+                hint = "Open camera to capture the impact",
+                photoPath = photoPath,
+                onClick = { onOpenCamera(photoSlot) }
+            )
 
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = "Impact details")

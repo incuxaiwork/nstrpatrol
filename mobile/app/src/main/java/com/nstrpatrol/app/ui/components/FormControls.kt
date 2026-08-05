@@ -1,5 +1,6 @@
 package com.nstrpatrol.app.ui.components
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -41,7 +43,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -142,13 +146,50 @@ fun SelectField(
     }
 }
 
-/** Dashed photo placeholder with camera glyph + action text. */
+/** Dashed photo placeholder with camera glyph + action text, or the captured thumbnail. */
 @Composable
 fun PhotoPlaceholder(
     actionText: String,
     hint: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    photoPath: String? = null,
+    onClick: () -> Unit = {}
 ) {
+    if (photoPath != null) {
+        val bitmap = remember(photoPath) { decodeBitmap(photoPath) }
+        if (bitmap != null) {
+            Box(
+                modifier = modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
+                    .clickable(onClick = onClick),
+                contentAlignment = Alignment.BottomEnd
+            ) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Captured photo",
+                    modifier = Modifier.fillMaxSize(),
+                    contentScale = ContentScale.Crop
+                )
+                Box(
+                    modifier = Modifier
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = "Retake",
+                        color = Color.White,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
+            return
+        }
+    }
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -156,7 +197,7 @@ fun PhotoPlaceholder(
             .clip(RoundedCornerShape(8.dp))
             .background(Surface)
             .dashedBorder(BeigeAccent)
-            .clickable { },
+            .clickable(onClick = onClick),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -181,6 +222,9 @@ fun PhotoPlaceholder(
         )
     }
 }
+
+private fun decodeBitmap(path: String): android.graphics.Bitmap? =
+    android.graphics.BitmapFactory.decodeFile(path)
 
 /** Free text field with grey hint. */
 @Composable
