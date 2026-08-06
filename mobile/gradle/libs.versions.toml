@@ -1,13 +1,13 @@
 [versions]
-agp = "9.2.1"
+agp = "8.13.2"
 coreKtx = "1.10.1"
 junit = "4.13.2"
 junitVersion = "1.1.5"
 espressoCore = "3.5.1"
 lifecycleRuntimeKtx = "2.6.1"
 activityCompose = "1.8.0"
-kotlin = "2.2.10"
-composeBom = "2026.02.01"
+kotlin = "2.0.21"
+composeBom = "2024.09.00"
 camerax = "1.4.2"
 
 [libraries]
@@ -34,4 +34,5 @@ androidx-camera-view = { group = "androidx.camera", name = "camera-view", versio
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
+kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }

@@ -20,6 +20,7 @@ sealed class Route(val route: String) {
     data object WaterSource : Route("water_source")
     data object QuickCapture : Route("quick_capture")
     data object Sos : Route("sos")
+    data object GpsDiagnostics : Route("gps_diagnostics")
 
     /** Full-screen camera; [slot] is the PhotoStore key for the requesting form. */
     data class Camera(val slot: String) : Route("camera")

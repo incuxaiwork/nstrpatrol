@@ -24,6 +24,7 @@ import com.nstrpatrol.app.ui.screens.AllPatrolsScreen
 import com.nstrpatrol.app.ui.screens.AnimalMortalityScreen
 import com.nstrpatrol.app.ui.screens.CameraScreen
 import com.nstrpatrol.app.ui.screens.DashboardScreen
+import com.nstrpatrol.app.ui.screens.GpsDiagnosticsScreen
 import com.nstrpatrol.app.ui.screens.HumanImpactScreen
 import com.nstrpatrol.app.ui.screens.LoginScreen
 import com.nstrpatrol.app.ui.screens.LogsScreen
@@ -102,6 +103,12 @@ fun NstrApp() {
 
         Route.Settings -> SettingsScreen(
             onLogout = { nav.resetTo(Route.Login) },
+            onOpenGpsDiagnostics = { nav.navigateTo(Route.GpsDiagnostics) },
+            onTabSelected = nav::selectTab
+        )
+
+        Route.GpsDiagnostics -> GpsDiagnosticsScreen(
+            onBack = { nav.popBack() },
             onTabSelected = nav::selectTab
         )
 

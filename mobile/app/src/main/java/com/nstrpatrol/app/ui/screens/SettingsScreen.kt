@@ -2,6 +2,7 @@ package com.nstrpatrol.app.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -34,6 +35,7 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 @Composable
 fun SettingsScreen(
     onLogout: () -> Unit,
+    onOpenGpsDiagnostics: () -> Unit = {},
     onTabSelected: (BottomTab) -> Unit
 ) {
     NstrScaffold(
@@ -59,12 +61,25 @@ fun SettingsScreen(
         SettingRow(label = "Map Layer", value = SettingsData.mapLayer)
 
         Spacer(Modifier.height(20.dp))
+        SectionHeader(text = "Diagnostics & System")
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = "GPS Diagnostics",
+            value = "GNSS Status, Constellations & Accuracy",
+            onClick = onOpenGpsDiagnostics
+        )
+
+        Spacer(Modifier.height(20.dp))
         DangerButton(text = "LOG OUT", onClick = onLogout)
     }
 }
 
 @Composable
-private fun SettingRow(label: String, value: String) {
+private fun SettingRow(
+    label: String,
+    value: String,
+    onClick: (() -> Unit)? = null
+) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -72,6 +87,7 @@ private fun SettingRow(label: String, value: String) {
             .clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
             .border(1.dp, OutlineCard, androidx.compose.foundation.shape.RoundedCornerShape(8.dp))
             .background(Surface)
+            .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
