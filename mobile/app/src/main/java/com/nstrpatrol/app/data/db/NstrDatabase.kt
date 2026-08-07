@@ -6,8 +6,13 @@ import androidx.room.Room
 import androidx.room.RoomDatabase
 
 @Database(
-    entities = [PatrolPointEntity::class, SensorReadingEntity::class],
-    version = 1,
+    entities = [
+        PatrolPointEntity::class,
+        SensorReadingEntity::class,
+        DailyActivityEntity::class,
+        PatrolSessionEntity::class
+    ],
+    version = 3,
     exportSchema = true
 )
 abstract class NstrDatabase : RoomDatabase() {

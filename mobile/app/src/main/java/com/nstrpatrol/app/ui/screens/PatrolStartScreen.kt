@@ -16,6 +16,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,7 +25,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.db.PatrolSessionEntity
+import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.OptionSheet
@@ -39,13 +43,16 @@ import com.nstrpatrol.app.ui.theme.OutlineCard
 import com.nstrpatrol.app.ui.theme.SurfaceMuted
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 @Composable
 fun PatrolStartScreen(
     onSave: () -> Unit,
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
-    onOpenCamera: (String) -> Unit = {}
+    onOpenCamera: (String) -> Unit = {},
+    patrolTimer: PatrolTimer,
+    dao: TelemetryDao
 ) {
     var patrolType by remember { mutableStateOf<String?>(null) }
     var patrolMethod by remember { mutableStateOf<String?>(null) }
@@ -58,6 +65,7 @@ fun PatrolStartScreen(
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "patrol_start"
     val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    val scope = rememberCoroutineScope()
 
     Box {
         NstrScaffold(
@@ -191,7 +199,26 @@ fun PatrolStartScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            PrimaryButton(text = "SAVE DETAILS", onClick = onSave, textSize = 15, textWeight = FontWeight.Bold)
+            PrimaryButton(text = "SAVE DETAILS", onClick = {
+                val pid = patrolTimer.patrolId
+                if (pid != null) {
+                    scope.launch {
+                        dao.upsertPatrolSession(
+                            PatrolSessionEntity(
+                                patrolId = pid,
+                                startTime = patrolTimer.trustedNow(),
+                                patrolType = patrolType,
+                                patrolMethod = patrolMethod,
+                                beat = beat,
+                                teamLeader = teamLeader,
+                                armedStatus = armed,
+                                memberCount = memberCount
+                            )
+                        )
+                    }
+                }
+                onSave()
+            }, textSize = 15, textWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
         }
 

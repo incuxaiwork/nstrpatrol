@@ -4,6 +4,7 @@ import android.os.SystemClock
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.UUID
 
 /**
  * Patrol elapsed-time tracker driven by the monotonic clock
@@ -23,7 +24,11 @@ class PatrolTimer {
     private var startTrustedMillis = 0L
     private var startWallClockMillis = 0L
 
+    var patrolId: String? = null
+        private set
+
     fun start(trustedUtcNow: Long, wallClockNow: Long) {
+        patrolId = "patrol-${UUID.randomUUID()}"
         startElapsedRealtime = SystemClock.elapsedRealtime()
         startTrustedMillis = trustedUtcNow
         startWallClockMillis = wallClockNow

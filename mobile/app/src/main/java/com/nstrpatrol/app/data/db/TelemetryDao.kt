@@ -43,4 +43,101 @@ interface TelemetryDao {
             "ORDER BY timestamp DESC LIMIT 1"
     )
     suspend fun latestMovementReading(): SensorReadingEntity?
+
+    @Query(
+        "SELECT COALESCE(SUM(value), 0) FROM sensor_readings " +
+            "WHERE patrolId = :patrolId AND type = 'STEP_COUNTER'"
+    )
+    suspend fun stepsForPatrol(patrolId: String): Double
+
+    @Query(
+        "SELECT COALESCE(SUM(value), 0) FROM sensor_readings " +
+            "WHERE type = 'STEP_COUNTER' " +
+            "AND timestamp >= :startOfDay AND timestamp < :endOfDay"
+    )
+    suspend fun stepsForDay(startOfDay: Long, endOfDay: Long): Double
+
+    @Query(
+        "SELECT * FROM patrol_points " +
+            "WHERE patrolId = :patrolId ORDER BY timestamp ASC"
+    )
+    suspend fun patrolPointsOrdered(patrolId: String): List<PatrolPointEntity>
+
+    @Query(
+        "SELECT COUNT(*) FROM sensor_readings " +
+            "WHERE patrolId = :patrolId AND type = 'MOVEMENT_MODE' " +
+            "AND CAST(value AS INTEGER) IN (2, 3, 4)"
+    )
+    suspend fun activeMovementSamplesForPatrol(patrolId: String): Int
+
+    @Query(
+        "SELECT COUNT(*) FROM sensor_readings " +
+            "WHERE type = 'MOVEMENT_MODE' " +
+            "AND CAST(value AS INTEGER) IN (2, 3, 4) " +
+            "AND timestamp >= :startOfDay AND timestamp < :endOfDay"
+    )
+    suspend fun activeMovementSamplesForDay(startOfDay: Long, endOfDay: Long): Int
+
+    @Query(
+        "SELECT patrolId FROM sensor_readings " +
+            "WHERE type = 'MOVEMENT_MODE' " +
+            "AND timestamp >= :startOfDay AND timestamp < :endOfDay " +
+            "GROUP BY patrolId"
+    )
+    suspend fun patrolIdsForDay(startOfDay: Long, endOfDay: Long): List<String>
+
+    @Query("SELECT * FROM daily_activity WHERE date = :date")
+    suspend fun dailyActivity(date: String): DailyActivityEntity?
+
+    @Query("SELECT * FROM daily_activity WHERE date = :date")
+    fun dailyActivityFlow(date: String): Flow<DailyActivityEntity?>
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun upsertDailyActivity(entity: DailyActivityEntity)
+
+    @Query(
+        "SELECT MIN(timestamp) FROM patrol_points " +
+        "WHERE patrolId = :patrolId"
+    )
+    suspend fun patrolStartTime(patrolId: String): Long?
+
+    @Query(
+        "SELECT MAX(timestamp) FROM patrol_points " +
+        "WHERE patrolId = :patrolId"
+    )
+    suspend fun patrolEndTime(patrolId: String): Long?
+
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun upsertPatrolSession(session: PatrolSessionEntity)
+
+    @Query("SELECT * FROM patrol_sessions WHERE patrolId = :patrolId")
+    suspend fun patrolSession(patrolId: String): PatrolSessionEntity?
+
+    @Query("SELECT * FROM patrol_sessions ORDER BY startTime DESC")
+    fun allPatrolSessions(): Flow<List<PatrolSessionEntity>>
+
+    @Query("SELECT * FROM patrol_sessions WHERE status = :status ORDER BY startTime DESC")
+    fun patrolSessionsByStatus(status: String): Flow<List<PatrolSessionEntity>>
+
+    @Query("UPDATE patrol_sessions SET status = :status WHERE patrolId = :patrolId")
+    suspend fun updatePatrolStatus(patrolId: String, status: String)
+
+    @Query(
+        "UPDATE patrol_sessions SET endTime = :endTime, status = 'COMPLETED', " +
+        "totalDistanceMeters = :distance, totalSteps = :steps, " +
+        "moveMinutes = :moveMin, caloriesEstimate = :calories, " +
+        "heartPointsEstimate = :heartPoints, avgSpeedKmh = :avgSpeed, " +
+        "pointCount = :points WHERE patrolId = :patrolId"
+    )
+    suspend fun completePatrol(
+        patrolId: String,
+        endTime: Long,
+        distance: Double,
+        steps: Int,
+        moveMin: Int,
+        calories: Double,
+        heartPoints: Double,
+        avgSpeed: Double,
+        points: Int
+    )
 }

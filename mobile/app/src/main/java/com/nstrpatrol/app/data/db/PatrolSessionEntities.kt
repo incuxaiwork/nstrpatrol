@@ -1,0 +1,30 @@
+package com.nstrpatrol.app.data.db
+
+import androidx.room.Entity
+import androidx.room.PrimaryKey
+
+/**
+ * A persisted patrol session record. Created when a patrol starts,
+ * updated with final stats when it stops.
+ */
+@Entity(tableName = "patrol_sessions")
+data class PatrolSessionEntity(
+    @PrimaryKey val patrolId: String,
+    val startTime: Long,
+    val endTime: Long? = null,
+    val status: String = "ACTIVE",
+    val patrolType: String? = null,
+    val patrolMethod: String? = null,
+    val beat: String? = null,
+    val teamLeader: String? = null,
+    val armedStatus: String? = null,
+    val memberCount: Int = 0,
+    val totalDistanceMeters: Double = 0.0,
+    val totalSteps: Int = 0,
+    val moveMinutes: Int = 0,
+    val caloriesEstimate: Double = 0.0,
+    val heartPointsEstimate: Double = 0.0,
+    val avgSpeedKmh: Double = 0.0,
+    val pointCount: Int = 0,
+    val syncStatus: String = "PENDING"
+)

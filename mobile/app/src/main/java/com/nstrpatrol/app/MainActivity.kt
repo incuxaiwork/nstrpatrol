@@ -46,6 +46,7 @@ import com.nstrpatrol.app.ui.screens.IncidentDetailScreen
 import com.nstrpatrol.app.ui.screens.LoginScreen
 import com.nstrpatrol.app.ui.screens.LogsScreen
 import com.nstrpatrol.app.ui.screens.MapsScreen
+import com.nstrpatrol.app.ui.screens.PatrolReportScreen
 import com.nstrpatrol.app.ui.screens.PatrolStartScreen
 import com.nstrpatrol.app.ui.screens.QuickCaptureScreen
 import com.nstrpatrol.app.ui.screens.ReportsScreen
@@ -172,18 +173,29 @@ fun NstrApp() {
         Route.Login -> LoginScreen(onLogin = { nav.resetTo(Route.Dashboard) })
 
         Route.Dashboard -> DashboardScreen(
-            onOpenLogs = { nav.navigateTo(Route.Logs) },    
+            onOpenLogs = { nav.navigateTo(Route.Logs) },
             onStartPatrol = { nav.navigateTo(Route.PatrolStart) },
             onQuickCapture = { nav.navigateTo(Route.QuickCapture) },
             onSos = { nav.navigateTo(Route.Sos) },
             onTabSelected = nav::selectTab,
             timeState = timeState,
-            patrolTimer = patrolTimer
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao()
         )
 
-        Route.Maps -> MapsScreen(nav::selectTab)
+        Route.Maps -> MapsScreen(
+            onTabSelected = nav::selectTab,
+            patrolTimer = patrolTimer,
+            telemetryManager = telemetryManager,
+            dao = database.telemetryDao(),
+            onStopPatrol = { patrolTimer.stop() }
+        )
 
-        Route.AllPatrols -> AllPatrolsScreen(nav::selectTab)
+        Route.AllPatrols -> AllPatrolsScreen(
+            onTabSelected = nav::selectTab,
+            onOpenPatrol = { patrolId -> nav.navigateTo(Route.PatrolReport(patrolId)) },
+            dao = database.telemetryDao()
+        )
 
         Route.Reports -> ReportsScreen(
             onOpenCategory = { category ->
@@ -221,7 +233,9 @@ fun NstrApp() {
             onSave = { patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis()); nav.popBack() },
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao()
         )
 
         Route.HumanImpact -> HumanImpactScreen(
@@ -266,6 +280,13 @@ fun NstrApp() {
             slot = (nav.current as Route.Camera).slot,
             onClose = { nav.popBack() },
             onCaptured = { nav.popBack() }
+        )
+
+        is Route.PatrolReport -> PatrolReportScreen(
+            patrolId = (nav.current as Route.PatrolReport).patrolId,
+            onBack = { nav.popBack() },
+            onTabSelected = nav::selectTab,
+            dao = database.telemetryDao()
         )
         }
     }

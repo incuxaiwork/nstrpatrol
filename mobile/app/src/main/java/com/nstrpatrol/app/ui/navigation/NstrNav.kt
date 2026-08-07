@@ -28,11 +28,15 @@ sealed class Route(val route: String) {
     /** Full-screen camera; [slot] is the PhotoStore key for the requesting form. */
     data class Camera(val slot: String) : Route("camera")
 
+    /** Complete patrol report for a finished or in-progress patrol. */
+    data class PatrolReport(val patrolId: String) : Route("patrol_report")
+
     /** Stable identifier used to persist the route across configuration changes. */
     val key: String
         get() = when (this) {
             is IncidentDetail -> "$route:$incidentId"
             is Camera -> "$route:$slot"
+            is PatrolReport -> "$route:$patrolId"
             else -> route
         }
 
@@ -58,6 +62,7 @@ sealed class Route(val route: String) {
                 "gps_diagnostics" -> GpsDiagnostics
                 "incident_detail" -> if (parts.size == 2) IncidentDetail(parts[1]) else null
                 "camera" -> if (parts.size == 2) Camera(parts[1]) else null
+                "patrol_report" -> if (parts.size == 2) PatrolReport(parts[1]) else null
                 else -> null
             }
         }

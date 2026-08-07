@@ -23,7 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -36,7 +36,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.db.DailyActivityEntity
+import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.TimeIntegrityState
+import com.nstrpatrol.app.ui.components.ActivityRings
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.Background
@@ -60,9 +64,10 @@ fun DashboardScreen(
     onSos: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
     timeState: TimeIntegrityState,
-    patrolTimer: PatrolTimer
+    patrolTimer: PatrolTimer,
+    dao: TelemetryDao
 ) {
-    var tick by remember { mutableLongStateOf(0L) }
+    var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(patrolTimer.running.value) {
         if (patrolTimer.running.value) {
             while (true) {
@@ -74,8 +79,15 @@ fun DashboardScreen(
     val satTimeText = timeState.satelliteUtcMillis?.let {
         SimpleDateFormat("EEE, dd MMM yyyy · HH:mm:ss z", Locale.US).format(Date(it))
     }
-    tick // read to trigger recomposition on each tick while the timer runs
-    val durationText = if (patrolTimer.running.value) patrolTimer.elapsedFormatted() else "3h 12m"
+    tick
+    val durationText = if (patrolTimer.running.value) patrolTimer.elapsedFormatted() else "—"
+
+    var dailyActivity by remember { mutableStateOf<DailyActivityEntity?>(null) }
+    LaunchedEffect(tick, patrolTimer.running.value) {
+        dailyActivity = ActivitySummary.computeForToday(dao)
+    }
+
+    val activity = dailyActivity
 
     NstrScaffold(
         title = "Dashboard",
@@ -152,11 +164,42 @@ fun DashboardScreen(
         }
 
         Spacer(Modifier.height(12.dp))
+
+        // Activity rings
+        ActivityRings(
+            steps = activity?.steps ?: 0,
+            stepsGoal = 10000,
+            moveMinutes = activity?.moveMinutes ?: 0,
+            moveGoal = 60,
+            calories = activity?.caloriesEstimate ?: 0.0,
+            calGoal = 500
+        )
+
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            StatCard(label = "Total dist. covered", value = "12.4 km", modifier = Modifier.weight(1f))
+            StatCard(
+                label = "Distance",
+                value = activity?.distanceMeters?.let {
+                    if (it >= 1000) String.format("%.1f km", it / 1000) else String.format("%.0f m", it)
+                } ?: "—",
+                modifier = Modifier.weight(1f)
+            )
             StatCard(
                 label = "Patrol duration",
                 value = durationText,
+                modifier = Modifier.weight(1f)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatCard(
+                label = "Heart points",
+                value = String.format("%.0f", activity?.heartPointsEstimate ?: 0.0),
+                modifier = Modifier.weight(1f)
+            )
+            StatCard(
+                label = "Patrols today",
+                value = "${activity?.patrolCount ?: 0}",
                 modifier = Modifier.weight(1f)
             )
         }

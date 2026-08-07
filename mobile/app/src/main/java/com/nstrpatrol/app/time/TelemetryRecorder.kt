@@ -16,6 +16,7 @@ import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.db.PatrolPointEntity
+import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.SensorReadingEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import kotlinx.coroutines.CoroutineScope
@@ -111,11 +112,21 @@ class TelemetryRecorder(
     private fun startPatrol() {
         if (running) return
         running = true
-        patrolId = "patrol-${UUID.randomUUID()}"
+        patrolId = patrolTimer.patrolId
         _samplesRecorded.value = 0
         _movement.value = MovementInfo()
         registerSensors()
         registerArUpdates()
+        patrolId?.let { pid ->
+            scope.launch {
+                dao.upsertPatrolSession(
+                    PatrolSessionEntity(
+                        patrolId = pid,
+                        startTime = patrolTimer.trustedNow()
+                    )
+                )
+            }
+        }
         sampleJob = scope.launch {
             while (running) {
                 try {
@@ -134,6 +145,24 @@ class TelemetryRecorder(
         sampleJob = null
         unregisterArUpdates()
         unregisterSensors()
+        val pid = patrolId
+        if (pid != null) {
+            scope.launch {
+                val metrics = ActivitySummary.computeForPatrol(pid, dao)
+                val endTime = timeManager.trustedUtcNow()
+                dao.completePatrol(
+                    patrolId = pid,
+                    endTime = endTime,
+                    distance = metrics.distanceMeters,
+                    steps = metrics.steps,
+                    moveMin = metrics.moveMinutes,
+                    calories = metrics.caloriesEstimate,
+                    heartPoints = metrics.heartPointsEstimate,
+                    avgSpeed = metrics.avgSpeedKmh,
+                    points = _samplesRecorded.value.toInt()
+                )
+            }
+        }
         patrolId = null
     }
 
