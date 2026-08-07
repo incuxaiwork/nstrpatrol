@@ -135,6 +135,69 @@ object Contacts {
     )
 }
 
+object ReportedIncidents {
+    enum class IncidentStatus(val label: String) {
+        SUBMITTED("Submitted"),
+        VERIFIED("Verified"),
+        RESOLVED("Resolved"),
+        REJECTED("Rejected")
+    }
+
+    data class Incident(
+        val id: String,
+        val category: String,
+        val type: String,
+        val severity: String,
+        val date: String,
+        val beat: String,
+        val remarks: String,
+        val status: IncidentStatus
+    )
+
+    val list = listOf(
+        Incident(
+            id = "R-1042",
+            category = "Human Impact",
+            type = "Encroachment",
+            severity = "High",
+            date = "03 Aug 2026 · 11:42 AM",
+            beat = "2A North",
+            remarks = "New fencing erected on the eastern boundary of block 2A, close to the waterhole. Location marked for range office review.",
+            status = IncidentStatus.RESOLVED
+        ),
+        Incident(
+            id = "R-1041",
+            category = "Animal Mortality",
+            type = "Disease_infection",
+            severity = "Medium",
+            date = "02 Aug 2026 · 06:15 AM",
+            beat = "2A North",
+            remarks = "Spotted deer carcass near waterhole T-4. No external injury, suspected disease; coordinates logged.",
+            status = IncidentStatus.VERIFIED
+        ),
+        Incident(
+            id = "R-1040",
+            category = "Sightings",
+            type = "Direct Sighting",
+            severity = "Low",
+            date = "01 Aug 2026 · 08:30 AM",
+            beat = "2B South",
+            remarks = "Tiger pugmarks followed along the fire line for about 1 km, direction south-east.",
+            status = IncidentStatus.SUBMITTED
+        ),
+        Incident(
+            id = "R-1039",
+            category = "Water Source",
+            type = "Artificial",
+            severity = "Medium",
+            date = "31 Jul 2026 · 05:20 AM",
+            beat = "3C East",
+            remarks = "Water level critically low at tank K-9; refill requested.",
+            status = IncidentStatus.REJECTED
+        )
+    )
+}
+
 object AutoDetails {
     const val gps = "27.5163° N, 84.3842° E"
     const val timestamp = "11:42 AM · 03 Aug 2026"

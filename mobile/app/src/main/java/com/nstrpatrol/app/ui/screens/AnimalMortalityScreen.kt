@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.ui.components.AutoCapturedPanel
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -35,6 +36,7 @@ import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.components.SelectField
 import com.nstrpatrol.app.ui.components.SegmentedControl
+import com.nstrpatrol.app.ui.components.SeverityControl
 import com.nstrpatrol.app.ui.components.Stepper
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.OutlineCard
@@ -51,6 +53,7 @@ fun AnimalMortalityScreen(
     var species by remember { mutableStateOf<String?>(null) }
     var causeOfDeath by remember { mutableStateOf<String?>(null) }
     var carcassState by remember { mutableStateOf<String?>(null) }
+    var severity by remember { mutableStateOf("Low") }
     var remarks by remember { mutableStateOf("") }
     var sex by remember { mutableStateOf("MALE") }
     var adultMale by remember { mutableIntStateOf(0) }
@@ -58,7 +61,7 @@ fun AnimalMortalityScreen(
     var youngMale by remember { mutableIntStateOf(0) }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "animal_mortality"
-    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
+    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
 
     val titles = mapOf(
         "species_type" to "Species Type",
@@ -87,7 +90,7 @@ fun AnimalMortalityScreen(
             PhotoPlaceholder(
                 actionText = "Take photo",
                 hint = "Open camera to capture the impact",
-                photoPath = photoPath,
+                photoPaths = photoPaths,
                 onClick = { onOpenCamera(photoSlot) }
             )
 
@@ -134,14 +137,9 @@ fun AnimalMortalityScreen(
             )
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Remarks")
+            FieldLabel(text = "Severity")
             Spacer(Modifier.height(4.dp))
-            RemarksField(
-                value = remarks,
-                onValueChange = { remarks = it },
-                placeholder = "Enter Any Remarks Here",
-                height = 100
-            )
+            SeverityControl(selected = severity, onSelect = { severity = it })
 
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = "Count details")
@@ -169,6 +167,21 @@ fun AnimalMortalityScreen(
             CountRow(label = "Sub Adult Male Count Details", value = subAdultMale, onMinus = { if (subAdultMale > 0) subAdultMale-- }, onPlus = { subAdultMale++ })
             Spacer(Modifier.height(8.dp))
             CountRow(label = "Young Male Count Details", value = youngMale, onMinus = { if (youngMale > 0) youngMale-- }, onPlus = { youngMale++ })
+
+            Spacer(Modifier.height(16.dp))
+            FieldLabel(text = "Remarks")
+            Spacer(Modifier.height(4.dp))
+            RemarksField(
+                value = remarks,
+                onValueChange = { remarks = it },
+                placeholder = "Enter Any Remarks Here",
+                height = 100
+            )
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader(text = "Captured")
+            Spacer(Modifier.height(8.dp))
+            AutoCapturedPanel()
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = "SAVE DETAILS", onClick = onBack, textSize = 15, textWeight = FontWeight.Bold)

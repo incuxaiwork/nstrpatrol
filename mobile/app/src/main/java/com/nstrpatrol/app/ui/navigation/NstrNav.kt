@@ -22,8 +22,46 @@ sealed class Route(val route: String) {
     data object Sos : Route("sos")
     data object GpsDiagnostics : Route("gps_diagnostics")
 
+    /** Read-only view of an already-reported incident opened from the Reports page. */
+    data class IncidentDetail(val incidentId: String) : Route("incident_detail")
+
     /** Full-screen camera; [slot] is the PhotoStore key for the requesting form. */
     data class Camera(val slot: String) : Route("camera")
+
+    /** Stable identifier used to persist the route across configuration changes. */
+    val key: String
+        get() = when (this) {
+            is IncidentDetail -> "$route:$incidentId"
+            is Camera -> "$route:$slot"
+            else -> route
+        }
+
+    companion object {
+        /** Rebuilds a route from its [key]; returns null for unknown keys. */
+        fun fromKey(key: String): Route? {
+            val parts = key.split(":", limit = 2)
+            return when (parts[0]) {
+                "login" -> Login
+                "dashboard" -> Dashboard
+                "maps" -> Maps
+                "all_patrols" -> AllPatrols
+                "reports" -> Reports
+                "settings" -> Settings
+                "logs" -> Logs
+                "patrol_start" -> PatrolStart
+                "human_impact" -> HumanImpact
+                "animal_mortality" -> AnimalMortality
+                "sighting" -> Sighting
+                "water_source" -> WaterSource
+                "quick_capture" -> QuickCapture
+                "sos" -> Sos
+                "gps_diagnostics" -> GpsDiagnostics
+                "incident_detail" -> if (parts.size == 2) IncidentDetail(parts[1]) else null
+                "camera" -> if (parts.size == 2) Camera(parts[1]) else null
+                else -> null
+            }
+        }
+    }
 }
 
 /** Bottom navigation tabs. */
@@ -77,5 +115,19 @@ class NstrNavState(initial: Route = Route.Login) {
         backStack.removeLast()
         current = backStack.last()
         return true
+    }
+
+    /** Keys of the full back stack, in order (root first). */
+    val backStackKeys: List<String> get() = backStack.map { it.key }
+
+    companion object {
+        /** Rebuilds navigation state from persisted [keys] (root first). */
+        fun fromKeys(keys: List<String>): NstrNavState {
+            val routes = keys.mapNotNull { Route.fromKey(it) }
+            if (routes.isEmpty()) return NstrNavState()
+            val nav = NstrNavState(routes.first())
+            routes.drop(1).forEach { nav.navigateTo(it) }
+            return nav
+        }
     }
 }

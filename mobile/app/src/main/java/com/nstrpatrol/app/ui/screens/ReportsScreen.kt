@@ -12,10 +12,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.filled.Visibility
@@ -23,10 +22,6 @@ import androidx.compose.material.icons.filled.WaterDrop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,39 +30,43 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nstrpatrol.app.data.AutoDetails
-import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.ReportedIncidents
+import com.nstrpatrol.app.data.ReportedIncidents.IncidentStatus
 import com.nstrpatrol.app.ui.components.NstrScaffold
-import com.nstrpatrol.app.ui.components.PhotoPlaceholder
-import com.nstrpatrol.app.ui.components.PrimaryButton
-import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SectionHeader
-import com.nstrpatrol.app.ui.components.SecondaryButton
+import com.nstrpatrol.app.ui.components.StatusChip
 import com.nstrpatrol.app.ui.navigation.BottomTab
+import com.nstrpatrol.app.ui.theme.ChipRejected
+import com.nstrpatrol.app.ui.theme.ChipResolved
+import com.nstrpatrol.app.ui.theme.ChipSubmitted
+import com.nstrpatrol.app.ui.theme.ChipVerified
 import com.nstrpatrol.app.ui.theme.ForestGreen
+import com.nstrpatrol.app.ui.theme.IncidentRejected
+import com.nstrpatrol.app.ui.theme.IncidentResolved
+import com.nstrpatrol.app.ui.theme.IncidentSubmitted
+import com.nstrpatrol.app.ui.theme.IncidentVerified
 import com.nstrpatrol.app.ui.theme.LightForest
 import com.nstrpatrol.app.ui.theme.OutlineCard
-import com.nstrpatrol.app.ui.theme.SeverityHigh
-import com.nstrpatrol.app.ui.theme.SeverityLow
-import com.nstrpatrol.app.ui.theme.SeverityMedium
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
 
+/**
+ * Report category chooser. Per the Penpot flow this page is only the category
+ * grid; tapping a category opens its individual form page (which carries the
+ * category fields, severity, remarks, captured details and save actions).
+ * Below the grid, previously reported incidents are listed and open their
+ * full report detail on tap.
+ */
 @Composable
 fun ReportsScreen(
     onOpenCategory: (String) -> Unit,
-    onTabSelected: (BottomTab) -> Unit,
-    onOpenCamera: (String) -> Unit = {}
+    onOpenIncident: (String) -> Unit,
+    onTabSelected: (BottomTab) -> Unit
 ) {
-    var severity by remember { mutableStateOf("Low") }
-    var description by remember { mutableStateOf("") }
-    val photoSlot = "reports"
-    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
-
     NstrScaffold(
         title = "Reports",
-        subtitle = "Record a new field observation",
+        subtitle = "Select a report category",
         activeTab = BottomTab.Reports,
         onTabSelected = onTabSelected
     ) {
@@ -79,7 +78,6 @@ fun ReportsScreen(
             CategoryCard(
                 label = "Human Impact",
                 icon = Icons.Filled.Person,
-                selected = true,
                 onClick = { onOpenCategory("human_impact") },
                 modifier = Modifier.weight(1f)
             )
@@ -108,119 +106,86 @@ fun ReportsScreen(
             CategoryCard(label = "", icon = null, onClick = { }, modifier = Modifier.weight(1f))
         }
 
-        Spacer(Modifier.height(20.dp))
-        SectionHeader(text = "Report details", color = TextPrimary)
+        Spacer(Modifier.height(24.dp))
+        SectionHeader(text = "Reported incidents", color = TextPrimary)
         Spacer(Modifier.height(8.dp))
-        Text(
-            text = "Severity",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(38.dp)
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
-                .background(Surface)
-                .padding(2.dp)
-        ) {
-            val colors = mapOf("Low" to SeverityLow, "Medium" to SeverityMedium, "High" to SeverityHigh)
-            listOf("Low", "Medium", "High").forEach { option ->
-                val isSelected = option == severity
-                val color = colors.getValue(option)
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(30.dp)
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (isSelected) color else color.copy(alpha = 0.12f))
-                        .then(
-                            if (isSelected) Modifier.border(1.5.dp, color, RoundedCornerShape(6.dp))
-                            else Modifier
-                        )
-                        .clickable { severity = option },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Filled.Check,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(Modifier.width(4.dp))
-                        }
-                        Text(
-                            text = option,
-                            color = if (isSelected) Color.White else color,
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-            }
+        ReportedIncidents.list.forEach { incident ->
+            IncidentCard(
+                incident = incident,
+                onClick = { onOpenIncident(incident.id) }
+            )
+            Spacer(Modifier.height(8.dp))
         }
-
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "Description",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(8.dp))
-        RemarksField(
-            value = description,
-            onValueChange = { description = it },
-            placeholder = "Describe the observation in detail...",
-            height = 88
-        )
-
-        Spacer(Modifier.height(16.dp))
-        Text(
-            text = "Add photo",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium
-        )
-        Spacer(Modifier.height(8.dp))
-        PhotoPlaceholder(
-            actionText = "Tap to add photos",
-            hint = "Open camera to capture the observation",
-            photoPath = photoPath,
-            onClick = { onOpenCamera(photoSlot) }
-        )
-
-        Spacer(Modifier.height(20.dp))
-        SectionHeader(text = "Auto-captured details", color = TextSecondary)
-        Spacer(Modifier.height(8.dp))
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(8.dp))
-                .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
-                .background(Surface)
-        ) {
-            AutoDetailRow(label = "GPS coordinates", value = AutoDetails.gps)
-            AutoDetailRow(label = "Timestamp", value = AutoDetails.timestamp)
-            AutoDetailRow(label = "Officer", value = AutoDetails.officer)
-            AutoDetailRow(label = "Badge", value = AutoDetails.badge)
-            AutoDetailRow(label = "Beat", value = AutoDetails.beat)
-            AutoDetailRow(label = "GPS accuracy", value = AutoDetails.accuracy)
-            AutoDetailRow(label = "Saved", value = AutoDetails.saved)
-        }
-
-        Spacer(Modifier.height(20.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            SecondaryButton(text = "Save Draft", onClick = { }, modifier = Modifier.weight(1f))
-            PrimaryButton(text = "Submit Report", onClick = { }, modifier = Modifier.weight(1f))
-        }
+        Spacer(Modifier.height(12.dp))
     }
+}
+
+@Composable
+private fun IncidentCard(
+    incident: ReportedIncidents.Incident,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val (chipColor, chipBg) = incidentStatusStyle(incident.status)
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
+            .background(Surface)
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(40.dp)
+                .background(LightForest, CircleShape),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = categoryIcon(incident.category),
+                contentDescription = incident.category,
+                tint = ForestGreen,
+                modifier = Modifier.size(22.dp)
+            )
+        }
+        Spacer(Modifier.size(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = incident.category,
+                color = TextPrimary,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+            Spacer(Modifier.height(2.dp))
+            Text(
+                text = "${incident.type} · ${incident.date}",
+                color = TextSecondary,
+                fontSize = 12.sp
+            )
+        }
+        Spacer(Modifier.size(8.dp))
+        StatusChip(
+            label = incident.status.label,
+            chipColor = chipColor,
+            chipBackground = chipBg
+        )
+    }
+}
+
+private fun categoryIcon(category: String): ImageVector = when (category) {
+    "Human Impact" -> Icons.Filled.Person
+    "Animal Mortality" -> Icons.Filled.Pets
+    "Sightings" -> Icons.Filled.Visibility
+    else -> Icons.Filled.WaterDrop
+}
+
+private fun incidentStatusStyle(status: IncidentStatus): Pair<Color, Color> = when (status) {
+    IncidentStatus.SUBMITTED -> IncidentSubmitted to ChipSubmitted
+    IncidentStatus.VERIFIED -> IncidentVerified to ChipVerified
+    IncidentStatus.RESOLVED -> IncidentResolved to ChipResolved
+    IncidentStatus.REJECTED -> IncidentRejected to ChipRejected
 }
 
 @Composable
@@ -228,15 +193,14 @@ private fun CategoryCard(
     label: String,
     icon: ImageVector?,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    selected: Boolean = false
+    modifier: Modifier = Modifier
 ) {
     Column(
         modifier = modifier
             .height(64.dp)
             .clip(RoundedCornerShape(8.dp))
-            .border(1.dp, if (selected) ForestGreen else OutlineCard, RoundedCornerShape(8.dp))
-            .background(if (selected) LightForest else Surface)
+            .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
+            .background(Surface)
             .clickable(onClick = onClick)
             .padding(vertical = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -258,35 +222,5 @@ private fun CategoryCard(
                 maxLines = 1
             )
         }
-    }
-}
-
-@Composable
-private fun AutoDetailRow(label: String, value: String) {
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp)
-        ) {
-            Text(
-                text = label,
-                color = TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.weight(1f)
-            )
-            Text(
-                text = value,
-                color = TextPrimary,
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium
-            )
-        }
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(Color(0xFFEEEEEE))
-        )
     }
 }

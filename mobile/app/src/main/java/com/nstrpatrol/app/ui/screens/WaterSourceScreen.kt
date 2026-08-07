@@ -14,6 +14,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.ui.components.AutoCapturedPanel
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -23,6 +24,7 @@ import com.nstrpatrol.app.ui.components.RadioRow
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.components.SelectField
+import com.nstrpatrol.app.ui.components.SeverityControl
 import com.nstrpatrol.app.ui.navigation.BottomTab
 
 @Composable
@@ -41,10 +43,11 @@ fun WaterSourceScreen(
     var animalSign by remember { mutableStateOf<String?>(null) }
     var speciesType by remember { mutableStateOf<String?>(null) }
     var species by remember { mutableStateOf<String?>(null) }
+    var severity by remember { mutableStateOf("Low") }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "water_source"
-    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
+    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
 
     val titles = mapOf(
         "source_type" to "Water Source Type",
@@ -79,7 +82,7 @@ fun WaterSourceScreen(
             PhotoPlaceholder(
                 actionText = "Take photo",
                 hint = "Open camera to capture the impact",
-                photoPath = photoPath,
+                photoPaths = photoPaths,
                 onClick = { onOpenCamera(photoSlot) }
             )
 
@@ -168,6 +171,11 @@ fun WaterSourceScreen(
             )
 
             Spacer(Modifier.height(12.dp))
+            FieldLabel(text = "Severity")
+            Spacer(Modifier.height(4.dp))
+            SeverityControl(selected = severity, onSelect = { severity = it })
+
+            Spacer(Modifier.height(12.dp))
             FieldLabel(text = "Remarks")
             Spacer(Modifier.height(4.dp))
             RemarksField(
@@ -176,6 +184,11 @@ fun WaterSourceScreen(
                 placeholder = "Enter Any Remarks Here",
                 height = 100
             )
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader(text = "Captured")
+            Spacer(Modifier.height(8.dp))
+            AutoCapturedPanel()
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = "SAVE DETAILS", onClick = onBack, textSize = 15, textWeight = FontWeight.Bold)

@@ -57,7 +57,7 @@ fun PatrolStartScreen(
     var memberCount by remember { mutableIntStateOf(0) }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "patrol_start"
-    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
+    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
 
     Box {
         NstrScaffold(
@@ -73,7 +73,7 @@ fun PatrolStartScreen(
             PhotoPlaceholder(
                 actionText = "Take photo",
                 hint = "Add a photo of your patrolling team",
-                photoPath = photoPath,
+                photoPaths = photoPaths,
                 onClick = { onOpenCamera(photoSlot) }
             )
 

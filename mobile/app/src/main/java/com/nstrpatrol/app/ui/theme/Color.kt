@@ -30,5 +30,15 @@ val ChipInProgress = Color(0xFFE3F2FD)
 val ChipCompleted = Color(0xFFE8F5E9)
 val ChipScheduled = Color(0xFFECEFF1)
 
+val IncidentSubmitted = Color(0xFF1565C0)
+val IncidentVerified = Color(0xFF2E7D32)
+val IncidentResolved = Color(0xFF546E7A)
+val IncidentRejected = Color(0xFFB3261E)
+
+val ChipSubmitted = Color(0xFFE3F2FD)
+val ChipVerified = Color(0xFFE8F5E9)
+val ChipResolved = Color(0xFFECEFF1)
+val ChipRejected = Color(0xFFFDECEA)
+
 val MapCanvas = Color(0xFFECEFF1)
 val MapGridLine = Color(0xFFFFFFFF)

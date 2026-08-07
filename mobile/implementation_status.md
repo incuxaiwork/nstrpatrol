@@ -145,10 +145,11 @@ store + map/grid source).
 
 ### 7.7 Reports (list/new report)
 - Flow: tab root; category cards navigate to the 4 category forms.
-- UI: category cards (4 Material icons), severity selector (Low/Medium/High with colors always visible; selected = solid fill + check + border), description field, add-photo box, auto-captured details card (GPS, timestamp, officer, badge, beat, accuracy, saved), Save Draft + Submit Report buttons.
-- Data: `AutoDetails` (mock); severity/description local state; **photo slot via CameraX (10.1)**.
+- UI: **category grid only** (4 filled Material-icon cards + 2 empty placeholders). The full report composition (severity selector, description, add-photo, auto-captured details card, Save Draft + Submit Report) lives on each category form page (7.8–7.11).
+- Data: local state; **photo slot via CameraX (10.1)**; `AutoDetails` (mock) on the category forms.
 - API: `[ ]` none — needs report create + auto-capture endpoint.
-- Working: `[x]` category navigation + severity colors verified; submit/draft are no-ops.
+- Working: `[x]` category navigation verified.
+- `[ ]` **Reported Incidents section** — below the category grid, list incidents this ranger has reported previously (type, date, severity/status); tap → incident detail view. Needs a Penpot screen design + a data source (mock until Room/sync exists).
 
 ### 7.8 Human Impact form
 - Flow: Reports → "Human Impact".
@@ -337,11 +338,14 @@ the step-by-step features currently being implemented.
 
 - `[x]` CameraX deps (camera-core / camera2 / lifecycle / view) + `CAMERA` permission in manifest.
 - `[x]` `PhotoStore` (no DB) — saves captured photos to app-internal `filesDir/captures/`, keyed by form slot.
-- `[x]` `CameraScreen` — full-screen CameraX `PreviewView` + capture button; runtime CAMERA permission; `popBack` on capture.
+  - **Multi-photo per slot:** a slot holds a *list* of photos; `set(slot, files)` replaces, `add(slot, file)` appends; files named `{slot}_{epoch}.jpg`; `init()` re-hydrates the map from the captures dir on app start.
+- `[x]` `PhotoUtils` — `decodeScaled(file, maxDim)` downscales and applies EXIF rotation/flip so captured photos render upright.
+- `[x]` `CameraScreen` — full-screen CameraX `PreviewView`; runtime CAMERA permission; camera stays live after each shot.
+  - **Multi-photo session:** thumbnail strip of the session's photos with per-photo remove; **back/front camera toggle** (`FlipCameraAndroid`); target rotation set from the display (correct EXIF orientation); **Done** writes all session photos to the slot and pops back (closing discards the session).
 - `[x]` `Route.Camera` added to navigation + wired in `MainActivity`.
-- `[x]` `PhotoPlaceholder` upgraded: shows captured thumbnail + "Retake" when a photo exists, else dotted placeholder; tap opens camera.
+- `[x]` `PhotoPlaceholder` upgraded: **thumbnail LazyRow** (per-photo aspect-ratio tiles + "Retake" chip) plus a dashed "Add photo" tile when photos exist, else the dashed placeholder; tap opens camera.
 - `[x]` Wire photo slots into the 7 screens: Quick Capture, Reports, Patrol Start, Human Impact, Animal Mortality, Sighting, Water Source.
-  - Verified on emulator: captures saved per slot (`quick_capture_*.jpg`, `reports_*.jpg`, `sighting_*.jpg`), thumbnail + Retake shown after capture.
+  - Verified on emulator: multi-photo saved per slot (`quick_capture_*.jpg`, `sighting_*.jpg`, ...), thumbnail strip + Retake shown after capture; **EXIF orientation fix confirmed via pixel-MSE** — portrait photo renders upright (MSE 490) vs raw landscape decode (MSE 6712).
 
 ### 10.2 Trusted time (GNSS satellite time — anti-cheat)
 
@@ -369,6 +373,7 @@ Two methods considered for stopping rangers faking timings:
 
 ## Backlog & next tasks
 
+- `[ ]` Reports screen: add **"Reported Incidents"** section below the category grid (list of previously reported incidents; tap → incident detail). Design in Penpot first, then app UI code; mock data until persistence exists.
 - `[ ]` Replace mock layer with Room + repository pattern (SQLite-first storage).
 - `[ ]` Wire authentication to backend API (replace mock login).
 - `[ ]` Persist Patrol Start to SQLite (save actually inserts a local patrol).
@@ -384,4 +389,4 @@ Two methods considered for stopping rangers faking timings:
 
 ---
 
-*Last updated: 2026-08-05. Architecture note added 2026-08-05: offline-first (SQLite primary, Postgres sync target). Section 10 added 2026-08-05: on-device photo capture + GNSS trusted-time plan.*
+*Last updated: 2026-08-07. 2026-08-07: multi-photo capture per slot + camera flip + EXIF-upright decode (10.1); Reports screen to gain a "Reported Incidents" section (7.7/backlog); Penpot MCP configured as a remote HTTP stream server in opencode.*

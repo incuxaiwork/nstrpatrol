@@ -16,6 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.ui.components.AutoCapturedPanel
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -24,6 +25,7 @@ import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.components.SelectField
+import com.nstrpatrol.app.ui.components.SeverityControl
 import com.nstrpatrol.app.ui.navigation.BottomTab
 
 @Composable
@@ -35,10 +37,11 @@ fun HumanImpactScreen(
     var impactType by remember { mutableStateOf<String?>(null) }
     var actionTaken by remember { mutableStateOf<String?>(null) }
     var timeElapsed by remember { mutableStateOf<String?>(null) }
+    var severity by remember { mutableStateOf("Low") }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "human_impact"
-    val photoPath by remember { mutableStateOf(PhotoStore.path(photoSlot)) }
+    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
 
     val titles = mapOf(
         "impact" to "Human Impact Type",
@@ -65,7 +68,7 @@ fun HumanImpactScreen(
             PhotoPlaceholder(
                 actionText = "Take photo",
                 hint = "Open camera to capture the impact",
-                photoPath = photoPath,
+                photoPaths = photoPaths,
                 onClick = { onOpenCamera(photoSlot) }
             )
 
@@ -91,6 +94,11 @@ fun HumanImpactScreen(
             )
 
             Spacer(Modifier.height(12.dp))
+            FieldLabel(text = "Severity")
+            Spacer(Modifier.height(4.dp))
+            SeverityControl(selected = severity, onSelect = { severity = it })
+
+            Spacer(Modifier.height(12.dp))
             FieldLabel(text = "Time Elapsed (optional)")
             Spacer(Modifier.height(4.dp))
             SelectField(
@@ -108,6 +116,11 @@ fun HumanImpactScreen(
                 placeholder = "Enter Any Remarks Here",
                 height = 100
             )
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader(text = "Captured")
+            Spacer(Modifier.height(8.dp))
+            AutoCapturedPanel()
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(

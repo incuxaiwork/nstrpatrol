@@ -67,10 +67,20 @@ class TrustedTimeManager(private val appContext: Context) {
         evaluate()
     }
 
-    /** True UTC at this instant, derived from the GNSS anchor + monotonic clock. */
+    /**
+     * True UTC at this instant, derived from the GNSS anchor + monotonic clock.
+     *
+     * Without a GNSS anchor there is no tamper-proof time source, so the raw
+     * device clock is returned. (Adding the monotonic delta to the raw clock
+     * here would double-count elapsed time and advance at 2x real speed.)
+     */
     fun trustedUtcNow(): Long {
-        val anchor = anchorGnssUtcMillis ?: System.currentTimeMillis()
-        return anchor + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
+        val anchor = anchorGnssUtcMillis
+        return if (anchor != null) {
+            anchor + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
+        } else {
+            System.currentTimeMillis()
+        }
     }
 
     fun isAutoTimeEnabled(): Boolean {

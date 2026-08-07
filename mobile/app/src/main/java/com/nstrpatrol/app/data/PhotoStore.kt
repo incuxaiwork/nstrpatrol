@@ -5,12 +5,12 @@ import java.io.File
 /**
  * In-memory + on-disk store for captured photos before any DB exists.
  * Photos are saved into the app-internal captures dir and keyed by form slot
- * (e.g. "quick_capture", "patrol_start"). A photo for a slot is cleared when
- * the user captures a new one for the same slot.
+ * (e.g. "quick_capture", "patrol_start"). A slot can hold multiple photos;
+ * setting a slot replaces its previous photos.
  */
 object PhotoStore {
 
-    private val store = mutableMapOf<String, String>()
+    private val store = mutableMapOf<String, MutableList<String>>()
     private var root: File? = null
 
     fun init(capturesDir: File) {
@@ -20,7 +20,7 @@ object PhotoStore {
         capturesDir.listFiles()?.forEach { file ->
             val slot: String = file.name.substringBefore('_')
             if (slot.isNotEmpty()) {
-                store[slot] = file.absolutePath
+                store.getOrPut(slot) { mutableListOf() }.add(file.absolutePath)
             }
         }
     }
@@ -30,16 +30,24 @@ object PhotoStore {
         return root ?: File(tmp)
     }
 
-    fun put(slot: String, file: File) {
-        store[slot] = file.absolutePath
+    /** Replace all photos for [slot] with [files]. */
+    fun set(slot: String, files: List<File>) {
+        clear(slot)
+        store[slot] = files.map { it.absolutePath }.toMutableList()
     }
 
-    fun path(slot: String): String? = store[slot]?.takeIf { File(it).exists() }
+    /** Append a single photo for [slot]. */
+    fun add(slot: String, file: File) {
+        store.getOrPut(slot) { mutableListOf() }.add(file.absolutePath)
+    }
 
-    fun has(slot: String): Boolean = path(slot) != null
+    fun paths(slot: String): List<String> =
+        store[slot].orEmpty().filter { File(it).exists() }
+
+    fun has(slot: String): Boolean = paths(slot).isNotEmpty()
 
     fun clear(slot: String) {
-        store.remove(slot)?.let { File(it).delete() }
+        store.remove(slot)?.forEach { File(it).delete() }
     }
 
     fun remove(slot: String) = clear(slot)
