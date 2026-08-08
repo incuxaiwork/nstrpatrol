@@ -127,11 +127,13 @@ fun MapsScreen(
     val gisRepo = remember { ForestGisRepository(context) }
     val mbtilesServer = remember { MbtilesServer(context) }
 
+    // Start the MBTiles tile server first so the basemap never starves,
+    // then load the GIS layers (beats/compartments) on a background thread.
     LaunchedEffect(Unit) {
+        mbtilesServer.start()
         withContext(Dispatchers.IO) {
             gisRepo.loadGisData()
         }
-        mbtilesServer.start()
     }
 
     DisposableEffect(Unit) {
@@ -248,7 +250,11 @@ fun MapsScreen(
                 .background(MapCanvas)
         ) {
             // MAPLIBRE VIEW COMPOSABLE
-            if (!mapInitError) {
+            // Wait for the GIS layer data (beats/compartments) to finish loading
+            // before creating the map. The style callback adds the GeoJSON
+            // sources/layers only if the JSON is already loaded, so creating the
+            // map too early silently drops those layers forever.
+            if (!mapInitError && gisRepo.isDataLoaded) {
                 AndroidView(
                     modifier = Modifier.fillMaxSize(),
                     factory = { ctx ->
@@ -403,6 +409,27 @@ fun MapsScreen(
                     lifecycleOwner.lifecycle.addObserver(observer)
                     onDispose {
                         lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
+            } else if (!gisRepo.isDataLoaded) {
+                // Loading placeholder while the beat/compartment GeoJSON loads
+                Box(
+                    modifier = Modifier.matchParentSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            text = "Loading forest layers...",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "Reading offline beat & compartment data",
+                            fontSize = 11.sp,
+                            color = TextSecondary
+                        )
                     }
                 }
             } else {

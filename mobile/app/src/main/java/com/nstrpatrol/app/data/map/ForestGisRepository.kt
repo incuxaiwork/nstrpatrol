@@ -88,7 +88,9 @@ class ForestGisRepository(private val context: Context) {
         } catch (e: Exception) {
             Log.e("ForestGisRepository", "Error reading mark_comp.json", e)
         }
-        isDataLoaded = true
+        // Only signal "loaded" once the beat data (the layer the map waits for)
+        // parsed successfully, so the map is never blocked forever on a bad asset.
+        isDataLoaded = beatGeoJsonString.isNotEmpty()
     }
 
     fun findBeatByName(name: String): ForestBeatModel? {
