@@ -1,170 +1,189 @@
 package com.nstrpatrol.app.ui.components
 
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.nstrpatrol.app.ui.theme.ForestGreen
-import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlin.math.cos
 import kotlin.math.sin
 
-private val CardinalColor = Color(0xFFE53935)
-private val TickColor = Color(0xFF616161)
-private val SubTickColor = Color(0xFF9E9E9E)
-private val LabelColor = Color(0xFFBDBDBD)
-private val DegreeLabelColor = Color(0xFF757575)
+private val PointerRed = Color(0xFFE53935)
+private val RingStroke = Color(0xFF444444)
+private val TickMajor = Color(0xFFE0E0E0)
+private val TickMinor = Color(0xFF777777)
+private val TickSub = Color(0xFF555555)
+private val LabelWhite = Color(0xFFCCCCCC)
+private val LabelDim = Color(0xFF666666)
 
 /**
- * Detailed rotating compass dial with fixed red pointer at top.
- * The dial rotates by [headingDegrees] while the pointer stays stationary.
+ * Clean rotating compass dial. The dial ring rotates with heading;
+ * a fixed red pointer at 12-o'clock indicates the current direction.
  */
 @Composable
 fun CompassDial(
     headingDegrees: Float,
     modifier: Modifier = Modifier
 ) {
-    Box(
-        modifier = modifier.size(260.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Canvas(modifier = Modifier.matchParentSize()) {
+    val animatedHeading by animateFloatAsState(
+        targetValue = headingDegrees,
+        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
+        label = "heading"
+    )
+
+    Box(modifier = modifier.size(280.dp), contentAlignment = Alignment.Center) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(8.dp)) {
             val cx = size.width / 2
             val cy = size.height / 2
-            val outerRadius = size.width / 2 - 4.dp.toPx()
-            val tickRingRadius = outerRadius - 8.dp.toPx()
-            val innerRingRadius = outerRadius - 32.dp.toPx()
+            val outerR = size.width / 2
 
-            // --- Rotating dial ring ---
-            drawCircle(
-                color = Color(0xFF333333),
-                radius = outerRadius,
-                style = Stroke(width = 2.dp.toPx())
-            )
-            drawCircle(
-                color = Color(0xFF2A2A2A),
-                radius = innerRingRadius,
-                style = Stroke(width = 1.dp.toPx())
-            )
+            // --- Outer ring ---
+            drawCircle(RingStroke, outerR, style = Stroke(2.dp.toPx()))
 
-            // Draw degree ticks and labels on the rotating ring
-            for (deg in 0 until 360) {
-                val rad = Math.toRadians((deg - headingDegrees).toDouble())
-                val cosRad = cos(rad).toFloat()
-                val sinRad = sin(rad).toFloat()
+            // --- Tick marks (drawn on the rotating dial) ---
+            drawDialTicks(cx, cy, outerR, animatedHeading)
 
-                val isMajor = deg % 30 == 0
-                val isMinor = deg % 10 == 0
-                val isSub = deg % 5 == 0
-
-                if (!isSub) continue
-
-                val tickLength = when {
-                    isMajor -> 14.dp.toPx()
-                    isMinor -> 9.dp.toPx()
-                    else -> 5.dp.toPx()
-                }
-
-                val tickStart = tickRingRadius - tickLength
-                val x1 = cx + tickStart * sinRad
-                val y1 = cy - tickStart * cosRad
-                val x2 = cx + tickRingRadius * sinRad
-                val y2 = cy - tickRingRadius * cosRad
-
-                val tickColor = when {
-                    isMajor -> Color(0xFFE0E0E0)
-                    isMinor -> SubTickColor
-                    else -> TickColor
-                }
-                val strokeWidth = when {
-                    isMajor -> 2.dp.toPx()
-                    isMinor -> 1.2.dp.toPx()
-                    else -> 0.8.dp.toPx()
-                }
-
-                drawLine(
-                    color = tickColor,
-                    start = Offset(x1, y1),
-                    end = Offset(x2, y2),
-                    strokeWidth = strokeWidth
-                )
-            }
-
-            // Draw cardinal and degree labels on the ring
-            val cardinals = mapOf(
-                0 to "North",
-                90 to "East",
-                180 to "South",
-                270 to "West"
-            )
-            val degreeLabels = listOf(30, 60, 120, 150, 210, 240, 300, 330)
-
-            // Cardinal labels
-            for ((deg, label) in cardinals) {
-                val rad = Math.toRadians((deg - headingDegrees).toDouble())
-                val labelRadius = tickRingRadius - 22.dp.toPx()
-                val x = cx + labelRadius * sin(rad).toFloat()
-                val y = cy - labelRadius * cos(rad).toFloat()
-
-                val paint = android.graphics.Paint().apply {
-                    color = if (deg == 0) CardinalColor.hashCode() else LabelColor.hashCode()
-                    textSize = if (deg == 0) 13.sp.toPx() else 11.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    isFakeBoldText = deg == 0
-                    isAntiAlias = true
-                }
-                drawContext.canvas.nativeCanvas.drawText(label, x, y + paint.textSize / 3, paint)
-            }
-
-            // Degree labels (30, 60, etc.)
-            for (deg in degreeLabels) {
-                val rad = Math.toRadians((deg - headingDegrees).toDouble())
-                val labelRadius = tickRingRadius - 20.dp.toPx()
-                val x = cx + labelRadius * sin(rad).toFloat()
-                val y = cy - labelRadius * cos(rad).toFloat()
-
-                val paint = android.graphics.Paint().apply {
-                    color = DegreeLabelColor.hashCode()
-                    textSize = 10.sp.toPx()
-                    textAlign = android.graphics.Paint.Align.CENTER
-                    isAntiAlias = true
-                }
-                drawContext.canvas.nativeCanvas.drawText("$deg", x, y + paint.textSize / 3, paint)
-            }
+            // --- Cardinal labels on the rotating dial ---
+            drawDialLabels(cx, cy, outerR, animatedHeading)
 
             // --- Fixed red pointer at top ---
-            val pointerSize = 14.dp.toPx()
-            val pointerY = tickRingRadius + 2.dp.toPx()
-            val path = android.graphics.Path().apply {
-                moveTo(cx, cy - outerRadius - pointerSize)
-                lineTo(cx - pointerSize * 0.6f, cy - outerRadius)
-                lineTo(cx + pointerSize * 0.6f, cy - outerRadius)
-                close()
-            }
-            drawContext.canvas.nativeCanvas.drawPath(
-                path,
-                android.graphics.Paint().apply {
-                    color = CardinalColor.hashCode()
-                    style = android.graphics.Paint.Style.FILL
-                    isAntiAlias = true
-                }
-            )
+            drawFixedPointer(cx, cy, outerR)
+        }
+    }
+}
 
-            // Small line from pointer to ring
+private fun DrawScope.drawDialTicks(cx: Float, cy: Float, outerR: Float, heading: Float) {
+    val tickOuter = outerR - 3.dp.toPx()
+
+    for (deg in 0 until 360) {
+        val isMajor = deg % 30 == 0
+        val isMid = deg % 10 == 0
+        val isMinor = deg % 5 == 0
+        if (!isMinor) continue
+
+        val tickLen = when {
+            isMajor -> 16.dp.toPx()
+            isMid -> 10.dp.toPx()
+            else -> 5.dp.toPx()
+        }
+        val tickInner = tickOuter - tickLen
+        val color = when {
+            isMajor -> TickMajor
+            isMid -> TickMinor
+            else -> TickSub
+        }
+        val strokeW = when {
+            isMajor -> 2.dp.toPx()
+            isMid -> 1.2.dp.toPx()
+            else -> 0.7.dp.toPx()
+        }
+
+        // Rotate each tick by -heading so the dial spins
+        rotate(-heading, Offset(cx, cy)) {
+            val rad = Math.toRadians(deg.toDouble())
+            val sinR = sin(rad).toFloat()
+            val cosR = cos(rad).toFloat()
             drawLine(
-                color = CardinalColor,
-                start = Offset(cx, cy - outerRadius),
-                end = Offset(cx, cy - outerRadius + 6.dp.toPx()),
-                strokeWidth = 2.dp.toPx()
+                color = color,
+                start = Offset(cx + tickInner * sinR, cy - tickInner * cosR),
+                end = Offset(cx + tickOuter * sinR, cy - tickOuter * cosR),
+                strokeWidth = strokeW
             )
         }
     }
+}
+
+private fun DrawScope.drawDialLabels(cx: Float, cy: Float, outerR: Float, heading: Float) {
+    val labelR = outerR - 28.dp.toPx()
+
+    data class Label(val deg: Int, val text: String, val isCardinal: Boolean, val isRed: Boolean)
+
+    val labels = listOf(
+        Label(0, "N", true, true),
+        Label(30, "30", false, false),
+        Label(60, "60", false, false),
+        Label(90, "E", true, false),
+        Label(120, "120", false, false),
+        Label(150, "150", false, false),
+        Label(180, "S", true, false),
+        Label(210, "210", false, false),
+        Label(240, "240", false, false),
+        Label(270, "W", true, false),
+        Label(300, "300", false, false),
+        Label(330, "330", false, false)
+    )
+
+    for (label in labels) {
+        val rotatedDeg = label.deg.toFloat() - heading
+        val rad = Math.toRadians(rotatedDeg.toDouble())
+        val x = cx + labelR * sin(rad).toFloat()
+        val y = cy - labelR * cos(rad).toFloat()
+
+        val paint = android.graphics.Paint().apply {
+            textSize = when {
+                label.isCardinal -> 14.dp.toPx()
+                else -> 10.dp.toPx()
+            }
+            color = when {
+                label.isRed -> PointerRed.hashCode()
+                label.isCardinal -> LabelWhite.hashCode()
+                else -> LabelDim.hashCode()
+            }
+            textAlign = android.graphics.Paint.Align.CENTER
+            isFakeBoldText = label.isCardinal
+            isAntiAlias = true
+            typeface = if (label.isCardinal) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
+        }
+
+        // Only draw if not rotated behind the pointer (optional: always draw)
+        drawContext.canvas.nativeCanvas.drawText(label.text, x, y + paint.textSize / 3, paint)
+    }
+}
+
+private fun DrawScope.drawFixedPointer(cx: Float, cy: Float, outerR: Float) {
+    val pointerTip = 6.dp.toPx()
+    val pointerBase = outerR - 20.dp.toPx()
+    val halfWidth = 8.dp.toPx()
+
+    // Triangle pointer above the ring
+    val tipY = cy - outerR - pointerTip
+    val baseY = cy - outerR + 2.dp.toPx()
+
+    val path = android.graphics.Path().apply {
+        moveTo(cx, tipY)
+        lineTo(cx - halfWidth, baseY)
+        lineTo(cx + halfWidth, baseY)
+        close()
+    }
+
+    drawContext.canvas.nativeCanvas.drawPath(
+        path,
+        android.graphics.Paint().apply {
+            color = PointerRed.hashCode()
+            style = android.graphics.Paint.Style.FILL
+            isAntiAlias = true
+        }
+    )
+
+    // Vertical line from pointer into the ring
+    drawLine(
+        color = PointerRed,
+        start = Offset(cx, baseY),
+        end = Offset(cx, baseY + 8.dp.toPx()),
+        strokeWidth = 2.dp.toPx()
+    )
 }
