@@ -2,6 +2,7 @@ package com.nstrpatrol.app.ui.screens
 
 import android.content.Context
 import android.graphics.Color as AndroidColor
+import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -22,14 +23,19 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddLocation
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompassCalibration
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -57,14 +63,17 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -75,6 +84,7 @@ import com.nstrpatrol.app.data.map.ForestBeatModel
 import com.nstrpatrol.app.data.map.ForestGisRepository
 import com.nstrpatrol.app.data.map.GisLayerState
 import com.nstrpatrol.app.data.map.MbtilesServer
+import com.nstrpatrol.app.data.map.SightingPointModel
 import com.nstrpatrol.app.time.GpsTelemetryManager
 import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.ui.components.ActivePatrolOverlay
@@ -98,8 +108,10 @@ import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
+import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.FillLayer
 import org.maplibre.android.style.layers.LineLayer
+import org.maplibre.android.style.layers.Property
 import org.maplibre.android.style.layers.PropertyFactory
 import org.maplibre.android.style.layers.RasterLayer
 import org.maplibre.android.style.layers.SymbolLayer
@@ -122,6 +134,7 @@ fun MapsScreen(
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val clipboardManager = LocalClipboardManager.current
 
     // Initialize GIS repository & local MBTiles tile server
     val gisRepo = remember { ForestGisRepository(context) }
@@ -142,12 +155,12 @@ fun MapsScreen(
 
     // Map UI state
     var selectedBeat by remember { mutableStateOf<ForestBeatModel?>(null) }
+    var selectedIncident by remember { mutableStateOf<SightingPointModel?>(null) }
     var layerState by remember { mutableStateOf(GisLayerState()) }
     var showLayerDialog by remember { mutableStateOf(false) }
     var showLegend by remember { mutableStateOf(true) }
-    var currentZoom by remember { mutableFloatStateOf(11.5f) }
-    var centerLat by remember { mutableDoubleStateOf(15.90) }
-    var centerLon by remember { mutableDoubleStateOf(79.25) }
+    var isFullScreen by remember { mutableStateOf(false) }
+    var currentZoom by remember { mutableFloatStateOf(11.8f) }
 
     var mapLibreMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
@@ -185,66 +198,142 @@ fun MapsScreen(
         }
     }
 
-    NstrScaffold(
-        title = "Forest Patrol Map",
-        subtitle = if (isRunning) "Patrol in progress • Markapur Division" else "Markapur Division • 44 Beats",
-        activeTab = BottomTab.Maps,
-        onTabSelected = onTabSelected
-    ) {
-        Spacer(Modifier.height(12.dp))
-
-        // Top Control Bar (Search & Layer Toggle & Status Indicator)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Offline Status Chip
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFE8F5E9))
-                    .border(1.dp, Color(0xFF2E7D32), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(Color(0xFF2E7D32), CircleShape)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Offline Map (MBTiles)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2E7D32)
-                    )
-                }
+    // REACTIVE LAYER VISIBILITY EFFECT
+    LaunchedEffect(layerState, mapLibreMapRef, gisRepo.isDataLoaded) {
+        mapLibreMapRef?.style?.let { style ->
+            // Ensure Sources
+            if (style.getSource("beats-geojson-source") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
+                style.addSource(GeoJsonSource("beats-geojson-source", gisRepo.beatGeoJsonString))
+            }
+            if (style.getSource("comp-geojson-source") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
+                style.addSource(GeoJsonSource("comp-geojson-source", gisRepo.compartmentGeoJsonString))
+            }
+            if (style.getSource("incidents-geojson-source") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
+                style.addSource(GeoJsonSource("incidents-geojson-source", gisRepo.incidentGeoJsonString))
             }
 
-            Row {
-                IconButton(
-                    onClick = { showLayerDialog = true },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Surface, CircleShape)
-                        .border(1.dp, OutlineCard, CircleShape)
-                ) {
-                    Icon(Icons.Filled.Layers, contentDescription = "Layers", tint = ForestGreen, modifier = Modifier.size(20.dp))
-                }
+            // Ensure Beats Layers
+            if (style.getLayer("beats-fill-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    FillLayer("beats-fill-layer", "beats-geojson-source").apply {
+                        setProperties(
+                            PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
+                            PropertyFactory.fillOpacity(0.12f)
+                        )
+                    }
+                )
             }
+            if (style.getLayer("beats-line-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    LineLayer("beats-line-layer", "beats-geojson-source").apply {
+                        setProperties(
+                            PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
+                            PropertyFactory.lineWidth(2.8f)
+                        )
+                    }
+                )
+            }
+            if (style.getLayer("beats-label-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
+                        minZoom = 9.0f
+                        setProperties(
+                            PropertyFactory.textField("{Beat}"),
+                            PropertyFactory.textSize(12f),
+                            PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
+                            PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
+                            PropertyFactory.textHaloWidth(2.0f)
+                        )
+                    }
+                )
+            }
+
+            // Ensure Compartments Layers
+            if (style.getLayer("comp-fill-layer") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    FillLayer("comp-fill-layer", "comp-geojson-source").apply {
+                        setProperties(
+                            PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
+                            PropertyFactory.fillOpacity(0.04f)
+                        )
+                    }
+                )
+            }
+            if (style.getLayer("comp-line-layer") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    LineLayer("comp-line-layer", "comp-geojson-source").apply {
+                        setProperties(
+                            PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
+                            PropertyFactory.lineWidth(1.2f),
+                            PropertyFactory.lineOpacity(0.75f)
+                        )
+                    }
+                )
+            }
+
+            // Ensure Incidents Layers
+            if (style.getLayer("incidents-circle-layer") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    CircleLayer("incidents-circle-layer", "incidents-geojson-source").apply {
+                        setProperties(
+                            PropertyFactory.circleColor(AndroidColor.parseColor("#D32F2F")),
+                            PropertyFactory.circleRadius(7f),
+                            PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#FFFFFF")),
+                            PropertyFactory.circleStrokeWidth(2f)
+                        )
+                    }
+                )
+            }
+            if (style.getLayer("incidents-label-layer") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
+                style.addLayer(
+                    SymbolLayer("incidents-label-layer", "incidents-geojson-source").apply {
+                        minZoom = 10.0f
+                        setProperties(
+                            PropertyFactory.textField("{icon} {title}"),
+                            PropertyFactory.textSize(11f),
+                            PropertyFactory.textColor(AndroidColor.parseColor("#B71C1C")),
+                            PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
+                            PropertyFactory.textHaloWidth(1.8f)
+                        )
+                    }
+                )
+            }
+
+            // Apply Layer Toggles
+            style.getLayer("mbtiles-raster-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showMBTiles) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("beats-fill-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("beats-line-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("beats-label-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("comp-fill-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("comp-line-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("incidents-circle-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
+            )
+            style.getLayer("incidents-label-layer")?.setProperties(
+                PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
+            )
         }
+    }
 
-        Spacer(Modifier.height(10.dp))
-
-        // MAP CONTAINER
+    // Helper Composable to render Map Content (Shared between Normal & Fullscreen Mode)
+    @Composable
+    fun MapContent(modifier: Modifier = Modifier, isFull: Boolean = false) {
         Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(420.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .border(1.dp, OutlineCard, RoundedCornerShape(12.dp))
+            modifier = modifier
+                .clip(if (isFull) RoundedCornerShape(0.dp) else RoundedCornerShape(12.dp))
+                .border(if (isFull) 0.dp else 1.dp, OutlineCard, if (isFull) RoundedCornerShape(0.dp) else RoundedCornerShape(12.dp))
                 .background(MapCanvas)
         ) {
             // MAPLIBRE VIEW COMPOSABLE
@@ -265,8 +354,8 @@ fun MapsScreen(
                             try {
                                 val tileUrl = mbtilesServer.tileUrlFormat
                                 val tileSet = TileSet("2.1.0", tileUrl)
-                                tileSet.minZoom = 8f
-                                tileSet.maxZoom = 16f
+                                tileSet.minZoom = 1f
+                                tileSet.maxZoom = 14f
                                 val rasterSource = RasterSource("mbtiles-raster-source", tileSet, 256)
 
                                 val styleJson = """
@@ -279,7 +368,7 @@ fun MapsScreen(
                                           "id": "background",
                                           "type": "background",
                                           "paint": {
-                                            "background-color": "#f2eae2"
+                                            "background-color": "#f5eedc"
                                           }
                                         }
                                       ]
@@ -294,66 +383,129 @@ fun MapsScreen(
                                     if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
                                         style.addSource(GeoJsonSource("comp-geojson-source", gisRepo.compartmentGeoJsonString))
                                     }
-
-                                    style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
-
-                                    // Compartments line layer (dashed)
-                                    if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                                        style.addLayer(
-                                            LineLayer("comp-line-layer", "comp-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#546E7A")),
-                                                    PropertyFactory.lineWidth(1.2f),
-                                                    PropertyFactory.lineDasharray(arrayOf(2f, 2f))
-                                                )
-                                            }
-                                        )
+                                    if (gisRepo.incidentGeoJsonString.isNotEmpty()) {
+                                        style.addSource(GeoJsonSource("incidents-geojson-source", gisRepo.incidentGeoJsonString))
                                     }
 
-                                    // Beats fill layer
+                                    // 1. MBTiles Basemap Layer
+                                    style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
+
+                                    // 2. Beats Fill Layer (Light green tint)
                                     if (gisRepo.beatGeoJsonString.isNotEmpty()) {
                                         style.addLayer(
                                             FillLayer("beats-fill-layer", "beats-geojson-source").apply {
                                                 setProperties(
                                                     PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.fillOpacity(0.20f)
+                                                    PropertyFactory.fillOpacity(0.12f),
+                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                                )
+                                            }
+                                        )
+                                    }
+
+                                    // 3. Compartments Fill Layer (Soft amber tint)
+                                    if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
+                                        style.addLayer(
+                                            FillLayer("comp-fill-layer", "comp-geojson-source").apply {
+                                                setProperties(
+                                                    PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
+                                                    PropertyFactory.fillOpacity(0.04f),
+                                                    PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                                 )
                                             }
                                         )
 
-                                        // Beats boundary stroke layer
+                                        // 4. Compartments Line Layer (Solid crisp amber line for clear visibility)
+                                        style.addLayer(
+                                            LineLayer("comp-line-layer", "comp-geojson-source").apply {
+                                                setProperties(
+                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
+                                                    PropertyFactory.lineWidth(1.2f),
+                                                    PropertyFactory.lineOpacity(0.75f),
+                                                    PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
+                                                )
+                                            }
+                                        )
+                                    }
+
+                                    // 5. Beats Line Layer (Bold dark green boundary)
+                                    if (gisRepo.beatGeoJsonString.isNotEmpty()) {
                                         style.addLayer(
                                             LineLayer("beats-line-layer", "beats-geojson-source").apply {
                                                 setProperties(
                                                     PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.lineWidth(2.5f)
+                                                    PropertyFactory.lineWidth(2.8f),
+                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
                                                 )
                                             }
                                         )
 
-                                        // Beat Name Label Layer
+                                        // 6. Beat Name Label Layer
                                         style.addLayer(
                                             SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
+                                                minZoom = 9.0f
                                                 setProperties(
                                                     PropertyFactory.textField("{Beat}"),
-                                                    PropertyFactory.textSize(11f),
+                                                    PropertyFactory.textSize(12f),
                                                     PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
                                                     PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                                                    PropertyFactory.textHaloWidth(1.5f)
+                                                    PropertyFactory.textHaloWidth(2.0f),
+                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
                                                 )
-                                                minZoom = 10f
+                                            }
+                                        )
+                                    }
+
+                                    // 7. Sighting & Incident Red Circle Points Layer
+                                    if (gisRepo.incidentGeoJsonString.isNotEmpty()) {
+                                        style.addLayer(
+                                            CircleLayer("incidents-circle-layer", "incidents-geojson-source").apply {
+                                                setProperties(
+                                                    PropertyFactory.circleColor(AndroidColor.parseColor("#D32F2F")),
+                                                    PropertyFactory.circleRadius(7f),
+                                                    PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#FFFFFF")),
+                                                    PropertyFactory.circleStrokeWidth(2f),
+                                                    PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
+                                                )
+                                            }
+                                        )
+
+                                        // 8. Incident Label Layer
+                                        style.addLayer(
+                                            SymbolLayer("incidents-label-layer", "incidents-geojson-source").apply {
+                                                minZoom = 10.0f
+                                                setProperties(
+                                                    PropertyFactory.textField("{icon} {title}"),
+                                                    PropertyFactory.textSize(11f),
+                                                    PropertyFactory.textColor(AndroidColor.parseColor("#B71C1C")),
+                                                    PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
+                                                    PropertyFactory.textHaloWidth(1.8f),
+                                                    PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
+                                                )
                                             }
                                         )
                                     }
 
                                     map.cameraPosition = CameraPosition.Builder()
-                                        .target(LatLng(15.90, 79.25))
-                                        .zoom(11.5)
+                                        .target(LatLng(15.92, 79.15))
+                                        .zoom(11.8)
                                         .build()
 
-                                    // Tap listener for beats
+                                    // Tap listener for map features (Beats & Incident Markers)
                                     map.addOnMapClickListener { latLng ->
                                         val pointF = map.projection.toScreenLocation(latLng)
+                                        // 1. Check Incident tap first
+                                        val incidentFeatures = map.queryRenderedFeatures(pointF, "incidents-circle-layer")
+                                        if (incidentFeatures.isNotEmpty()) {
+                                            val incId = incidentFeatures[0].getStringProperty("id") ?: ""
+                                            val matchedIncident = gisRepo.findIncidentById(incId)
+                                            if (matchedIncident != null) {
+                                                selectedIncident = matchedIncident
+                                                return@addOnMapClickListener true
+                                            }
+                                        }
+
+                                        // 2. Check Beat tap
                                         val features = map.queryRenderedFeatures(pointF, "beats-fill-layer")
                                         if (features.isNotEmpty()) {
                                             val feat = features[0]
@@ -372,23 +524,7 @@ fun MapsScreen(
                         }
                         mapView
                     },
-                    update = { view ->
-                        // Update layer visibility
-                        mapLibreMapRef?.style?.let { style ->
-                            style.getLayer("mbtiles-raster-layer")?.setProperties(
-                                PropertyFactory.visibility(if (layerState.showMBTiles) "visible" else "none")
-                            )
-                            style.getLayer("beats-fill-layer")?.setProperties(
-                                PropertyFactory.visibility(if (layerState.showBeats) "visible" else "none")
-                            )
-                            style.getLayer("beats-line-layer")?.setProperties(
-                                PropertyFactory.visibility(if (layerState.showBeats) "visible" else "none")
-                            )
-                            style.getLayer("comp-line-layer")?.setProperties(
-                                PropertyFactory.visibility(if (layerState.showCompartments) "visible" else "none")
-                            )
-                        }
-                    }
+                    update = { view -> }
                 )
 
                 // Manage MapView Lifecycle
@@ -406,7 +542,7 @@ fun MapsScreen(
                     }
                 }
             } else {
-                // Fallback Grid Canvas if MapLibre GL is unavailable
+                // Fallback Grid Canvas if MapLibre GL is initializing
                 Canvas(modifier = Modifier.matchParentSize()) {
                     var x = 32.dp.toPx()
                     while (x < size.width) {
@@ -421,13 +557,20 @@ fun MapsScreen(
                 }
             }
 
-            // FLOATING MAP CONTROLS (Top-Right / Right Side)
+            // FLOATING MAP CONTROLS (Right Side)
             Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Fullscreen Toggle
+                FloatingControlButton(
+                    icon = if (isFull) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                    contentDescription = if (isFull) "Exit Fullscreen" else "Full Screen",
+                    onClick = { isFullScreen = !isFullScreen }
+                )
+
                 // Zoom In (+)
                 FloatingControlButton(
                     icon = Icons.Filled.Add,
@@ -471,7 +614,7 @@ fun MapsScreen(
                     contentDescription = "Recenter",
                     onClick = {
                         mapLibreMapRef?.animateCamera(
-                            CameraUpdateFactory.newLatLngZoom(LatLng(15.90, 79.25), 11.5)
+                            CameraUpdateFactory.newLatLngZoom(LatLng(15.92, 79.15), 11.8)
                         )
                     }
                 )
@@ -502,7 +645,7 @@ fun MapsScreen(
                     Card(
                         modifier = Modifier
                             .padding(top = 4.dp)
-                            .width(180.dp),
+                            .width(205.dp),
                         shape = RoundedCornerShape(8.dp),
                         colors = CardDefaults.cardColors(containerColor = Surface.copy(alpha = 0.95f)),
                         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
@@ -510,18 +653,93 @@ fun MapsScreen(
                         Column(modifier = Modifier.padding(8.dp)) {
                             LegendItem(color = ForestGreen, isDashed = false, label = "Forest Beat Boundary")
                             Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFF546E7A), isDashed = true, label = "Compartment Boundary")
+                            LegendItem(color = Color(0xFFE65100), isDashed = false, label = "Compartment Boundary")
                             Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFFB3261E), isDashed = false, isPoint = true, label = "Sighting / Incident")
+                            LegendItem(color = Color(0xFFD32F2F), isDashed = false, isPoint = true, label = "Sightings & Incidents (12)")
                             Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFFC3B091), isDashed = false, isRaster = true, label = "MBTiles Basemap")
+                            LegendItem(color = Color(0xFFC3B091), isDashed = false, isRaster = true, label = "MBTiles Offline Basemap")
                         }
                     }
                 }
             }
         }
+    }
 
-        // Active Patrol Overlay / Quick Layers info
+    // NORMAL VIEW MODE (Inside NstrScaffold)
+    NstrScaffold(
+        title = "Forest Patrol Map",
+        subtitle = if (isRunning) "Patrol in progress • Markapur Division" else "Markapur Division • 44 Beats • 12 Sightings Logged",
+        activeTab = BottomTab.Maps,
+        onTabSelected = onTabSelected
+    ) {
+        Spacer(Modifier.height(12.dp))
+
+        // Top Control Bar (Search & Layer Toggle & Status Indicator)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Offline Status Chip
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0xFFE8F5E9))
+                    .border(1.dp, Color(0xFF2E7D32), RoundedCornerShape(16.dp))
+                    .padding(horizontal = 10.dp, vertical = 5.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(7.dp)
+                            .background(Color(0xFF2E7D32), CircleShape)
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = "Offline Map (MBTiles)",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF2E7D32)
+                    )
+                }
+            }
+
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                // Fullscreen Button
+                Button(
+                    onClick = { isFullScreen = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = LightForest),
+                    shape = RoundedCornerShape(20.dp),
+                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
+                ) {
+                    Icon(Icons.Filled.Fullscreen, contentDescription = "Full Screen", tint = ForestGreen, modifier = Modifier.size(16.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("FULL SCREEN", color = ForestGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+
+                IconButton(
+                    onClick = { showLayerDialog = true },
+                    modifier = Modifier
+                        .size(36.dp)
+                        .background(Surface, CircleShape)
+                        .border(1.dp, OutlineCard, CircleShape)
+                ) {
+                    Icon(Icons.Filled.Layers, contentDescription = "Layers", tint = ForestGreen, modifier = Modifier.size(20.dp))
+                }
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+
+        // Normal Map View Container
+        MapContent(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(420.dp),
+            isFull = false
+        )
+
+        // Active Patrol Overlay
         if (isRunning) {
             Spacer(Modifier.height(12.dp))
             ActivePatrolOverlay(
@@ -536,7 +754,7 @@ fun MapsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        // Quick Beat Inspector List
+        // Recent Sightings & Incidents Quick List
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp),
@@ -549,22 +767,23 @@ fun MapsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Forest Beats (${gisRepo.beatsList.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                    Text("Tap beat for details", fontSize = 11.sp, color = TextSecondary)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("🚨 Logged Sightings & Incidents (${gisRepo.incidentsList.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+                    }
+                    Text("Tap marker to view", fontSize = 11.sp, color = TextSecondary)
                 }
 
                 Spacer(Modifier.height(10.dp))
 
-                val sampleBeats = gisRepo.beatsList.take(4)
-                sampleBeats.forEach { beat ->
+                gisRepo.incidentsList.take(5).forEach { inc ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
                             .clickable {
-                                selectedBeat = beat
+                                selectedIncident = inc
                                 mapLibreMapRef?.animateCamera(
-                                    CameraUpdateFactory.newLatLngZoom(LatLng(15.90, 79.25), 12.5)
+                                    CameraUpdateFactory.newLatLngZoom(LatLng(inc.lat, inc.lon), 13.5)
                                 )
                             }
                             .padding(vertical = 6.dp, horizontal = 4.dp),
@@ -572,159 +791,314 @@ fun MapsScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .background(ForestGreen, CircleShape)
-                            )
-                            Spacer(Modifier.width(8.dp))
+                            Text(inc.icon, fontSize = 16.sp)
+                            Spacer(Modifier.width(10.dp))
                             Column {
-                                Text(beat.name, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
-                                Text("Range: ${beat.range} • Sec: ${beat.section}", fontSize = 11.sp, color = TextSecondary)
+                                Text(inc.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
+                                Text("Beat: ${inc.beatName} • ${inc.time}", fontSize = 11.sp, color = TextSecondary)
                             }
                         }
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(4.dp))
-                                .background(LightForest)
+                                .background(
+                                    when (inc.severity) {
+                                        "Critical" -> Color(0xFFFFEBEE)
+                                        "High" -> Color(0xFFFFF3E0)
+                                        else -> Color(0xFFE8F5E9)
+                                    }
+                                )
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
-                            Text("ID: ${beat.id}", fontSize = 10.sp, fontWeight = FontWeight.Bold, color = ForestGreen)
+                            Text(
+                                text = inc.severity.uppercase(),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = when (inc.severity) {
+                                    "Critical" -> Color(0xFFC62828)
+                                    "High" -> Color(0xFFE65100)
+                                    else -> Color(0xFF2E7D32)
+                                }
+                            )
                         }
                     }
                     Spacer(Modifier.height(4.dp))
                 }
             }
         }
+    }
 
-        // BEAT DETAILS BOTTOM SHEET
-        if (selectedBeat != null) {
-            val b = selectedBeat!!
-            ModalBottomSheet(
-                onDismissRequest = { selectedBeat = null },
-                sheetState = rememberModalBottomSheetState(),
-                containerColor = Surface
-            ) {
-                Column(
+    // FULL SCREEN MAP MODE DIALOG
+    if (isFullScreen) {
+        Dialog(
+            onDismissRequest = { isFullScreen = false },
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Box(modifier = Modifier.fillMaxSize().background(MapCanvas)) {
+                MapContent(modifier = Modifier.fillMaxSize(), isFull = true)
+
+                // Top Bar for Full Screen
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                        .padding(16.dp)
+                        .align(Alignment.TopStart),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(20.dp))
+                            .background(Surface.copy(alpha = 0.95f))
+                            .border(1.dp, OutlineCard, RoundedCornerShape(20.dp))
+                            .padding(horizontal = 14.dp, vertical = 8.dp)
                     ) {
+                        Text("Forest Patrol Map • Fullscreen", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = ForestGreen)
+                    }
+
+                    IconButton(
+                        onClick = { isFullScreen = false },
+                        modifier = Modifier
+                            .size(40.dp)
+                            .background(Surface.copy(alpha = 0.95f), CircleShape)
+                            .border(1.dp, OutlineCard, CircleShape)
+                    ) {
+                        Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit Fullscreen", tint = ForestGreen)
+                    }
+                }
+            }
+        }
+    }
+
+    // SIGHTING & INCIDENT DETAILS BOTTOM SHEET
+    if (selectedIncident != null) {
+        val inc = selectedIncident!!
+        ModalBottomSheet(
+            onDismissRequest = { selectedIncident = null },
+            sheetState = rememberModalBottomSheetState(),
+            containerColor = Surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(inc.icon, fontSize = 28.sp)
+                        Spacer(Modifier.width(10.dp))
                         Column {
                             Text(
-                                text = "BEAT DETAILS",
-                                fontSize = 11.sp,
+                                text = "INCIDENT / SIGHTING RECORD",
+                                fontSize = 10.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = TextSecondary
                             )
                             Text(
-                                text = b.name,
-                                fontSize = 22.sp,
+                                text = inc.title,
+                                fontSize = 20.sp,
                                 fontWeight = FontWeight.ExtraBold,
-                                color = ForestGreen
+                                color = TextPrimary
                             )
                         }
-                        IconButton(onClick = { selectedBeat = null }) {
-                            Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
-                        }
+                    }
+                    IconButton(onClick = { selectedIncident = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                DetailItemRow("Record ID", inc.id)
+                DetailItemRow("Category", inc.category)
+                DetailItemRow("Severity Level", inc.severity)
+                DetailItemRow("Forest Beat", inc.beatName)
+                DetailItemRow("Logged Time", inc.time)
+                DetailItemRow("GPS Location", "${"%.5f".format(inc.lat)}° N, ${"%.5f".format(inc.lon)}° E")
+
+                Spacer(Modifier.height(10.dp))
+
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(8.dp),
+                    colors = CardDefaults.cardColors(containerColor = LightForest)
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text("Field Remarks / Observations", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = ForestGreen)
+                        Spacer(Modifier.height(4.dp))
+                        Text(inc.details, fontSize = 13.sp, color = TextPrimary)
+                    }
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = {
+                            val locText = "${inc.lat}, ${inc.lon}"
+                            clipboardManager.setText(AnnotatedString(locText))
+                            Toast.makeText(context, "Coordinates copied: $locText", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("COPY COORDS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
                     }
 
-                    Spacer(Modifier.height(14.dp))
-
-                    DetailItemRow("Beat Name", b.name)
-                    DetailItemRow("Beat Identifier (ID)", b.id)
-                    DetailItemRow("Range", b.range)
-                    DetailItemRow("Division", b.division)
-                    DetailItemRow("Section", b.section)
-                    DetailItemRow("Circle", b.circle)
-                    DetailItemRow("District", b.district)
-                    DetailItemRow("Area (ha)", b.areaHa)
-                    DetailItemRow("Patrol Status", "Active Forest Beat")
-
-                    Spacer(Modifier.height(20.dp))
-
                     Button(
-                        onClick = { selectedBeat = null },
+                        onClick = { selectedIncident = null },
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
+                            .weight(1f)
+                            .height(46.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
                         shape = RoundedCornerShape(8.dp)
                     ) {
-                        Text("CLOSE DETAILS", fontWeight = FontWeight.Bold, color = Color.White)
+                        Text("CLOSE", fontWeight = FontWeight.Bold, color = Color.White)
                     }
-                    Spacer(Modifier.height(12.dp))
                 }
+                Spacer(Modifier.height(12.dp))
             }
         }
+    }
 
-        // LAYER CONTROL DIALOG / BOTTOM SHEET
-        if (showLayerDialog) {
-            ModalBottomSheet(
-                onDismissRequest = { showLayerDialog = false },
-                sheetState = rememberModalBottomSheetState(),
-                containerColor = Surface
+    // BEAT DETAILS BOTTOM SHEET
+    if (selectedBeat != null) {
+        val b = selectedBeat!!
+        ModalBottomSheet(
+            onDismissRequest = { selectedBeat = null },
+            sheetState = rememberModalBottomSheetState(),
+            containerColor = Surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
-                Column(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "BEAT DETAILS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = b.name,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ForestGreen
+                        )
+                    }
+                    IconButton(onClick = { selectedBeat = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                DetailItemRow("Beat Name", b.name)
+                DetailItemRow("Beat Identifier (ID)", b.id)
+                DetailItemRow("Range", b.range)
+                DetailItemRow("Division", b.division)
+                DetailItemRow("Section", b.section)
+                DetailItemRow("Circle", b.circle)
+                DetailItemRow("District", b.district)
+                DetailItemRow("Area (ha)", b.areaHa)
+                DetailItemRow("Patrol Status", "Active Forest Beat")
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = { selectedBeat = null },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 16.dp)
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(8.dp)
                 ) {
-                    Text(
-                        text = "Map Layers",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Spacer(Modifier.height(14.dp))
-
-                    LayerToggleRow(
-                        title = "MBTiles Offline Basemap",
-                        subtitle = "Raster tile atlas (NSTR.mbtiles)",
-                        checked = layerState.showMBTiles,
-                        onChecked = { layerState = layerState.copy(showMBTiles = it) }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    LayerToggleRow(
-                        title = "Forest Beat Boundaries",
-                        subtitle = "44 Markapur Division beats",
-                        checked = layerState.showBeats,
-                        onChecked = { layerState = layerState.copy(showBeats = it) }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    LayerToggleRow(
-                        title = "Forest Compartments",
-                        subtitle = "448 compartment polygons",
-                        checked = layerState.showCompartments,
-                        onChecked = { layerState = layerState.copy(showCompartments = it) }
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    LayerToggleRow(
-                        title = "Sighting & Incident Points",
-                        subtitle = "Patrol checkpoint markers",
-                        checked = layerState.showIncidents,
-                        onChecked = { layerState = layerState.copy(showIncidents = it) }
-                    )
-
-                    Spacer(Modifier.height(20.dp))
-
-                    Button(
-                        onClick = { showLayerDialog = false },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(48.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("APPLY LAYERS", fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    Spacer(Modifier.height(12.dp))
+                    Text("CLOSE DETAILS", fontWeight = FontWeight.Bold, color = Color.White)
                 }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+
+    // LAYER CONTROL DIALOG / BOTTOM SHEET
+    if (showLayerDialog) {
+        ModalBottomSheet(
+            onDismissRequest = { showLayerDialog = false },
+            sheetState = rememberModalBottomSheetState(),
+            containerColor = Surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Text(
+                    text = "Map Layers",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Spacer(Modifier.height(14.dp))
+
+                LayerToggleRow(
+                    title = "MBTiles Offline Basemap",
+                    subtitle = "Raster tile atlas (NSTR.mbtiles)",
+                    checked = layerState.showMBTiles,
+                    onChecked = { layerState = layerState.copy(showMBTiles = it) }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Forest Beat Boundaries",
+                    subtitle = "44 Markapur Division beats",
+                    checked = layerState.showBeats,
+                    onChecked = { layerState = layerState.copy(showBeats = it) }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Forest Compartments",
+                    subtitle = "448 compartment polygons (Solid Amber)",
+                    checked = layerState.showCompartments,
+                    onChecked = { layerState = layerState.copy(showCompartments = it) }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Sighting & Incident Points",
+                    subtitle = "12 active wildlife & hazard markers",
+                    checked = layerState.showIncidents,
+                    onChecked = { layerState = layerState.copy(showIncidents = it) }
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = { showLayerDialog = false },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("APPLY LAYERS", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(Modifier.height(12.dp))
             }
         }
     }
