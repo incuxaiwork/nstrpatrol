@@ -95,6 +95,16 @@ model Patrol {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
+  // Aggregate telemetry stats synced from the device at patrol end.
+  // Mirrors the mobile PatrolSessionEntity columns.
+  totalDistanceMeters  Float   @default(0)
+  totalSteps           Int     @default(0)
+  moveMinutes          Int     @default(0)
+  caloriesEstimate     Float   @default(0)
+  heartPointsEstimate  Float   @default(0)
+  avgSpeedKmh          Float   @default(0)
+  pointCount           Int     @default(0)
+
   user         User          @relation(fields: [userId], references: [id])
   forest       Forest        @relation(fields: [forestId], references: [id])
   points       PatrolPoint[]
