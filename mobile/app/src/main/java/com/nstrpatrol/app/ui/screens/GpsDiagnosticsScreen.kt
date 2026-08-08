@@ -85,6 +85,7 @@ import com.nstrpatrol.app.time.ModeSource
 import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.time.TelemetryRecorder
 import com.nstrpatrol.app.time.TimeIntegrityState
+import com.nstrpatrol.app.ui.components.CompassDial
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.ForestGreen
@@ -919,72 +920,27 @@ private fun LiveCompassCard(telemetry: GpsTelemetry) {
 
             Spacer(Modifier.height(16.dp))
 
-            Box(
-                modifier = Modifier.size(160.dp),
-                contentAlignment = Alignment.Center
-            ) {
+            CompassDial(headingDegrees = degrees)
+
+            Spacer(Modifier.height(8.dp))
+
+            // Center display: large degree + cardinal
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 Text(
-                    "N",
-                    fontSize = 14.sp,
+                    text = heading?.let { "${it.toInt()}°" } ?: "--",
+                    fontSize = 32.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color(0xFFB3261E),
-                    modifier = Modifier.align(Alignment.TopCenter)
+                    color = TextPrimary
                 )
                 Text(
-                    "E",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary,
-                    modifier = Modifier.align(Alignment.CenterEnd)
+                    text = heading?.let { degreesToCardinal(it) } ?: "No signal",
+                    fontSize = 16.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = TextSecondary
                 )
-                Text(
-                    "S",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary,
-                    modifier = Modifier.align(Alignment.BottomCenter)
-                )
-                Text(
-                    "W",
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextSecondary,
-                    modifier = Modifier.align(Alignment.CenterStart)
-                )
-
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .size(120.dp)
-                ) {
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val center = Offset(size.width / 2, size.height / 2)
-                        val radius = size.width / 2 - 6.dp.toPx()
-
-                        drawCircle(color = OutlineCard, radius = radius, style = Stroke(width = 2.dp.toPx()))
-
-                        for (i in 0 until 360 step 30) {
-                            val rad = i * PI / 180
-                            val startR = radius - if (i % 90 == 0) 10.dp.toPx() else 5.dp.toPx()
-                            val p1 = Offset(center.x + startR * sin(rad).toFloat(), center.y - startR * cos(rad).toFloat())
-                            val p2 = Offset(center.x + radius * sin(rad).toFloat(), center.y - radius * cos(rad).toFloat())
-                            drawLine(color = if (i % 90 == 0) ForestGreen else TextSecondary, start = p1, end = p2, strokeWidth = 2.dp.toPx())
-                        }
-                    }
-
-                    Icon(
-                        imageVector = Icons.Filled.Navigation,
-                        contentDescription = null,
-                        tint = ForestGreen,
-                        modifier = Modifier
-                            .align(Alignment.Center)
-                            .size(44.dp)
-                            .rotate(degrees)
-                    )
-                }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(16.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text("Magnetic Heading", fontSize = 11.sp, color = TextSecondary)
