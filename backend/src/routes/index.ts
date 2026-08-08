@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { healthRouter } from './health';
+import { gisRouter } from './gis';
 
 export const apiRouter = Router();
 
@@ -8,3 +9,4 @@ apiRouter.get('/', (_req, res) => {
 });
 
 apiRouter.use('/health', healthRouter);
+apiRouter.use('/gis', gisRouter);
