@@ -9,7 +9,11 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -44,8 +48,22 @@ fun CompassDial(
     headingDegrees: Float,
     modifier: Modifier = Modifier
 ) {
+    // The raw heading is normalized to 0..360. Animating it directly causes
+    // the dial to spin almost a full revolution when crossing North
+    // (359 -> 0 -> 1). We unwrap it into a continuous angle instead:
+    //   358, 359, 360, 361
+    // while the telemetry heading stays normalized: 358, 359, 0, 1.
+    var lastNormalized by remember { mutableFloatStateOf(headingDegrees) }
+    var unwrappedHeading by remember { mutableFloatStateOf(headingDegrees) }
+
+    LaunchedEffect(headingDegrees) {
+        val delta = shortestAngularDelta(headingDegrees, lastNormalized)
+        lastNormalized = headingDegrees
+        unwrappedHeading += delta
+    }
+
     val animatedHeading by animateFloatAsState(
-        targetValue = headingDegrees,
+        targetValue = unwrappedHeading,
         animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow),
         label = "heading"
     )
@@ -69,6 +87,15 @@ fun CompassDial(
             drawFixedPointer(cx, cy, outerR)
         }
     }
+}
+
+/**
+ * Shortest signed angular delta (in degrees) to get from [from] to [to],
+ * both normalized to 0..360. Returns a value in (-180, 180], so crossing
+ * North (359 -> 0) yields +1 rather than -359.
+ */
+private fun shortestAngularDelta(to: Float, from: Float): Float {
+    return ((to - from + 540f) % 360f) - 180f
 }
 
 /**

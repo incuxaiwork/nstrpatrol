@@ -18,6 +18,8 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import android.view.Surface
+import android.view.WindowManager
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -109,9 +111,9 @@ data class GpsTelemetry(
     /** True if we have a recent, accurate GPS-provider fix. */
     val hasGpsFix: Boolean
         get() = provider == "gps" &&
-            latitude != null && longitude != null &&
-            horizontalAccuracyMeters != null &&
-            ageMs in 0..15_000
+                latitude != null && longitude != null &&
+                horizontalAccuracyMeters != null &&
+                ageMs in 0..15_000
 
     /** True if the GNSS receiver reports a fix is being used, or a fresh GPS fix exists. */
     val hasFix: Boolean
@@ -189,6 +191,7 @@ class GpsTelemetryManager(private val appContext: Context) {
                     hasGravity = true
                     updateHeadingFromMagnetic()
                 }
+
                 Sensor.TYPE_MAGNETIC_FIELD -> {
                     System.arraycopy(event.values, 0, magneticValues, 0, 3)
                     hasMagnetic = true
@@ -341,18 +344,81 @@ class GpsTelemetryManager(private val appContext: Context) {
     }
 
     private fun setHeading(rotation: FloatArray) {
+        val remapped = remapRotationForDisplay(rotation)
         val orientation = FloatArray(3)
-        SensorManager.getOrientation(rotation, orientation)
-        // orientation[0] = azimuth in radians. Android's right-hand-rule around
-        // Z (pointing up) makes it counter-clockwise. Compass convention is
-        // clockwise from North, so negate before converting to degrees.
-        val azimuth = orientation[0]
-        val degrees = (-azimuth * 180f / Math.PI.toFloat())
+        SensorManager.getOrientation(remapped, orientation)
+        val degrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
         val heading = (degrees + 360f) % 360f
-        if (lastHeadingDegrees < 0f || abs(heading - lastHeadingDegrees) >= 0.5f) {
+        if (lastHeadingDegrees < 0f ||
+            angularDifference(heading, lastHeadingDegrees) >= 0.5f
+        ) {
             lastHeadingDegrees = heading
             _telemetry.value = _telemetry.value.copy(headingDegrees = heading)
         }
+    }
+
+    /**
+     * Remaps the raw sensor rotation matrix into the currently displayed
+     * screen frame so that the computed azimuth always points toward the top
+     * of the physical display, regardless of portrait/landscape rotation.
+     */
+    private fun remapRotationForDisplay(rotation: FloatArray): FloatArray {
+        val remapped = FloatArray(9)
+        val ok = when (currentDisplayRotation()) {
+            Surface.ROTATION_90 -> SensorManager.remapCoordinateSystem(
+                rotation,
+                SensorManager.AXIS_MINUS_Y,
+                SensorManager.AXIS_X,
+                remapped
+            )
+            Surface.ROTATION_180 -> SensorManager.remapCoordinateSystem(
+                rotation,
+                SensorManager.AXIS_MINUS_X,
+                SensorManager.AXIS_MINUS_Y,
+                remapped
+            )
+            Surface.ROTATION_270 -> SensorManager.remapCoordinateSystem(
+                rotation,
+                SensorManager.AXIS_Y,
+                SensorManager.AXIS_MINUS_X,
+                remapped
+            )
+            else -> {
+                System.arraycopy(rotation, 0, remapped, 0, 9)
+                true
+            }
+        }
+        return if (ok) remapped else rotation
+    }
+
+    private fun currentDisplayRotation(): Int {
+        // The application context is not associated with a display, so
+        // context.display throws UnsupportedOperationException on API 30+.
+        // Fall back to the window manager's default display instead.
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            try {
+                appContext.display?.rotation ?: defaultDisplayRotation()
+            } catch (e: UnsupportedOperationException) {
+                defaultDisplayRotation()
+            }
+        } else {
+            defaultDisplayRotation()
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun defaultDisplayRotation(): Int {
+        val windowManager =
+            appContext.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+        return windowManager.defaultDisplay.rotation
+    }
+
+    /**
+     * Shortest angular distance between two headings in [0, 360), so that
+     * 359° -> 0° is treated as a 1° change rather than a 359° change.
+     */
+    private fun angularDifference(a: Float, b: Float): Float {
+        return abs(((a - b + 540f) % 360f) - 180f)
     }
 
     private fun registerGnssCallback() {
