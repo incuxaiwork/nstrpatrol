@@ -21,14 +21,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompassCalibration
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -48,7 +46,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableDoubleStateOf
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -95,6 +92,7 @@ import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
 import org.maplibre.android.maps.Style
@@ -147,9 +145,8 @@ fun MapsScreen(
     var layerState by remember { mutableStateOf(GisLayerState()) }
     var showLayerDialog by remember { mutableStateOf(false) }
     var showLegend by remember { mutableStateOf(true) }
-    var currentZoom by remember { mutableFloatStateOf(11.5f) }
-    var centerLat by remember { mutableDoubleStateOf(15.90) }
-    var centerLon by remember { mutableDoubleStateOf(79.25) }
+    var centerLat by remember { mutableDoubleStateOf(16.11) }
+    var centerLon by remember { mutableDoubleStateOf(79.18) }
 
     var mapLibreMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
@@ -300,17 +297,16 @@ fun MapsScreen(
                                     if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
                                         style.addSource(GeoJsonSource("comp-geojson-source", gisRepo.compartmentGeoJsonString))
                                     }
-
                                     style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
 
-                                    // Compartments line layer (dashed)
+                                    // Compartments line layer (dashed, orange to contrast with green beats)
                                     if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
                                         style.addLayer(
                                             LineLayer("comp-line-layer", "comp-geojson-source").apply {
                                                 setProperties(
-                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#546E7A")),
-                                                    PropertyFactory.lineWidth(1.2f),
-                                                    PropertyFactory.lineDasharray(arrayOf(2f, 2f))
+                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#F57F17")),
+                                                    PropertyFactory.lineWidth(2f),
+                                                    PropertyFactory.lineDasharray(arrayOf(3f, 2f))
                                                 )
                                             }
                                         )
@@ -322,17 +318,17 @@ fun MapsScreen(
                                             FillLayer("beats-fill-layer", "beats-geojson-source").apply {
                                                 setProperties(
                                                     PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.fillOpacity(0.20f)
+                                                    PropertyFactory.fillOpacity(0.28f)
                                                 )
                                             }
                                         )
 
-                                        // Beats boundary stroke layer
+                                        // Beats boundary stroke layer (bright green for visibility)
                                         style.addLayer(
                                             LineLayer("beats-line-layer", "beats-geojson-source").apply {
                                                 setProperties(
-                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.lineWidth(2.5f)
+                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#2E7D32")),
+                                                    PropertyFactory.lineWidth(3f)
                                                 )
                                             }
                                         )
@@ -342,20 +338,23 @@ fun MapsScreen(
                                             SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
                                                 setProperties(
                                                     PropertyFactory.textField("{Beat}"),
-                                                    PropertyFactory.textSize(11f),
-                                                    PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
+                                                    PropertyFactory.textSize(12f),
+                                                    PropertyFactory.textColor(AndroidColor.parseColor("#1B5E20")),
                                                     PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                                                    PropertyFactory.textHaloWidth(1.5f)
+                                                    PropertyFactory.textHaloWidth(1.8f)
                                                 )
-                                                minZoom = 10f
+                                                minZoom = 9f
                                             }
                                         )
                                     }
 
-                                    map.cameraPosition = CameraPosition.Builder()
-                                        .target(LatLng(15.90, 79.25))
-                                        .zoom(11.5)
+                                    // Fit the camera to the full beat dataset bounds so all
+                                    // beats are visible at startup (old zoom 11.5 sat in a gap).
+                                    val dataBounds = LatLngBounds.Builder()
+                                        .include(LatLng(15.59, 78.80))
+                                        .include(LatLng(16.63, 79.57))
                                         .build()
+                                    map.moveCamera(CameraUpdateFactory.newLatLngBounds(dataBounds, 48))
 
                                     // Tap listener for beats
                                     map.addOnMapClickListener { latLng ->
@@ -455,30 +454,6 @@ fun MapsScreen(
                     .padding(12.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Zoom In (+)
-                FloatingControlButton(
-                    icon = Icons.Filled.Add,
-                    contentDescription = "Zoom In",
-                    onClick = {
-                        mapLibreMapRef?.let { m ->
-                            m.animateCamera(CameraUpdateFactory.zoomIn())
-                            currentZoom = (m.cameraPosition.zoom + 1).toFloat()
-                        }
-                    }
-                )
-
-                // Zoom Out (-)
-                FloatingControlButton(
-                    icon = Icons.Filled.Remove,
-                    contentDescription = "Zoom Out",
-                    onClick = {
-                        mapLibreMapRef?.let { m ->
-                            m.animateCamera(CameraUpdateFactory.zoomOut())
-                            currentZoom = (m.cameraPosition.zoom - 1).toFloat()
-                        }
-                    }
-                )
-
                 // Compass Reset Bearing
                 FloatingControlButton(
                     icon = Icons.Filled.CompassCalibration,
@@ -497,9 +472,11 @@ fun MapsScreen(
                     icon = Icons.Filled.MyLocation,
                     contentDescription = "Recenter",
                     onClick = {
-                        mapLibreMapRef?.animateCamera(
-                            CameraUpdateFactory.newLatLngZoom(LatLng(15.90, 79.25), 11.5)
-                        )
+                        val bounds = LatLngBounds.Builder()
+                            .include(LatLng(15.59, 78.80))
+                            .include(LatLng(16.63, 79.57))
+                            .build()
+                        mapLibreMapRef?.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 48))
                     }
                 )
             }
@@ -535,9 +512,9 @@ fun MapsScreen(
                         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
                     ) {
                         Column(modifier = Modifier.padding(8.dp)) {
-                            LegendItem(color = ForestGreen, isDashed = false, label = "Forest Beat Boundary")
+                            LegendItem(color = Color(0xFF2E7D32), isDashed = false, label = "Forest Beat Boundary")
                             Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFF546E7A), isDashed = true, label = "Compartment Boundary")
+                            LegendItem(color = Color(0xFFF57F17), isDashed = true, label = "Compartment Boundary")
                             Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFB3261E), isDashed = false, isPoint = true, label = "Sighting / Incident")
                             Spacer(Modifier.height(4.dp))
@@ -591,7 +568,9 @@ fun MapsScreen(
                             .clickable {
                                 selectedBeat = beat
                                 mapLibreMapRef?.animateCamera(
-                                    CameraUpdateFactory.newLatLngZoom(LatLng(15.90, 79.25), 12.5)
+                                    CameraUpdateFactory.newLatLngZoom(
+                                        LatLng((16.63 + 15.59) / 2, (79.57 + 78.80) / 2), 10.5
+                                    )
                                 )
                             }
                             .padding(vertical = 6.dp, horizontal = 4.dp),
