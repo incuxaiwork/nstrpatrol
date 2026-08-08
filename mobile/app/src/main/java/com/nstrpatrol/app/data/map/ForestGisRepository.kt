@@ -159,7 +159,7 @@ class ForestGisRepository(private val context: Context) {
             }
         """.trimIndent()
 
-        isDataLoaded = true
+        isDataLoaded = beatGeoJsonString.isNotEmpty()
     }
 
     fun findBeatByName(name: String): ForestBeatModel? {

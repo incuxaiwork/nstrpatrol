@@ -8,6 +8,9 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -162,7 +165,8 @@ fun MapsScreen(
     var isFullScreen by remember { mutableStateOf(false) }
     var currentZoom by remember { mutableFloatStateOf(11.8f) }
 
-    var mapLibreMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
+    var miniMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
+    var fullScreenMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
 
     // Patrol State
@@ -198,132 +202,13 @@ fun MapsScreen(
         }
     }
 
-    // REACTIVE LAYER VISIBILITY EFFECT
-    LaunchedEffect(layerState, mapLibreMapRef, gisRepo.isDataLoaded) {
-        mapLibreMapRef?.style?.let { style ->
-            // Ensure Sources
-            if (style.getSource("beats-geojson-source") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
-                style.addSource(GeoJsonSource("beats-geojson-source", gisRepo.beatGeoJsonString))
-            }
-            if (style.getSource("comp-geojson-source") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                style.addSource(GeoJsonSource("comp-geojson-source", gisRepo.compartmentGeoJsonString))
-            }
-            if (style.getSource("incidents-geojson-source") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
-                style.addSource(GeoJsonSource("incidents-geojson-source", gisRepo.incidentGeoJsonString))
-            }
-
-            // Ensure Beats Layers
-            if (style.getLayer("beats-fill-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    FillLayer("beats-fill-layer", "beats-geojson-source").apply {
-                        setProperties(
-                            PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
-                            PropertyFactory.fillOpacity(0.12f)
-                        )
-                    }
-                )
-            }
-            if (style.getLayer("beats-line-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    LineLayer("beats-line-layer", "beats-geojson-source").apply {
-                        setProperties(
-                            PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
-                            PropertyFactory.lineWidth(2.8f)
-                        )
-                    }
-                )
-            }
-            if (style.getLayer("beats-label-layer") == null && gisRepo.beatGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
-                        minZoom = 9.0f
-                        setProperties(
-                            PropertyFactory.textField("{Beat}"),
-                            PropertyFactory.textSize(12f),
-                            PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
-                            PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                            PropertyFactory.textHaloWidth(2.0f)
-                        )
-                    }
-                )
-            }
-
-            // Ensure Compartments Layers
-            if (style.getLayer("comp-fill-layer") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    FillLayer("comp-fill-layer", "comp-geojson-source").apply {
-                        setProperties(
-                            PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
-                            PropertyFactory.fillOpacity(0.04f)
-                        )
-                    }
-                )
-            }
-            if (style.getLayer("comp-line-layer") == null && gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    LineLayer("comp-line-layer", "comp-geojson-source").apply {
-                        setProperties(
-                            PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
-                            PropertyFactory.lineWidth(1.2f),
-                            PropertyFactory.lineOpacity(0.75f)
-                        )
-                    }
-                )
-            }
-
-            // Ensure Incidents Layers
-            if (style.getLayer("incidents-circle-layer") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    CircleLayer("incidents-circle-layer", "incidents-geojson-source").apply {
-                        setProperties(
-                            PropertyFactory.circleColor(AndroidColor.parseColor("#D32F2F")),
-                            PropertyFactory.circleRadius(7f),
-                            PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#FFFFFF")),
-                            PropertyFactory.circleStrokeWidth(2f)
-                        )
-                    }
-                )
-            }
-            if (style.getLayer("incidents-label-layer") == null && gisRepo.incidentGeoJsonString.isNotEmpty()) {
-                style.addLayer(
-                    SymbolLayer("incidents-label-layer", "incidents-geojson-source").apply {
-                        minZoom = 10.0f
-                        setProperties(
-                            PropertyFactory.textField("{icon} {title}"),
-                            PropertyFactory.textSize(11f),
-                            PropertyFactory.textColor(AndroidColor.parseColor("#B71C1C")),
-                            PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                            PropertyFactory.textHaloWidth(1.8f)
-                        )
-                    }
-                )
-            }
-
-            // Apply Layer Toggles
-            style.getLayer("mbtiles-raster-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showMBTiles) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("beats-fill-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("beats-line-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("beats-label-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("comp-fill-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("comp-line-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("incidents-circle-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
-            )
-            style.getLayer("incidents-label-layer")?.setProperties(
-                PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
-            )
+    // REACTIVE LAYER VISIBILITY EFFECT (Applies to both Mini Map & Fullscreen Map)
+    LaunchedEffect(layerState, miniMapRef, fullScreenMapRef) {
+        miniMapRef?.style?.let { style ->
+            applyLayerVisibility(style, layerState)
+        }
+        fullScreenMapRef?.style?.let { style ->
+            applyLayerVisibility(style, layerState)
         }
     }
 
@@ -349,9 +234,32 @@ fun MapsScreen(
 
                         val mapView = MapView(ctx)
                         mapView.onCreate(null)
+                        mapView.setOnTouchListener { v, event ->
+                            when (event.actionMasked) {
+                                android.view.MotionEvent.ACTION_DOWN,
+                                android.view.MotionEvent.ACTION_POINTER_DOWN,
+                                android.view.MotionEvent.ACTION_MOVE -> {
+                                    v.parent?.requestDisallowInterceptTouchEvent(true)
+                                }
+                            }
+                            false
+                        }
                         mapView.getMapAsync { map ->
-                            mapLibreMapRef = map
+                            if (isFull) {
+                                fullScreenMapRef = map
+                            } else {
+                                miniMapRef = map
+                            }
                             try {
+                                map.uiSettings.apply {
+                                    isZoomGesturesEnabled = true
+                                    isScrollGesturesEnabled = true
+                                    isRotateGesturesEnabled = true
+                                    isTiltGesturesEnabled = true
+                                    isDoubleTapGesturesEnabled = true
+                                    isQuickZoomGesturesEnabled = true
+                                }
+
                                 val tileUrl = mbtilesServer.tileUrlFormat
                                 val tileSet = TileSet("2.1.0", tileUrl)
                                 tileSet.minZoom = 1f
@@ -529,13 +437,7 @@ fun MapsScreen(
 
                 // Manage MapView Lifecycle
                 DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        when (event) {
-                            Lifecycle.Event.ON_START -> mapLibreMapRef?.let { }
-                            Lifecycle.Event.ON_STOP -> mapLibreMapRef?.let { }
-                            else -> {}
-                        }
-                    }
+                    val observer = LifecycleEventObserver { _, _ -> }
                     lifecycleOwner.lifecycle.addObserver(observer)
                     onDispose {
                         lifecycleOwner.lifecycle.removeObserver(observer)
@@ -558,10 +460,13 @@ fun MapsScreen(
             }
 
             // FLOATING MAP CONTROLS (Right Side)
+            val currentMap = if (isFull) fullScreenMapRef else miniMapRef
+
             Column(
                 modifier = Modifier
                     .align(Alignment.TopEnd)
-                    .padding(12.dp),
+                    .padding(12.dp)
+                    .zIndex(10f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 // Fullscreen Toggle
@@ -576,7 +481,7 @@ fun MapsScreen(
                     icon = Icons.Filled.Add,
                     contentDescription = "Zoom In",
                     onClick = {
-                        mapLibreMapRef?.let { m ->
+                        currentMap?.let { m ->
                             m.animateCamera(CameraUpdateFactory.zoomIn())
                             currentZoom = (m.cameraPosition.zoom + 1).toFloat()
                         }
@@ -588,34 +493,67 @@ fun MapsScreen(
                     icon = Icons.Filled.Remove,
                     contentDescription = "Zoom Out",
                     onClick = {
-                        mapLibreMapRef?.let { m ->
+                        currentMap?.let { m ->
                             m.animateCamera(CameraUpdateFactory.zoomOut())
                             currentZoom = (m.cameraPosition.zoom - 1).toFloat()
                         }
                     }
                 )
 
-                // Compass Reset Bearing
+                // Compass Reset Bearing (Resets map rotation & tilt to North)
                 FloatingControlButton(
                     icon = Icons.Filled.CompassCalibration,
                     contentDescription = "Reset Bearing",
                     onClick = {
-                        mapLibreMapRef?.animateCamera(
-                            CameraUpdateFactory.newCameraPosition(
-                                CameraPosition.Builder().bearing(0.0).build()
-                            )
-                        )
+                        currentMap?.let { m ->
+                            val currentTarget = m.cameraPosition.target
+                            try {
+                                m.animateCamera(
+                                    CameraUpdateFactory.newCameraPosition(
+                                        CameraPosition.Builder()
+                                            .target(currentTarget)
+                                            .zoom(m.cameraPosition.zoom)
+                                            .bearing(0.0)
+                                            .tilt(0.0)
+                                            .build()
+                                    ),
+                                    800
+                                )
+                            } catch (e: Exception) {
+                                m.cameraPosition = CameraPosition.Builder()
+                                    .target(currentTarget)
+                                    .zoom(m.cameraPosition.zoom)
+                                    .bearing(0.0)
+                                    .tilt(0.0)
+                                    .build()
+                            }
+                            Toast.makeText(context, "Compass reset to North", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 )
 
-                // Recenter Markapur Division
+                // Recenter My Location / Markapur Division
                 FloatingControlButton(
                     icon = Icons.Filled.MyLocation,
-                    contentDescription = "Recenter",
+                    contentDescription = "Recenter Location",
                     onClick = {
-                        mapLibreMapRef?.animateCamera(
-                            CameraUpdateFactory.newLatLngZoom(LatLng(15.92, 79.15), 11.8)
-                        )
+                        currentMap?.let { m ->
+                            val targetPos = if (patrolPoints.isNotEmpty()) {
+                                val lastPt = patrolPoints.last()
+                                LatLng(lastPt.latitude, lastPt.longitude)
+                            } else {
+                                LatLng(15.92, 79.15)
+                            }
+                            try {
+                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, 12.8), 1000)
+                            } catch (e: Exception) {
+                                m.cameraPosition = CameraPosition.Builder()
+                                    .target(targetPos)
+                                    .zoom(12.8)
+                                    .build()
+                            }
+                            Toast.makeText(context, "Recentered map view", Toast.LENGTH_SHORT).show()
+                        }
                     }
                 )
             }
@@ -782,7 +720,7 @@ fun MapsScreen(
                             .clip(RoundedCornerShape(6.dp))
                             .clickable {
                                 selectedIncident = inc
-                                mapLibreMapRef?.animateCamera(
+                                (miniMapRef ?: fullScreenMapRef)?.animateCamera(
                                     CameraUpdateFactory.newLatLngZoom(LatLng(inc.lat, inc.lon), 13.5)
                                 )
                             }
@@ -1062,28 +1000,48 @@ fun MapsScreen(
                     title = "MBTiles Offline Basemap",
                     subtitle = "Raster tile atlas (NSTR.mbtiles)",
                     checked = layerState.showMBTiles,
-                    onChecked = { layerState = layerState.copy(showMBTiles = it) }
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showMBTiles = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 LayerToggleRow(
                     title = "Forest Beat Boundaries",
                     subtitle = "44 Markapur Division beats",
                     checked = layerState.showBeats,
-                    onChecked = { layerState = layerState.copy(showBeats = it) }
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showBeats = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 LayerToggleRow(
                     title = "Forest Compartments",
                     subtitle = "448 compartment polygons (Solid Amber)",
                     checked = layerState.showCompartments,
-                    onChecked = { layerState = layerState.copy(showCompartments = it) }
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showCompartments = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
                 )
                 Spacer(Modifier.height(8.dp))
                 LayerToggleRow(
                     title = "Sighting & Incident Points",
                     subtitle = "12 active wildlife & hazard markers",
                     checked = layerState.showIncidents,
-                    onChecked = { layerState = layerState.copy(showIncidents = it) }
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showIncidents = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
                 )
 
                 Spacer(Modifier.height(20.dp))
@@ -1199,6 +1157,23 @@ private fun LayerToggleRow(
             )
         )
     }
+}
+
+private fun applyLayerVisibility(style: Style?, state: GisLayerState) {
+    if (style == null) return
+    val mbtilesVis = if (state.showMBTiles) Property.VISIBLE else Property.NONE
+    val beatsVis = if (state.showBeats) Property.VISIBLE else Property.NONE
+    val compVis = if (state.showCompartments) Property.VISIBLE else Property.NONE
+    val incidentsVis = if (state.showIncidents) Property.VISIBLE else Property.NONE
+
+    style.getLayer("mbtiles-raster-layer")?.setProperties(PropertyFactory.visibility(mbtilesVis))
+    style.getLayer("beats-fill-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
+    style.getLayer("beats-line-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
+    style.getLayer("beats-label-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
+    style.getLayer("comp-fill-layer")?.setProperties(PropertyFactory.visibility(compVis))
+    style.getLayer("comp-line-layer")?.setProperties(PropertyFactory.visibility(compVis))
+    style.getLayer("incidents-circle-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
+    style.getLayer("incidents-label-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
 }
 
 private fun computeDistance(points: List<PatrolPointEntity>): Double {
