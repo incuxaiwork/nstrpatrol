@@ -72,8 +72,10 @@ fun CompassDial(
 }
 
 /**
- * Converts a "compass degree" (0=N, 90=E, ...) to a screen position offset
- * from center (cx, cy) at the given radius.
+ * Converts a "compass degree" (0=N, 90=E, ...) to a screen position.
+ * Standard compass math: 0°=top (North), 90°=right (East).
+ *   screenX = cx + r * sin(angle)
+ *   screenY = cy - r * cos(angle)
  */
 private fun compassToScreen(cx: Float, cy: Float, r: Float, deg: Float): Offset {
     val rad = Math.toRadians(deg.toDouble())
@@ -109,8 +111,6 @@ private fun DrawScope.drawDialTicks(cx: Float, cy: Float, outerR: Float, heading
             else -> 0.7.dp.toPx()
         }
 
-        // Each tick's visual position is rotated by heading
-        // Subtract heading so the direction you face moves to the top
         val visualDeg = deg.toFloat() - heading
         val p1 = compassToScreen(cx, cy, tickInner, visualDeg)
         val p2 = compassToScreen(cx, cy, tickOuter, visualDeg)
