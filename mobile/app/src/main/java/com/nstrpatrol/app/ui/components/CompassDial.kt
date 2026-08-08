@@ -16,7 +16,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.unit.dp
 import kotlin.math.cos
@@ -31,8 +30,14 @@ private val LabelWhite = Color(0xFFCCCCCC)
 private val LabelDim = Color(0xFF666666)
 
 /**
- * Clean rotating compass dial. The dial ring rotates with heading;
- * a fixed red pointer at 12-o'clock indicates the current direction.
+ * Compass dial where the ring rotates with heading via trigonometry only.
+ * A fixed red pointer at 12-o'clock indicates the current direction.
+ *
+ * Convention: 0°=N up, 90°=E right, 180°=S down, 270°=W left.
+ * In Canvas coords: x=right, y=down. So:
+ *   screenX = cx + r * sin(angle)
+ *   screenY = cy - r * cos(angle)
+ * This maps 0°→top, 90°→right, etc.
  */
 @Composable
 fun CompassDial(
@@ -51,19 +56,31 @@ fun CompassDial(
             val cy = size.height / 2
             val outerR = size.width / 2
 
-            // --- Outer ring ---
+            // Outer ring
             drawCircle(RingStroke, outerR, style = Stroke(2.dp.toPx()))
 
-            // --- Tick marks (drawn on the rotating dial) ---
+            // Dial ticks — all positioned via trig, no canvas rotate()
             drawDialTicks(cx, cy, outerR, animatedHeading)
 
-            // --- Cardinal labels on the rotating dial ---
+            // Cardinal and degree labels — positioned via trig
             drawDialLabels(cx, cy, outerR, animatedHeading)
 
-            // --- Fixed red pointer at top ---
+            // Fixed red pointer at top (does not rotate)
             drawFixedPointer(cx, cy, outerR)
         }
     }
+}
+
+/**
+ * Converts a "compass degree" (0=N, 90=E, ...) to a screen position offset
+ * from center (cx, cy) at the given radius.
+ */
+private fun compassToScreen(cx: Float, cy: Float, r: Float, deg: Float): Offset {
+    val rad = Math.toRadians(deg.toDouble())
+    return Offset(
+        x = cx + r * sin(rad).toFloat(),
+        y = cy - r * cos(rad).toFloat()
+    )
 }
 
 private fun DrawScope.drawDialTicks(cx: Float, cy: Float, outerR: Float, heading: Float) {
@@ -92,18 +109,11 @@ private fun DrawScope.drawDialTicks(cx: Float, cy: Float, outerR: Float, heading
             else -> 0.7.dp.toPx()
         }
 
-        // Rotate each tick by -heading so the dial spins
-        rotate(-heading, Offset(cx, cy)) {
-            val rad = Math.toRadians(deg.toDouble())
-            val sinR = sin(rad).toFloat()
-            val cosR = cos(rad).toFloat()
-            drawLine(
-                color = color,
-                start = Offset(cx + tickInner * sinR, cy - tickInner * cosR),
-                end = Offset(cx + tickOuter * sinR, cy - tickOuter * cosR),
-                strokeWidth = strokeW
-            )
-        }
+        // Each tick's visual position is rotated by heading
+        val visualDeg = deg.toFloat() + heading
+        val p1 = compassToScreen(cx, cy, tickInner, visualDeg)
+        val p2 = compassToScreen(cx, cy, tickOuter, visualDeg)
+        drawLine(color = color, start = p1, end = p2, strokeWidth = strokeW)
     }
 }
 
@@ -128,10 +138,8 @@ private fun DrawScope.drawDialLabels(cx: Float, cy: Float, outerR: Float, headin
     )
 
     for (label in labels) {
-        val rotatedDeg = label.deg.toFloat() - heading
-        val rad = Math.toRadians(rotatedDeg.toDouble())
-        val x = cx + labelR * sin(rad).toFloat()
-        val y = cy - labelR * cos(rad).toFloat()
+        val visualDeg = label.deg.toFloat() + heading
+        val pos = compassToScreen(cx, cy, labelR, visualDeg)
 
         val paint = android.graphics.Paint().apply {
             textSize = when {
@@ -149,22 +157,17 @@ private fun DrawScope.drawDialLabels(cx: Float, cy: Float, outerR: Float, headin
             typeface = if (label.isCardinal) android.graphics.Typeface.DEFAULT_BOLD else android.graphics.Typeface.DEFAULT
         }
 
-        // Only draw if not rotated behind the pointer (optional: always draw)
-        drawContext.canvas.nativeCanvas.drawText(label.text, x, y + paint.textSize / 3, paint)
+        drawContext.canvas.nativeCanvas.drawText(label.text, pos.x, pos.y + paint.textSize / 3, paint)
     }
 }
 
 private fun DrawScope.drawFixedPointer(cx: Float, cy: Float, outerR: Float) {
     val pointerTip = 6.dp.toPx()
-    val pointerBase = outerR - 20.dp.toPx()
     val halfWidth = 8.dp.toPx()
-
-    // Triangle pointer above the ring
-    val tipY = cy - outerR - pointerTip
     val baseY = cy - outerR + 2.dp.toPx()
 
     val path = android.graphics.Path().apply {
-        moveTo(cx, tipY)
+        moveTo(cx, cy - outerR - pointerTip)
         lineTo(cx - halfWidth, baseY)
         lineTo(cx + halfWidth, baseY)
         close()
@@ -179,7 +182,6 @@ private fun DrawScope.drawFixedPointer(cx: Float, cy: Float, outerR: Float) {
         }
     )
 
-    // Vertical line from pointer into the ring
     drawLine(
         color = PointerRed,
         start = Offset(cx, baseY),
