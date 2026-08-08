@@ -343,7 +343,11 @@ class GpsTelemetryManager(private val appContext: Context) {
     private fun setHeading(rotation: FloatArray) {
         val orientation = FloatArray(3)
         SensorManager.getOrientation(rotation, orientation)
-        val degrees = Math.toDegrees(orientation[0].toDouble()).toFloat()
+        // orientation[0] = azimuth in radians. Android's right-hand-rule around
+        // Z (pointing up) makes it counter-clockwise. Compass convention is
+        // clockwise from North, so negate before converting to degrees.
+        val azimuth = orientation[0]
+        val degrees = (-azimuth * 180f / Math.PI.toFloat())
         val heading = (degrees + 360f) % 360f
         if (lastHeadingDegrees < 0f || abs(heading - lastHeadingDegrees) >= 0.5f) {
             lastHeadingDegrees = heading
