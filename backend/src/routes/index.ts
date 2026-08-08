@@ -4,6 +4,7 @@ import { gisRouter } from './gis';
 import { authRouter } from './auth';
 import { usersRouter } from './users';
 import { devicesRouter } from './devices';
+import { forestsRouter } from './forests';
 
 export const apiRouter = Router();
 
@@ -16,3 +17,4 @@ apiRouter.use('/gis', gisRouter);
 apiRouter.use('/auth', authRouter);
 apiRouter.use('/users', usersRouter);
 apiRouter.use('/devices', devicesRouter);
+apiRouter.use('/forests', forestsRouter);
