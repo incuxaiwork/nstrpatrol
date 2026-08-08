@@ -110,7 +110,8 @@ private fun DrawScope.drawDialTicks(cx: Float, cy: Float, outerR: Float, heading
         }
 
         // Each tick's visual position is rotated by heading
-        val visualDeg = deg.toFloat() + heading
+        // Subtract heading so the direction you face moves to the top
+        val visualDeg = deg.toFloat() - heading
         val p1 = compassToScreen(cx, cy, tickInner, visualDeg)
         val p2 = compassToScreen(cx, cy, tickOuter, visualDeg)
         drawLine(color = color, start = p1, end = p2, strokeWidth = strokeW)
@@ -138,7 +139,7 @@ private fun DrawScope.drawDialLabels(cx: Float, cy: Float, outerR: Float, headin
     )
 
     for (label in labels) {
-        val visualDeg = label.deg.toFloat() + heading
+        val visualDeg = label.deg.toFloat() - heading
         val pos = compassToScreen(cx, cy, labelR, visualDeg)
 
         val paint = android.graphics.Paint().apply {
