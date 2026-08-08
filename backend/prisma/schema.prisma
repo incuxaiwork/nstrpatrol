@@ -1,5 +1,11 @@
-// NSTR Patrol — Prisma schema
-// PostgreSQL + PostGIS
+// ============================================================
+// NSTR Patrol — Prisma schema (final redesign)
+// All geospatial data stored as native PostGIS geometry(4326).
+// Prisma maps them via Unsupported(); GIST indexes + triggers
+// are added in a hand-edited raw-SQL migration. Spatial queries
+// go through $queryRaw. GeoJSON served to the app is always
+// derived (ST_AsGeoJSON), never a stored source of truth.
+// ============================================================
 
 generator client {
   provider = "prisma-client-js"
@@ -10,45 +16,123 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Note: geometric fields (polygon, point) are stored as PostGIS geometries.
-// Prisma does not natively map PostGIS types; use String columns holding
-// WKT/GeoJSON and expose raw SQL queries (e.g. via $queryRaw / ST_* functions)
-// for spatial operations.
-
-model User {
-  id           String   @id @default(cuid())
-  email        String   @unique
-  passwordHash String
-  fullName     String
-  role         Role     @default(RANGER)
-  phone        String?
-  isActive     Boolean  @default(true)
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
-
-  devices   Device[]
-  patrols   Patrol[]
-  incidents Incident[]
-}
-
+// ------------------------------------------------ enums
 enum Role {
   ADMIN
   RANGER
 }
 
+enum SyncStatus {
+  PENDING
+  SYNCED
+  FAILED
+}
+
+enum PatrolType {
+  WALK
+  BICYCLE
+  VEHICLE
+  STATIONARY
+}
+
+enum PatrolStatus {
+  ASSIGNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+enum IncidentType {
+  HUMAN_IMPACT
+  ANIMAL_MORTALITY
+  SIGHTING
+  WATER_SOURCE
+  QUICK_CAPTURE
+  GENERAL
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+}
+
+enum IncidentStatus {
+  SUBMITTED
+  VERIFIED
+  RESOLVED
+  REJECTED
+}
+
+enum ActivityMode {
+  WALK
+  BICYCLE
+  VEHICLE
+  STATIONARY
+}
+
+enum CoverageType {
+  OUTSIDE_BEAT
+  NON_FOREST
+  OFF_ROUTE
+  SPEED_MISMATCH
+  JUMP
+  WAYPOINT_MISSED
+  MOCK_LOCATION
+  DEVICE_STATIONARY
+  TIME_TAMPER
+}
+
+// ------------------------------------------------ users & devices
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  passwordHash     String
+  fullName         String
+  role             Role     @default(RANGER)
+  cader            Cader
+  phone            String?
+  refreshTokenHash String?
+  isActive         Boolean  @default(true)
+  isAdmin          Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  devices           Device[]
+  assignments       PatrolAssignment[]
+  incidents         Incident[]
+  verifiedIncidents Incident[]         @relation("VerifiedBy")
+}
+
+enum Cader {
+  FRO
+  DyRO
+  FSO
+  FBO
+  ABO
+}
+
 model Device {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   userId      String
   deviceName  String
   deviceModel String
-  deviceId    String   @unique
+  deviceId    String    @unique
   pushToken   String?
   lastSeenAt  DateTime?
-  createdAt   DateTime @default(now())
+  createdAt   DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id])
 }
 
+// ------------------------------------------------ forest reference
 model Forest {
   id          String   @id @default(cuid())
   name        String
@@ -63,131 +147,396 @@ model Forest {
 }
 
 model ForestBoundary {
-  id        String  @id @default(cuid())
+  id        String                                 @id @default(cuid())
   forestId  String
   name      String
-  polygon   String // PostGIS polygon (WKT/GeoJSON)
-  createdAt DateTime @default(now())
+  geom      Unsupported("geometry(Polygon,4326)")?
+  createdAt DateTime                               @default(now())
 
   forest Forest @relation(fields: [forestId], references: [id])
+
+  @@index([forestId])
+  @@index([geom], type: Gist)
 }
 
 model ForestGrid {
-  id        String  @id @default(cuid())
+  id        String                                 @id @default(cuid())
   forestId  String
   gridCode  String
-  polygon   String // PostGIS polygon (WKT/GeoJSON)
-  createdAt DateTime @default(now())
+  geom      Unsupported("geometry(Polygon,4326)")?
+  createdAt DateTime                               @default(now())
 
-  forest       Forest       @relation(fields: [forestId], references: [id])
-  patrolPoints PatrolPoint[]
-}
-
-model Patrol {
-  id          String    @id @default(cuid())
-  userId      String
-  forestId    String
-  assignedAt  DateTime?
-  startedAt   DateTime?
-  endedAt     DateTime?
-  status      PatrolStatus @default(ASSIGNED)
-  syncStatus  SyncStatus   @default(PENDING)
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  // Aggregate telemetry stats synced from the device at patrol end.
-  // Mirrors the mobile PatrolSessionEntity columns.
-  totalDistanceMeters  Float   @default(0)
-  totalSteps           Int     @default(0)
-  moveMinutes          Int     @default(0)
-  caloriesEstimate     Float   @default(0)
-  heartPointsEstimate  Float   @default(0)
-  avgSpeedKmh          Float   @default(0)
-  pointCount           Int     @default(0)
-
-  user         User          @relation(fields: [userId], references: [id])
   forest       Forest        @relation(fields: [forestId], references: [id])
-  points       PatrolPoint[]
-  sensorReadings SensorReading[]
-  incidents    Incident[]
+  patrolPoints PatrolPoint[]
+
+  @@index([forestId])
+  @@index([geom], type: Gist)
 }
 
-enum PatrolStatus {
-  ASSIGNED
-  ACTIVE
-  COMPLETED
-  CANCELLED
+// ------------------------------------------------ duty vs member
+model Patrol {
+  id          String       @id @default(cuid())
+  forestId    String
+  name        String?
+  description String?
+  type        PatrolType
+  status      PatrolStatus @default(ASSIGNED)
+  startedAt   DateTime? // aggregate: first member start
+  endedAt     DateTime? // aggregate: last member end
+  syncStatus  SyncStatus   @default(PENDING)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  forest      Forest             @relation(fields: [forestId], references: [id])
+  assignments PatrolAssignment[]
+  routes      PatrolDutyRoute[]
+  waypoints   PatrolWaypoint[]
+
+  @@index([forestId])
+  @@index([status])
 }
 
-enum SyncStatus {
-  PENDING
-  SYNCED
-  FAILED
-}
-
-model PatrolPoint {
-  id        String   @id @default(cuid())
-  patrolId  String
-  gridId    String?
-  latitude  Float
-  longitude Float
-  altitude  Float?
-  speed     Float?
-  bearing   Float?
-  accuracy  Float?
-  point     String? // PostGIS point (WKT/GeoJSON)
-  timestamp DateTime
-  syncStatus SyncStatus @default(PENDING)
-  createdAt DateTime @default(now())
-
-  patrol Patrol        @relation(fields: [patrolId], references: [id])
-  grid   ForestGrid?   @relation(fields: [gridId], references: [id])
-
-  @@index([patrolId, timestamp])
-}
-
-model SensorReading {
-  id         String   @id @default(cuid())
+model PatrolAssignment {
+  id         String           @id @default(cuid())
   patrolId   String
-  timestamp  DateTime
-  type       String // ACCELEROMETER | GYROSCOPE | MAGNETOMETER | STEP_COUNTER | BAROMETER
-  x          Float?
-  y          Float?
-  z          Float?
-  value      Float?
-  syncStatus SyncStatus @default(PENDING)
-  createdAt  DateTime @default(now())
+  userId     String
+  status     AssignmentStatus @default(ASSIGNED)
+  startedAt  DateTime?
+  endedAt    DateTime? // last telemetry point == marked complete
+  syncStatus SyncStatus       @default(PENDING)
+  createdAt  DateTime         @default(now())
+  updatedAt  DateTime         @updatedAt
 
   patrol Patrol @relation(fields: [patrolId], references: [id])
+  user   User   @relation(fields: [userId], references: [id])
 
-  @@index([patrolId, timestamp])
+  points                PatrolPoint[]
+  stepReadings          StepReading[]
+  barometerReadings     BarometerReading[]
+  accelerometerReadings AccelerometerReading[]
+  gyroscopeReadings     GyroscopeReading[]
+  magnetometerReadings  MagnetometerReading[]
+  activitySegments      ActivitySegment[]
+  coverageEvents        CoverageEvent[]
+  integrityLogs         TimeIntegrityLog[]
+  waypointCheckins      WaypointCheckin[]
+  incidents             Incident[]
+  targetRoutes          PatrolDutyRoute[]
+  targetWaypoints       PatrolWaypoint[]
+
+  @@unique([patrolId, userId])
+  @@index([userId])
+  @@index([status])
 }
 
-model Incident {
-  id        String   @id @default(cuid())
-  patrolId  String?
-  userId    String
-  type      String
-  title     String
-  description String?
-  latitude  Float?
-  longitude Float?
-  point     String? // PostGIS point
-  photos    String[] // MinIO/S3 object keys
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+// ------------------------------------------------ coverage targets
+model PatrolDutyRoute {
+  id           String   @id @default(cuid())
+  patrolId     String
+  routeId      String
+  assignmentId String? // null = shared duty target; set = member-specific
+  createdAt    DateTime @default(now())
 
-  patrol Patrol? @relation(fields: [patrolId], references: [id])
-  user   User    @relation(fields: [userId], references: [id])
+  patrol     Patrol            @relation(fields: [patrolId], references: [id])
+  route      PatrolRoute       @relation(fields: [routeId], references: [id])
+  assignment PatrolAssignment? @relation(fields: [assignmentId], references: [id])
+
+  @@unique([patrolId, routeId, assignmentId])
+  @@index([routeId])
+}
+
+model PatrolWaypoint {
+  id           String                               @id @default(cuid())
+  patrolId     String
+  name         String
+  geom         Unsupported("geometry(Point,4326)")?
+  assignmentId String? // null = shared; set = member-specific
+  createdAt    DateTime                             @default(now())
+
+  patrol     Patrol            @relation(fields: [patrolId], references: [id])
+  assignment PatrolAssignment? @relation(fields: [assignmentId], references: [id])
+  checkins   WaypointCheckin[]
+
+  @@index([geom], type: Gist)
+  @@index([patrolId])
+}
+
+model WaypointCheckin {
+  id             String     @id @default(cuid())
+  assignmentId   String
+  waypointId     String
+  reachedAt      DateTime // trusted time of the reaching fix
+  distanceMeters Float?
+  accuracy       Float?
+  syncStatus     SyncStatus @default(PENDING)
+  createdAt      DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+  waypoint   PatrolWaypoint   @relation(fields: [waypointId], references: [id])
+
+  @@unique([assignmentId, waypointId])
+  @@index([waypointId])
+}
+
+// ------------------------------------------------ telemetry (per-assignment)
+model PatrolPoint {
+  id           String                               @id @default(cuid())
+  assignmentId String
+  gridId       String?
+  latitude     Float
+  longitude    Float
+  altitude     Float?
+  speed        Float?
+  bearing      Float?
+  accuracy     Float?
+  geom         Unsupported("geometry(Point,4326)")? // set by trigger: ST_MakePoint(longitude, latitude)
+  timestamp    DateTime
+  syncStatus   SyncStatus                           @default(PENDING)
+  createdAt    DateTime                             @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+  grid       ForestGrid?      @relation(fields: [gridId], references: [id])
+
+  @@index([geom], type: Gist)
+  @@index([assignmentId, timestamp])
+}
+
+model StepReading {
+  id           String     @id @default(cuid())
+  assignmentId String
+  timestamp    DateTime
+  steps        Int // delta since last reading
+  cadence      Float?
+  syncStatus   SyncStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+model BarometerReading {
+  id           String     @id @default(cuid())
+  assignmentId String
+  timestamp    DateTime
+  pressureHpa  Float
+  altitudeM    Float?
+  syncStatus   SyncStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+model AccelerometerReading {
+  id           String     @id @default(cuid())
+  assignmentId String
+  timestamp    DateTime
+  x            Float?
+  y            Float?
+  z            Float?
+  syncStatus   SyncStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+model GyroscopeReading {
+  id           String     @id @default(cuid())
+  assignmentId String
+  timestamp    DateTime
+  x            Float?
+  y            Float?
+  z            Float?
+  syncStatus   SyncStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+model MagnetometerReading {
+  id           String     @id @default(cuid())
+  assignmentId String
+  timestamp    DateTime
+  x            Float?
+  y            Float?
+  z            Float?
+  syncStatus   SyncStatus @default(PENDING)
+  createdAt    DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+model ActivitySegment {
+  id           String       @id @default(cuid())
+  assignmentId String
+  mode         ActivityMode
+  startTime    DateTime
+  endTime      DateTime
+  confidence   Float?
+  syncStatus   SyncStatus   @default(PENDING)
+  createdAt    DateTime     @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, startTime])
+}
+
+model CoverageEvent {
+  id           String       @id @default(cuid())
+  assignmentId String
+  type         CoverageType
+  latitude     Float?
+  longitude    Float?
+  timestamp    DateTime // trusted
+  syncStatus   SyncStatus   @default(PENDING)
+  createdAt    DateTime     @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, type])
+}
+
+model TimeIntegrityLog {
+  id                String     @id @default(cuid())
+  assignmentId      String
+  timestamp         DateTime
+  gnssTimeAvailable Boolean
+  divergenceSeconds Int
+  autoTimeEnabled   Boolean
+  tamperDetected    Boolean
+  satellites        Int
+  syncStatus        SyncStatus @default(PENDING)
+  createdAt         DateTime   @default(now())
+
+  assignment PatrolAssignment @relation(fields: [assignmentId], references: [id])
+
+  @@index([assignmentId, timestamp])
+}
+
+// ------------------------------------------------ incidents
+model Incident {
+  id             String                               @id @default(cuid())
+  assignmentId   String?
+  userId         String
+  type           IncidentType
+  title          String
+  description    String?
+  severity       IncidentSeverity                     @default(LOW)
+  status         IncidentStatus                       @default(SUBMITTED)
+  details        Json?
+  latitude       Float?
+  longitude      Float?
+  accuracy       Float?
+  geom           Unsupported("geometry(Point,4326)")?
+  photos         String[] // MinIO/S3 object keys
+  occurredAt     DateTime // trusted device capture time
+  reportedAt     DateTime
+  syncStatus     SyncStatus                           @default(PENDING)
+  verifiedById   String?
+  verifiedAt     DateTime?
+  resolutionNote String?
+  createdAt      DateTime                             @default(now())
+  updatedAt      DateTime                             @updatedAt
+
+  assignment PatrolAssignment? @relation(fields: [assignmentId], references: [id])
+  user       User              @relation(fields: [userId], references: [id])
+  verifiedBy User?             @relation("VerifiedBy", fields: [verifiedById], references: [id])
+
+  @@index([geom], type: Gist)
+  @@index([assignmentId])
+  @@index([userId])
+  @@index([verifiedById])
+  @@index([status])
+  @@index([occurredAt])
+}
+
+// ------------------------------------------------ map reference data
+model Beat {
+  id        String                                  @id @default(cuid())
+  name      String
+  section   String?
+  rangeName String?
+  division  String?
+  circle    String?
+  district  String?
+  areaHa    Float?
+  geom      Unsupported("geometry(Geometry,4326)")? // source data mixes Polygon & MultiPolygon
+  createdAt DateTime                                @default(now())
+  updatedAt DateTime                                @updatedAt
+
+  compartments Compartment[]
+  routes       PatrolRoute[]
+
+  @@index([geom], type: Gist)
+  @@index([name])
+}
+
+model Compartment {
+  id        String                                  @id @default(cuid())
+  beatId    String?
+  compNo    String
+  areaHa    Float?
+  geom      Unsupported("geometry(Geometry,4326)")? // source data mixes Polygon & MultiPolygon
+  createdAt DateTime                                @default(now())
+
+  beat Beat? @relation(fields: [beatId], references: [id])
+
+  @@index([geom], type: Gist)
+  @@index([beatId])
+}
+
+model PatrolRoute {
+  id         String                                    @id @default(cuid())
+  beatId     String?
+  patrolType String?
+  name       String
+  geom       Unsupported("geometry(LineString,4326)")?
+  targetKm   Float?
+  active     Boolean                                   @default(true)
+  createdAt  DateTime                                  @default(now())
+  updatedAt  DateTime                                  @updatedAt
+
+  beat      Beat?             @relation(fields: [beatId], references: [id])
+  dutyLinks PatrolDutyRoute[]
+
+  @@index([geom], type: Gist)
+  @@index([beatId])
+}
+
+model MapAsset {
+  id          String   @id @default(cuid())
+  resourceKey String   @unique
+  contentType String
+  storagePath String? // MinIO/S3 object key when stored out-of-DB; null when data is inline
+  sizeBytes   Int
+  sha256      String
+  version     Int      @default(1)
+  data        Bytes?   @db.ByteA // inline blob storage (e.g. MBTiles atlas) in PostGIS
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 }
 
 model SyncLog {
-  id           String   @id @default(cuid())
+  id           String    @id @default(cuid())
   deviceId     String?
   patrolId     String?
   recordsCount Int
   status       String
   errorMessage String?
-  startedAt    DateTime @default(now())
+  startedAt    DateTime  @default(now())
   finishedAt   DateTime?
+}
+
+model AppOption {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
 }
