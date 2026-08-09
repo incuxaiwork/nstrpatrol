@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
+import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+import { AppProvider } from "@/lib/store";
+import { AppShell } from "@/components/shell";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -13,17 +16,25 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "NSTR Patrol",
-  description: "NSTR Patrol — offline-first GIS tracking and forest patrol management.",
+  title: {
+    default: "NSTR Patrol — Admin Portal",
+    template: "%s · NSTR Patrol",
+  },
+  description:
+    "Forest Welfare System — operational command center for forest patrol oversight.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full">
+        <AppProvider>
+          <AppShell>{children}</AppShell>
+        </AppProvider>
+      </body>
     </html>
   );
 }
