@@ -13,9 +13,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 /**
@@ -52,6 +57,8 @@ class TrustedTimeManager(private val appContext: Context) {
     private val locationManager =
         appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private val _state = MutableStateFlow(TimeIntegrityState(autoTimeEnabled = isAutoTimeEnabled()))
     val state: StateFlow<TimeIntegrityState> = _state.asStateFlow()
 
@@ -60,11 +67,45 @@ class TrustedTimeManager(private val appContext: Context) {
     @Volatile
     private var anchorElapsedRealtime: Long = SystemClock.elapsedRealtime()
 
+    private val settingsObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            evaluate()
+        }
+    }
+
     init {
         listenToNmea()
         startGpsFixRequest()
         registerClockChangeReceiver()
+        registerSettingsObserver()
+        startPeriodicTicker()
         evaluate()
+    }
+
+    private fun startPeriodicTicker() {
+        scope.launch {
+            while (true) {
+                evaluate()
+                delay(1000)
+            }
+        }
+    }
+
+    private fun registerSettingsObserver() {
+        try {
+            appContext.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.AUTO_TIME),
+                false,
+                settingsObserver
+            )
+            appContext.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.AUTO_TIME_ZONE),
+                false,
+                settingsObserver
+            )
+        } catch (e: Exception) {
+            // Ignored if setting uri is protected on vendor ROMs
+        }
     }
 
     /**
@@ -176,7 +217,18 @@ class TrustedTimeManager(private val appContext: Context) {
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
             addAction(Intent.ACTION_DATE_CHANGED)
         }
-        appContext.registerReceiver(clockReceiver, filter)
+        try {
+            androidx.core.content.ContextCompat.registerReceiver(
+                appContext,
+                clockReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
+        } catch (e: Exception) {
+            try {
+                appContext.registerReceiver(clockReceiver, filter)
+            } catch (ignored: Exception) {}
+        }
     }
 
     private val clockReceiver = object : BroadcastReceiver() {

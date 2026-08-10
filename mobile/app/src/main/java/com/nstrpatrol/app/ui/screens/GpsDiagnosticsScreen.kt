@@ -109,7 +109,8 @@ enum class GpsBannerState(val title: String, val color: Color, val icon: ImageVe
     Searching("Searching for Satellites", Color(0xFFFF8F00), Icons.Filled.Refresh),
     Weak("Weak GPS Signal", Color(0xFFE65100), Icons.Filled.Warning),
     Disabled("Location Disabled", Color(0xFFB3261E), Icons.Filled.Warning),
-    Permission("Permission Required", Color(0xFFB3261E), Icons.Filled.Info)
+    Permission("Permission Required", Color(0xFFB3261E), Icons.Filled.Info),
+    TimeTamper("Time Integrity Alert", Color(0xFFB3261E), Icons.Filled.Warning)
 }
 
 @Composable
@@ -117,6 +118,7 @@ fun GpsDiagnosticsScreen(
     manager: GpsTelemetryManager,
     recorder: TelemetryRecorder,
     timeState: TimeIntegrityState,
+    trustedUtcNow: () -> Long = { System.currentTimeMillis() },
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit
 ) {
@@ -153,6 +155,7 @@ fun GpsDiagnosticsScreen(
     val bannerState = when {
         !hasPermission && !telemetry.permissionGranted -> GpsBannerState.Permission
         !telemetry.enabled -> GpsBannerState.Disabled
+        !timeState.autoTimeEnabled || timeState.tamperDetected -> GpsBannerState.TimeTamper
         !telemetry.hasFix -> GpsBannerState.Searching
         (telemetry.horizontalAccuracyMeters ?: Float.MAX_VALUE) > 25f -> GpsBannerState.Weak
         else -> GpsBannerState.Ready
@@ -336,6 +339,11 @@ private fun LiveStatusBanner(
             "Turn on Location Services in Android Settings"
         GpsBannerState.Permission ->
             "Fine Location Permission needed for Patrol Tracking"
+        GpsBannerState.TimeTamper ->
+            if (!timeState.autoTimeEnabled)
+                "Automatic Network Time is DISABLED in Phone Settings (Manual Clock Active)"
+            else
+                "Device clock differs from Satellite UTC by ${timeState.divergenceSeconds}s"
     }
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -1215,12 +1223,19 @@ private fun GpsStatusChecklistCard(telemetry: GpsTelemetry, timeState: TimeInteg
                 if (mockLocationAllowed) CheckStatus.Fail else CheckStatus.Pass
             )
             ChecklistItem(
-                "GNSS Time Sync",
+                "Automatic Network Time",
+                if (timeState.autoTimeEnabled) "Enabled (Network Synced)" else "OFF (Manual Clock Active)",
+                if (timeState.autoTimeEnabled) CheckStatus.Pass else CheckStatus.Fail
+            )
+            ChecklistItem(
+                "GNSS Time Integrity",
                 if (timeState.gnssTimeAvailable)
                     "Synced via Satellites (${timeState.divergenceSeconds}s drift)"
+                else if (!timeState.autoTimeEnabled)
+                    "Manual Clock Active (${timeState.divergenceSeconds}s divergence)"
                 else
-                    "No GNSS time yet (clock-based)",
-                if (timeState.gnssTimeAvailable && !timeState.tamperDetected) CheckStatus.Pass else CheckStatus.Warning
+                    "Clock-based (No Satellite anchor)",
+                if (timeState.autoTimeEnabled && !timeState.tamperDetected) CheckStatus.Pass else CheckStatus.Fail
             )
         }
     }

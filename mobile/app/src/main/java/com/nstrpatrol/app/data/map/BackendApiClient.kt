@@ -31,53 +31,56 @@ class BackendApiClient {
 
     /** GETs a UTF-8 text resource (e.g. GeoJSON). Returns null on any failure. */
     fun getText(path: String): String? {
-        return try {
-            val conn = open(path, "GET")
+        val candidates = getCandidateBaseUrls()
+        for (baseUrl in candidates) {
             try {
-                if (conn.responseCode in 200..299) {
-                    conn.inputStream.bufferedReader().use { it.readText() }
-                } else {
-                    Log.w("BackendApiClient", "GET $path -> ${conn.responseCode}")
-                    null
+                val conn = openUrl("$baseUrl$path", "GET")
+                try {
+                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+                    if (conn.responseCode in 200..299) {
+                        activeBaseUrl = baseUrl
+                        return conn.inputStream.bufferedReader().use { it.readText() }
+                    }
+                } finally {
+                    conn.disconnect()
                 }
-            } finally {
-                conn.disconnect()
+            } catch (e: Exception) {
+                Log.w("BackendApiClient", "GET $path via $baseUrl failed: ${e.message}")
             }
-        } catch (e: Exception) {
-            Log.w("BackendApiClient", "GET $path failed", e)
-            null
         }
+        return null
     }
 
     /** Streams a binary resource (e.g. the MBTiles atlas) to [dest]. */
     fun downloadTo(path: String, dest: File): Boolean {
-        return try {
-            dest.parentFile?.mkdirs()
-            val tmp = File(dest.parentFile, dest.name + ".part")
-            val conn = open(path, "GET")
+        dest.parentFile?.mkdirs()
+        val tmp = File(dest.parentFile, dest.name + ".part")
+        val candidates = getCandidateBaseUrls()
+        for (baseUrl in candidates) {
             try {
-                if (conn.responseCode !in 200..299) {
-                    Log.w("BackendApiClient", "download $path -> ${conn.responseCode}")
-                    return false
-                }
-                conn.inputStream.use { input ->
-                    FileOutputStream(tmp).use { output ->
-                        input.copyTo(output)
+                val conn = openUrl("$baseUrl$path", "GET")
+                try {
+                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+                    if (conn.responseCode in 200..299) {
+                        conn.inputStream.use { input ->
+                            FileOutputStream(tmp).use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        if (tmp.renameTo(dest)) {
+                            activeBaseUrl = baseUrl
+                            return true
+                        }
+                        tmp.delete()
                     }
+                } finally {
+                    conn.disconnect()
                 }
-            } finally {
-                conn.disconnect()
+            } catch (e: Exception) {
+                Log.w("BackendApiClient", "download $path via $baseUrl failed: ${e.message}")
             }
-            if (tmp.renameTo(dest)) {
-                true
-            } else {
-                tmp.delete()
-                false
-            }
-        } catch (e: Exception) {
-            Log.w("BackendApiClient", "download $path failed", e)
-            false
         }
+        return false
     }
 
     /** GETs a JSON object. Returns null on non-2xx. */
@@ -122,33 +125,52 @@ class BackendApiClient {
         throw ApiException(res.first, errorCode, message)
     }
 
-    /** Executes a request and returns (statusCode, responseBody) or null on transport failure. */
-    private fun request(path: String, method: String, body: JSONObject?): Pair<Int, String?>? {
-        return try {
-            val conn = open(path, method)
-            try {
-                if (body != null) {
-                    conn.doOutput = true
-                    conn.setRequestProperty("Content-Type", "application/json")
-                    conn.outputStream.use { it.write(body.toString().toByteArray()) }
-                }
-                accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
-                val code = conn.responseCode
-                val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                val text = stream?.bufferedReader()?.use { it.readText() }
-                Pair(code, text)
-            } finally {
-                conn.disconnect()
-            }
-        } catch (e: Exception) {
-            Log.w("BackendApiClient", "$method $path failed", e)
-            null
-        }
+    @Volatile
+    private var activeBaseUrl: String? = null
+
+    private fun getCandidateBaseUrls(): List<String> {
+        val configured = BuildConfig.API_BASE_URL.trimEnd('/')
+        return listOfNotNull(
+            activeBaseUrl,
+            configured,
+            "http://10.58.42.142:3000",
+            "http://10.141.232.13:3000",
+            "http://10.0.2.2:3000",
+            "http://127.0.0.1:3000"
+        ).distinct()
     }
 
-    private fun open(path: String, method: String): HttpURLConnection {
-        return (URL("$baseUrl$path").openConnection() as HttpURLConnection).apply {
-            connectTimeout = 8_000
+    /** Executes a request and returns (statusCode, responseBody) or null on transport failure. */
+    private fun request(path: String, method: String, body: JSONObject?): Pair<Int, String?>? {
+        val candidates = getCandidateBaseUrls()
+        for (baseUrl in candidates) {
+            try {
+                val conn = openUrl("$baseUrl$path", method)
+                try {
+                    if (body != null) {
+                        conn.doOutput = true
+                        conn.setRequestProperty("Content-Type", "application/json")
+                        conn.outputStream.use { it.write(body.toString().toByteArray()) }
+                    }
+                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val text = stream?.bufferedReader()?.use { it.readText() }
+                    activeBaseUrl = baseUrl
+                    return Pair(code, text)
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.w("BackendApiClient", "$method $path via $baseUrl failed: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    private fun openUrl(fullUrl: String, method: String): HttpURLConnection {
+        return (URL(fullUrl).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 5_000
             readTimeout = 60_000
             instanceFollowRedirects = true
             requestMethod = method
