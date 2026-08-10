@@ -13,7 +13,7 @@ import androidx.room.RoomDatabase
         PatrolSessionEntity::class
     ],
     version = 3,
-    exportSchema = true
+    exportSchema = false
 )
 abstract class NstrDatabase : RoomDatabase() {
 
