@@ -8,6 +8,7 @@ import { forestsRouter } from './forests';
 import { mapRouter } from './map';
 import { patrolsRouter } from './patrols';
 import { telemetryRouter } from './telemetry';
+import { incidentsRouter } from './incidents';
 
 export const apiRouter = Router();
 
@@ -24,3 +25,4 @@ apiRouter.use('/forests', forestsRouter);
 apiRouter.use('/map', mapRouter);
 apiRouter.use('/patrols', patrolsRouter);
 apiRouter.use('/telemetry', telemetryRouter);
+apiRouter.use('/incidents', incidentsRouter);
