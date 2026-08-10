@@ -7,6 +7,7 @@ import { devicesRouter } from './devices';
 import { forestsRouter } from './forests';
 import { mapRouter } from './map';
 import { patrolsRouter } from './patrols';
+import { telemetryRouter } from './telemetry';
 
 export const apiRouter = Router();
 
@@ -22,3 +23,4 @@ apiRouter.use('/devices', devicesRouter);
 apiRouter.use('/forests', forestsRouter);
 apiRouter.use('/map', mapRouter);
 apiRouter.use('/patrols', patrolsRouter);
+apiRouter.use('/telemetry', telemetryRouter);
