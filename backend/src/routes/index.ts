@@ -9,6 +9,7 @@ import { mapRouter } from './map';
 import { patrolsRouter } from './patrols';
 import { telemetryRouter } from './telemetry';
 import { incidentsRouter } from './incidents';
+import { syncRouter } from './sync';
 
 export const apiRouter = Router();
 
@@ -26,3 +27,4 @@ apiRouter.use('/map', mapRouter);
 apiRouter.use('/patrols', patrolsRouter);
 apiRouter.use('/telemetry', telemetryRouter);
 apiRouter.use('/incidents', incidentsRouter);
+apiRouter.use('/sync', syncRouter);
