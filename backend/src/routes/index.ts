@@ -10,6 +10,9 @@ import { patrolsRouter } from './patrols';
 import { telemetryRouter } from './telemetry';
 import { incidentsRouter } from './incidents';
 import { syncRouter } from './sync';
+import { sosRouter, alertsRouter } from './sos';
+import { optionsRouter } from './options';
+import { uploadsRouter } from './uploads';
 
 export const apiRouter = Router();
 
@@ -28,3 +31,7 @@ apiRouter.use('/patrols', patrolsRouter);
 apiRouter.use('/telemetry', telemetryRouter);
 apiRouter.use('/incidents', incidentsRouter);
 apiRouter.use('/sync', syncRouter);
+apiRouter.use('/sos', sosRouter);
+apiRouter.use('/alerts', alertsRouter);
+apiRouter.use('/options', optionsRouter);
+apiRouter.use('/uploads', uploadsRouter);
