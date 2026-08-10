@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import org.json.JSONObject
+import java.io.File
 
 data class ForestBeatModel(
     val id: String,
@@ -28,7 +29,16 @@ data class GisLayerState(
     val showMBTiles: Boolean = true
 )
 
+/**
+ * Loads forest beats + compartments GeoJSON. Source priority:
+ *   1. Backend API (fresh data, written to a local cache file)
+ *   2. Local cache (previously synced backend data, offline)
+ *   3. Bundled assets (mark_beat.json / mark_comp.json) as a last resort
+ */
 class ForestGisRepository(private val context: Context) {
+
+    private val api = BackendApiClient()
+    private val cacheDir = File(context.filesDir, "gis")
 
     var beatGeoJsonString: String = ""
         private set
@@ -39,61 +49,122 @@ class ForestGisRepository(private val context: Context) {
     var isDataLoaded by mutableStateOf(false)
         private set
 
+    /** Where the currently displayed data came from: "backend" | "cache" | "assets" */
+    var source by mutableStateOf("none")
+        private set
+
     val beatsList = mutableStateListOf<ForestBeatModel>()
 
     fun loadGisData() {
         if (isDataLoaded) return
-        try {
-            beatGeoJsonString = context.assets.open("mark_beat.json").bufferedReader().use { it.readText() }
-            val root = JSONObject(beatGeoJsonString)
-            val features = root.optJSONArray("features")
-            if (features != null) {
-                val newBeats = mutableListOf<ForestBeatModel>()
-                for (i in 0 until features.length()) {
-                    val feature = features.getJSONObject(i)
-                    val props = feature.optJSONObject("properties") ?: JSONObject()
-                    
-                    val propMap = mutableMapOf<String, String>()
-                    val keys = props.keys()
-                    while (keys.hasNext()) {
-                        val k = keys.next()
-                        propMap[k] = props.optString(k, "")
-                    }
 
-                    val beat = ForestBeatModel(
-                        id = props.optString("OBJECTID_1", "BEAT-${i + 1}"),
-                        name = props.optString("Beat", "UNNAMED BEAT"),
-                        section = props.optString("Section", "N/A"),
-                        range = props.optString("Range", "MARKAPUR"),
-                        division = props.optString("Division", "DD MARKAPUR"),
-                        circle = props.optString("Circle", "PT Circle"),
-                        district = props.optString("District", "PALNADU"),
-                        areaHa = props.optString("Area_ha", "0.00"),
-                        rawProperties = propMap,
-                        rawJson = feature.toString()
-                    )
-                    newBeats.add(beat)
-                }
-                beatsList.clear()
-                beatsList.addAll(newBeats)
-            }
-            Log.d("ForestGisRepository", "Loaded ${beatsList.size} forest beats from mark_beat.json")
-        } catch (e: Exception) {
-            Log.e("ForestGisRepository", "Error reading mark_beat.json", e)
+        // 1. Backend, fresh copy synced to disk.
+        val backendBeats = api.getText("/api/gis/beats")
+        if (backendBeats != null) {
+            val backendComps = api.getText("/api/gis/compartments")
+            writeCache("beats.geojson", backendBeats)
+            backendComps?.let { writeCache("compartments.geojson", it) }
+            applyData(backendBeats, backendComps ?: readCache("compartments.geojson") ?: "")
+            source = "backend"
+            isDataLoaded = beatGeoJsonString.isNotEmpty()
+            Log.d("ForestGisRepository", "Loaded beats/compartments from backend")
+            return
         }
 
+        // 2. Cached copy from a previous sync (offline mode).
+        val cachedBeats = readCache("beats.geojson")
+        if (cachedBeats != null) {
+            applyData(cachedBeats, readCache("compartments.geojson") ?: "")
+            source = "cache"
+            isDataLoaded = beatGeoJsonString.isNotEmpty()
+            Log.d("ForestGisRepository", "Loaded beats/compartments from cache")
+            return
+        }
+
+        // 3. Bundled assets fallback.
+        loadFromAssets()
+    }
+
+    fun findBeatByName(name: String): ForestBeatModel? {
+        return beatsList.find { it.name.equals(name, ignoreCase = true) }
+    }
+
+    private fun loadFromAssets() {
         try {
-            compartmentGeoJsonString = context.assets.open("mark_comp.json").bufferedReader().use { it.readText() }
-            Log.d("ForestGisRepository", "Loaded mark_comp.json (${compartmentGeoJsonString.length} chars)")
+            val assetBeats = context.assets.open("mark_beat.json").bufferedReader().use { it.readText() }
+            val assetComps = try {
+                context.assets.open("mark_comp.json").bufferedReader().use { it.readText() }
+            } catch (e: Exception) {
+                Log.e("ForestGisRepository", "Error reading mark_comp.json", e)
+                ""
+            }
+            applyData(assetBeats, assetComps)
+            source = "assets"
+            Log.d("ForestGisRepository", "Loaded beats/compartments from bundled assets")
         } catch (e: Exception) {
-            Log.e("ForestGisRepository", "Error reading mark_comp.json", e)
+            Log.e("ForestGisRepository", "Error reading mark_beat.json", e)
         }
         // Only signal "loaded" once the beat data (the layer the map waits for)
         // parsed successfully, so the map is never blocked forever on a bad asset.
         isDataLoaded = beatGeoJsonString.isNotEmpty()
     }
 
-    fun findBeatByName(name: String): ForestBeatModel? {
-        return beatsList.find { it.name.equals(name, ignoreCase = true) }
+    private fun applyData(beatGeoJson: String, compartmentGeoJson: String) {
+        beatGeoJsonString = beatGeoJson
+        compartmentGeoJsonString = compartmentGeoJson
+        parseBeats(beatGeoJson)
+    }
+
+    private fun parseBeats(geoJson: String) {
+        val root = JSONObject(geoJson)
+        val features = root.optJSONArray("features") ?: return
+        val newBeats = mutableListOf<ForestBeatModel>()
+        for (i in 0 until features.length()) {
+            val feature = features.getJSONObject(i)
+            val props = feature.optJSONObject("properties") ?: JSONObject()
+
+            val propMap = mutableMapOf<String, String>()
+            val keys = props.keys()
+            while (keys.hasNext()) {
+                val k = keys.next()
+                propMap[k] = props.optString(k, "")
+            }
+
+            val beat = ForestBeatModel(
+                id = props.optString("OBJECTID_1", "BEAT-${i + 1}"),
+                name = props.optString("Beat", "UNNAMED BEAT"),
+                section = props.optString("Section", "N/A"),
+                range = props.optString("Range", "MARKAPUR"),
+                division = props.optString("Division", "DD MARKAPUR"),
+                circle = props.optString("Circle", "PT Circle"),
+                district = props.optString("District", "PALNADU"),
+                areaHa = props.optString("Area_ha", "0.00"),
+                rawProperties = propMap,
+                rawJson = feature.toString()
+            )
+            newBeats.add(beat)
+        }
+        beatsList.clear()
+        beatsList.addAll(newBeats)
+        Log.d("ForestGisRepository", "Parsed ${beatsList.size} forest beats")
+    }
+
+    private fun writeCache(fileName: String, content: String) {
+        try {
+            cacheDir.mkdirs()
+            File(cacheDir, fileName).writeText(content)
+        } catch (e: Exception) {
+            Log.w("ForestGisRepository", "Failed writing cache $fileName", e)
+        }
+    }
+
+    private fun readCache(fileName: String): String? {
+        return try {
+            val f = File(cacheDir, fileName)
+            if (f.exists()) f.readText() else null
+        } catch (e: Exception) {
+            Log.w("ForestGisRepository", "Failed reading cache $fileName", e)
+            null
+        }
     }
 }

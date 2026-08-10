@@ -21,6 +21,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nstrpatrol.app.data.AuthUser
 import com.nstrpatrol.app.data.SettingsData
 import com.nstrpatrol.app.ui.components.DangerButton
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -36,8 +37,12 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 fun SettingsScreen(
     onLogout: () -> Unit,
     onOpenGpsDiagnostics: () -> Unit = {},
-    onTabSelected: (BottomTab) -> Unit
+    onTabSelected: (BottomTab) -> Unit,
+    user: AuthUser? = null
 ) {
+    val profileName = user?.fullName ?: SettingsData.name
+    val designation = user?.designation ?: SettingsData.designation
+
     NstrScaffold(
         title = "Settings",
         subtitle = "Preferences",
@@ -47,9 +52,15 @@ fun SettingsScreen(
         Spacer(Modifier.height(16.dp))
         SectionHeader(text = "Profile")
         Spacer(Modifier.height(8.dp))
-        SettingRow(label = "Name", value = SettingsData.name)
+        SettingRow(label = "Name", value = profileName)
         Spacer(Modifier.height(8.dp))
-        SettingRow(label = "Designation", value = SettingsData.designation)
+        SettingRow(label = "Designation", value = designation)
+        if (user != null) {
+            Spacer(Modifier.height(8.dp))
+            SettingRow(label = "Email", value = user.email)
+            Spacer(Modifier.height(8.dp))
+            SettingRow(label = "Phone", value = user.phone ?: "—")
+        }
 
         Spacer(Modifier.height(20.dp))
         SectionHeader(text = "General")

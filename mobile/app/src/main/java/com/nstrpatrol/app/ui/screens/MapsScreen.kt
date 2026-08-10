@@ -125,11 +125,12 @@ fun MapsScreen(
     val gisRepo = remember { ForestGisRepository(context) }
     val mbtilesServer = remember { MbtilesServer(context) }
 
-    // Start the MBTiles tile server first so the basemap never starves,
-    // then load the GIS layers (beats/compartments) on a background thread.
+    // Start the MBTiles tile server (downloads the atlas from the backend if
+    // not cached, falling back to bundled assets), then load the GIS layers
+    // (beats/compartments) on a background thread.
     LaunchedEffect(Unit) {
-        mbtilesServer.start()
         withContext(Dispatchers.IO) {
+            mbtilesServer.start()
             gisRepo.loadGisData()
         }
     }

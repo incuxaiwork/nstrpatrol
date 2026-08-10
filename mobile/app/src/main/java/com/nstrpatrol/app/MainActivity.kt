@@ -21,13 +21,16 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.data.db.NstrDatabase
@@ -99,12 +102,24 @@ private val NavStateSaver = Saver<NstrNavState, java.util.ArrayList<String>>(
 fun NstrApp() {
     val context = LocalContext.current
     val sessionStore = remember { SessionStore(context) }
+    val auth = remember { AuthSession(context) }
+    val restoredSession = remember { auth.restore() }
     val savedRoute = remember { sessionStore.lastRoute()?.let(Route::fromKey) }
     val nav = rememberSaveable(saver = NavStateSaver) {
-        NstrNavState(initial = savedRoute ?: Route.Login)
+        NstrNavState(
+            initial = if (restoredSession && savedRoute != null && savedRoute != Route.Login) {
+                savedRoute
+            } else {
+                Route.Login
+            }
+        )
     }
+    var currentPatrol by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(nav.current) {
         sessionStore.saveRoute(nav.current.key)
+    }
+    LaunchedEffect(auth.currentUser?.id) {
+        currentPatrol = auth.currentPatrolName()
     }
     val timeManager = remember { TrustedTimeManager(context.applicationContext) }
     val telemetryManager = remember { GpsTelemetryManager(context.applicationContext) }
@@ -170,7 +185,18 @@ fun NstrApp() {
             .safeDrawingPadding()
     ) {
         when (nav.current) {
-        Route.Login -> LoginScreen(onLogin = { nav.resetTo(Route.Dashboard) })
+        Route.Login -> LoginScreen(
+            onLogin = { email, password ->
+                try {
+                    auth.login(email, password)
+                    sessionStore.saveRoute(Route.Dashboard.key)
+                    null
+                } catch (e: Exception) {
+                    e.message ?: "Login failed"
+                }
+            },
+            onSuccess = { nav.resetTo(Route.Dashboard) }
+        )
 
         Route.Dashboard -> DashboardScreen(
             onOpenLogs = { nav.navigateTo(Route.Logs) },
@@ -180,7 +206,9 @@ fun NstrApp() {
             onTabSelected = nav::selectTab,
             timeState = timeState,
             patrolTimer = patrolTimer,
-            dao = database.telemetryDao()
+            dao = database.telemetryDao(),
+            user = auth.currentUser,
+            currentPatrol = currentPatrol
         )
 
         Route.Maps -> MapsScreen(
@@ -212,11 +240,13 @@ fun NstrApp() {
 
         Route.Settings -> SettingsScreen(
             onLogout = {
+                auth.logout()
                 sessionStore.clear()
                 nav.resetTo(Route.Login)
             },
             onOpenGpsDiagnostics = { nav.navigateTo(Route.GpsDiagnostics) },
-            onTabSelected = nav::selectTab
+            onTabSelected = nav::selectTab,
+            user = auth.currentUser
         )
 
         Route.GpsDiagnostics -> GpsDiagnosticsScreen(

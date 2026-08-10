@@ -90,9 +90,11 @@ store + map/grid source).
 - `[x]` Mock data in `data/MockData.kt`: `Options` (all picker option lists), `Patrols.list`, `LogsData.entries`, `Contacts.list`, `AutoDetails`, `SettingsData`.
 - `[x]` Mock `LocalDataSource` / repository layer used by screens.
 - `[ ]` Room database — entities mirror the Postgres models (Patrol, PatrolPoint, SensorReading, Incident, SyncQueue), each row carries a sync state (PENDING / SYNCED / FAILED).
-- `[ ]` Real API client (Retrofit/Ktor) — only used by the **sync worker**, not for live reads.
+- `[x]` Minimal HTTP client (`data/map/BackendApiClient.kt`, built-in `HttpURLConnection`, no extra deps) + `INTERNET` permission + configurable `API_BASE_URL` (BuildConfig field, default `http://10.0.2.2:3000`, override `-PapiBaseUrl=...`). Currently used for **reference-data download** (map/grid GeoJSON + MBTiles atlas).
+- `[ ]` Full API client (Retrofit/Ktor) for the sync worker — not built yet.
 - `[ ]` Sync worker (WorkManager): upload PENDING rows to Postgres when online, mark SYNCED, pull changes down.
-- `[ ]` Pickers/option lists & map/grid data (backend-owned) downloaded & cached locally.
+- `[x]` **Map/grid reference data downloaded from the backend & cached locally** (offline-first): beats + compartments GeoJSON cached in `filesDir/gis/`, MBTiles atlas cached in `filesDir/NSTR.mbtiles`; bundled assets kept as last-resort fallback (see 10.4).
+- `[ ]` Pickers/option lists (backend-owned) downloaded & cached locally.
 
 ---
 
@@ -117,10 +119,10 @@ store + map/grid source).
 
 ### 7.3 Maps (Maps tab)
 - Flow: tab root.
-- UI: grid canvas map, layer rows with switches (Satellite view, Patrol routes, Sighting markers).
-- Data: static grid; layer toggles local state.
-- API: `[ ]` none — needs tile/map + patrol route + marker endpoints.
-- Working: `[x]` renders and toggles; **no real map** (placeholder grid).
+- UI: **MapLibre GL** map with (a) raster basemap served by the embedded `MbtilesServer` (`http://127.0.0.1:8888/tiles/{z}/{x}/{y}.png`), (b) beat polygons (fill + outline + labels), (c) compartment boundaries (outline), (d) layer-toggle dialog (Beats / Compartments / Incidents / MBTiles), "Offline Map (MBTiles)" chip, beat search/selection.
+- Data: map/grid GeoJSON + MBTiles atlas fetched from the backend API, cached locally, with bundled assets as offline fallback (see 10.4).
+- API: `[x]` `GET /api/gis/beats`, `GET /api/gis/compartments` (GeoJSON), `GET /api/gis/assets/NSTR.mbtiles` (atlas download) — wired.
+- Working: `[x]` renders basemap + beat/compartment overlays; layer toggles verified.
 
 ### 7.4 All Patrols (Patrol tab)
 - Flow: tab root.
@@ -203,14 +205,17 @@ store + map/grid source).
 
 ---
 
-## 8. Backend / API integration (all pending)
+## 8. Backend / API integration
 
-Backend exists at repo root `backend/` (Express + Prisma + PostGIS) but is **not wired**
-to the mobile app. Per the offline-first architecture, the mobile app is a SQLite-first
-client; the backend/Postgres is the sync target + source for shared reference data
-(forests, grids, option lists).
+Backend lives at repo root `backend/` (Express + Prisma + PostGIS). Per the offline-first
+architecture, the mobile app is a SQLite-first client; the backend/Postgres is the sync
+target + source for shared reference data (forests, grids, option lists). **Map reference
+data is the first wired slice** — see 10.4 for the full data flow.
 
-- `[ ]` Shared API contract (endpoints, DTOs, error format, sync semantics) defined between mobile & backend.
+- `[x]` **Map reference data sync (GIS):** backend serves beats + compartments GeoJSON and the
+  MBTiles atlas from PostGIS; mobile downloads & caches them (10.4). Backend ingestion via
+  `npm run import:gis` (reads the former mobile assets → PostGIS tables).
+- `[ ]` Shared API contract (endpoints, DTOs, error format, sync semantics) for the remaining domains (patrols, incidents, auth, sync).
 - `[ ]` Room entities + sync-state columns; backend models already exist (Patrol, PatrolPoint, SensorReading, Incident, SyncLog).
 - `[ ]` Auth: login/token handling; replace mock login.
 - `[ ]` Reference-data download: forests, boundaries, grids, option lists → cached in SQLite.
@@ -226,7 +231,8 @@ client; the backend/Postgres is the sync target + source for shared reference da
 > What kind of endpoints the mobile app needs. Grounded in the backend models
 > (Prisma `backend/prisma/schema.prisma`): User, Device, Forest, ForestBoundary,
 > ForestGrid, Patrol, PatrolPoint, SensorReading, Incident, SyncLog.
-> Endpoints are described, **not implemented** — backend has only `/health` today.
+> Endpoints are described; the **GIS endpoints are implemented** (`GET /api/gis/*`,
+> see 9.3/10.4), the rest remain to be built. Backend has `/health` + `/gis` today.
 > "Auto" = captured on device (GPS/timestamp), no endpoint required.
 >
 > **Reading order matters:** the app writes to SQLite first; live CRUD endpoints are
@@ -250,9 +256,13 @@ client; the backend/Postgres is the sync target + source for shared reference da
 
 ### 9.3 Maps 7.3
 
-- **Reference (downloaded, cached in SQLite):**
-  - `GET /api/forests` + boundaries (Forest, ForestBoundary).
-  - `GET /api/forests/:id/grids` — grid polygons + codes (ForestGrid).
+- **Reference (downloaded, cached locally — IMPLEMENTED):**
+  - `[x]` `GET /api/gis/beats` — beat polygons + attributes (Beat/Section/Range/Division/Circle/District/Area_ha). Backend: PostGIS `Beat` table → `ST_AsGeoJSON`.
+  - `[x]` `GET /api/gis/compartments` — compartment boundaries (Polygon + MultiPolygon). Backend: PostGIS `Compartment` table → `ST_AsGeoJSON`.
+  - `[x]` `GET /api/gis/assets` — map-asset metadata list (resourceKey, sha256, version, sizeBytes).
+  - `[x]` `GET /api/gis/assets/:resourceKey` — binary download (the `NSTR.mbtiles` raster atlas stored as a BYTEA blob in `MapAsset.data`; ETag = sha256, `X-Asset-Version`).
+  - `[ ]` `GET /api/forests` + boundaries (Forest, ForestBoundary).
+  - `[ ]` `GET /api/forests/:id/grids` — grid polygons + codes (ForestGrid).
 - **Read (SQLite):** patrol route drawn from local PatrolPoint rows; sighting/incident markers from local Incident rows.
 - Satellite/imagery tiles — external provider (Google Maps / MapLibre tiles), not our API.
 
@@ -369,10 +379,37 @@ Two methods considered for stopping rangers faking timings:
 - `[x]` Logs screen prepends an `alert` entry when tampering is detected.
   - Verified on emulator: `settings put global auto_time 0` → banner + Logs alert entry appear; restore `auto_time 1` → banner clears; Patrol Start save → duration counts up (3s → 14s → 28s).
 
+### 10.4 Map data from backend (PostGIS) — beats, compartments, MBTiles
+
+Moves the hardcoded maps out of the APK into the PostGIS database. The bundled assets
+(`mark_beat.json`, `mark_comp.json`, `NSTR.mbtiles`) now act only as an offline fallback.
+
+- `[x]` Backend: `scripts/import-gis.ts` (`npm run import:gis`, idempotent) ingests the former
+  mobile assets into PostGIS — `mark_beat.json` → `Beat` (44 rows, Polygon), `mark_comp.json` →
+  `Compartment` (448 rows, Polygon + MultiPolygon, linked to Beat by name), `NSTR.mbtiles` →
+  `MapAsset.data` BYTEA blob (18 MB, sha256-keyed, versioned). SQL lives in raw migrations
+  (GIST indexes + generic `geometry(Geometry,4326)` columns).
+- `[x]` Backend API (`backend/src/routes/gis.ts`): beats + compartments GeoJSON built with
+  `ST_AsGeoJSON` (property names kept identical to the original files so the existing mobile
+  parser works unchanged); asset metadata + binary download with `ETag`/`X-Asset-Version`.
+- `[x]` `ForestGisRepository` — source priority **backend → local cache → bundled assets**:
+  fetches `/api/gis/beats` + `/api/gis/compartments`, writes them to `filesDir/gis/`, exposes
+  `source` ("backend"/"cache"/"assets"); parsing unchanged (same property names).
+- `[x]` `MbtilesServer` — `prepareMbtilesFile()` now downloads `/api/gis/assets/NSTR.mbtiles`
+  into `filesDir/` before falling back to copying the bundled asset; still serves tiles locally
+  via `http://127.0.0.1:8888`.
+- `[x]` `MapsScreen` runs tile-server startup + GIS load on `Dispatchers.IO` (the atlas download
+  is network I/O); map creation still waits on `gisRepo.isDataLoaded`.
+- Verified: `./gradlew :app:compileDebugKotlin` passes; backend `lint` + `build` pass; endpoint
+  counts match the source files (44 / 448) and the downloaded MBTiles sha256 equals the source.
+
 ---
 
 ## Backlog & next tasks
 
+- `[ ]` Backend: seed `Forest`/`ForestBoundary`/`ForestGrid` reference rows (grid point-in-polygon source) + `GET /api/forests`, `GET /api/forests/:id/grids` endpoints.
+- `[ ]` Mobile: drop the bundled assets (`mark_beat.json`, `mark_comp.json`, `NSTR.mbtiles`) from the APK once backend fetch is proven on device (shrinks APK ~22 MB).
+- `[ ]` Mobile: surface data source in the map UI (e.g. chip shows "Backend" / "Cache" / "Offline assets") and a "Refresh map data" action.
 - `[ ]` Reports screen: add **"Reported Incidents"** section below the category grid (list of previously reported incidents; tap → incident detail). Design in Penpot first, then app UI code; mock data until persistence exists.
 - `[ ]` Replace mock layer with Room + repository pattern (SQLite-first storage).
 - `[ ]` Wire authentication to backend API (replace mock login).
@@ -380,7 +417,6 @@ Two methods considered for stopping rangers faking timings:
 - `[ ]` Make Save Draft / Submit Report write to SQLite (DRAFT vs PENDING rows).
 - `[ ]` Implement sync worker (WorkManager): upload PENDING rows, download server changes.
 - `[ ]` Make SOS button send a live alert.
-- `[ ]` Add real map rendering (Google Maps / MapLibre) for Maps screen.
 - `[ ]` Add pull-to-refresh and loading indicators.
 - `[ ]` Verify screens on a range of devices (e.g., small 390dp and large screens).
 - `[ ]` Release build + R8 shrinking check.
@@ -389,4 +425,4 @@ Two methods considered for stopping rangers faking timings:
 
 ---
 
-*Last updated: 2026-08-07. 2026-08-07: multi-photo capture per slot + camera flip + EXIF-upright decode (10.1); Reports screen to gain a "Reported Incidents" section (7.7/backlog); Penpot MCP configured as a remote HTTP stream server in opencode.*
+*Last updated: 2026-08-08. 2026-08-08: map reference data moved into PostGIS — backend ingests beats/compartments/MBTiles via `npm run import:gis`, exposes `GET /api/gis/*`; mobile downloads & caches them with bundled assets as offline fallback (10.4). 2026-08-07: multi-photo capture per slot + camera flip + EXIF-upright decode (10.1); Reports screen to gain a "Reported Incidents" section (7.7/backlog); Penpot MCP configured as a remote HTTP stream server in opencode.*

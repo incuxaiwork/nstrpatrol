@@ -16,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -28,15 +30,23 @@ import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.theme.Background
+import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.ForestGreen
 import com.nstrpatrol.app.ui.theme.NstrIcons
 import com.nstrpatrol.app.ui.theme.TextSecondary
+import kotlinx.coroutines.launch
 
 /** Login screen: brand mark, credentials, entry into the app. */
 @Composable
-fun LoginScreen(onLogin: () -> Unit) {
+fun LoginScreen(
+    onLogin: suspend (username: String, password: String) -> String?,
+    onSuccess: () -> Unit
+) {
     var username by rememberSaveable { mutableStateOf("") }
     var password by rememberSaveable { mutableStateOf("") }
+    var loading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     Box(
         modifier = Modifier
@@ -81,7 +91,7 @@ fun LoginScreen(onLogin: () -> Unit) {
                 RemarksField(
                     value = username,
                     onValueChange = { username = it },
-                    placeholder = "Enter your username",
+                    placeholder = "Enter your email or username",
                     height = 48
                 )
                 Spacer(Modifier.height(16.dp))
@@ -96,12 +106,35 @@ fun LoginScreen(onLogin: () -> Unit) {
                 )
                 Spacer(Modifier.height(28.dp))
                 PrimaryButton(
-                    text = "Login",
-                    onClick = onLogin,
+                    text = if (loading) "Signing in…" else "Login",
+                    onClick = {
+                        if (!loading) {
+                            loading = true
+                            error = null
+                            scope.launch {
+                                val err = onLogin(username, password)
+                                if (err == null) {
+                                    onSuccess()
+                                } else {
+                                    error = err
+                                    loading = false
+                                }
+                            }
+                        }
+                    },
                     height = 52,
                     textSize = 17,
                     textWeight = FontWeight.SemiBold
                 )
+                if (error != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        text = error ?: "",
+                        color = ErrorRed,
+                        fontSize = 13.sp,
+                        modifier = Modifier.align(Alignment.CenterHorizontally)
+                    )
+                }
             }
             Spacer(Modifier.weight(1f))
             Text(

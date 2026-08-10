@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nstrpatrol.app.data.AuthUser
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.db.DailyActivityEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -65,7 +66,9 @@ fun DashboardScreen(
     onTabSelected: (BottomTab) -> Unit,
     timeState: TimeIntegrityState,
     patrolTimer: PatrolTimer,
-    dao: TelemetryDao
+    dao: TelemetryDao,
+    user: AuthUser?,
+    currentPatrol: String?
 ) {
     var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(patrolTimer.running.value) {
@@ -89,11 +92,14 @@ fun DashboardScreen(
 
     val activity = dailyActivity
 
+    val greetingName = user?.firstName ?: "Ranger"
+    val greetingAvatar = user?.initial ?: "R"
+
     NstrScaffold(
         title = "Dashboard",
-        subtitle = "Good day, Ranger K.",
+        subtitle = "Good day, $greetingName.",
         largeTitle = true,
-        avatarText = "K",
+        avatarText = greetingAvatar,
         activeTab = BottomTab.Home,
         onTabSelected = onTabSelected
     ) {
@@ -156,7 +162,7 @@ fun DashboardScreen(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = "Central Zone Patrol 01",
+                text = currentPatrol ?: "No assigned patrol",
                 color = Color.White,
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold
