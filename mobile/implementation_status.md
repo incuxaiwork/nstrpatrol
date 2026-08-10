@@ -105,24 +105,24 @@ store + map/grid source).
 
 ### 7.1 Login
 - Flow: initial route; `Login` button → Dashboard; `LOG OUT` resets back here.
-- UI: brand logo (paw), title, username + password fields (password has show/hide eye toggle), Login button, "For official use only".
-- Data: local state only.
-- API: `[ ]` No auth — mock login accepts any input.
-- Working: `[x]` verified on emulator (typing, password reveal/hide, login navigation).
+- UI: brand logo (paw), title, email + password fields (password has show/hide eye toggle), Login button ("Signing in…" while in flight, inline error text on failure), "For official use only".
+- Data: **real backend auth** via `AuthSession.login()` → `POST /api/auth/login`; access/refresh tokens + user profile persisted in SharedPreferences (`nstr_auth`) and restored on app start.
+- API: `[x]` `POST /api/auth/login` wired; device auto-registered via `POST /api/devices` on login; errors surface the backend message (e.g. "Invalid email or password").
+- Working: `[x]` verified on device (Moto G45 5G) with `admin@nstr.local` / `password123`; session survives app restart.
 
 ### 7.2 Dashboard (Home tab)
 - Flow: tab root / after login.
-- UI: large title + avatar, assigned-patrol banner, stat cards (distance 12.4 km, duration 3h 12m), Logs & alerts card, quick actions (Start Patrol, Sync Queue, SOS, Quick Capture, 2× future).
-- Data: mock values; **Patrol duration stat → live `PatrolTimer` count-up (10.3)**; **time-tamper warning banner when `TrustedTimeManager.tamperDetected` (10.3)**.
-- API: `[ ]` none — needs patrol summary endpoint.
+- UI: large title + **real user greeting/avatar** (first name + initial from `AuthUser`), **assigned-patrol banner (real patrol name from backend, or "No assigned patrol")**, stat cards (distance, duration), Logs & alerts card, quick actions (Start Patrol, Sync Queue, SOS, Quick Capture, 2× future).
+- Data: user profile from the auth session; **Patrol duration stat → live `PatrolTimer` count-up (10.3)**; **time-tamper warning banner when `TrustedTimeManager.tamperDetected` (10.3)**; assigned patrol from `GET /api/patrols?assignedTo=me` (best-effort, picks first ACTIVE/ASSIGNED).
+- API: `[x]` `GET /api/patrols?assignedTo=me` wired for the assigned-patrol banner.
 - Working: `[x]` quick actions navigate correctly; SOS opens SOS screen.
 
 ### 7.3 Maps (Maps tab)
 - Flow: tab root.
-- UI: **MapLibre GL** map with (a) raster basemap served by the embedded `MbtilesServer` (`http://127.0.0.1:8888/tiles/{z}/{x}/{y}.png`), (b) beat polygons (fill + outline + labels), (c) compartment boundaries (outline), (d) layer-toggle dialog (Beats / Compartments / Incidents / MBTiles), "Offline Map (MBTiles)" chip, beat search/selection.
-- Data: map/grid GeoJSON + MBTiles atlas fetched from the backend API, cached locally, with bundled assets as offline fallback (see 10.4).
+- UI: **MapLibre GL** map with (a) raster basemap served by the embedded `MbtilesServer` (`http://127.0.0.1:8888/tiles/{z}/{x}/{y}.png`), (b) beat polygons (fill + outline + labels), (c) compartment boundaries (outline), (d) layer-toggle dialog (Beats / Compartments / Incidents / MBTiles), "Offline Map (MBTiles)" chip, beat search/selection. **Full-screen mode** (mini + full-screen dual-map reference, expand/collapse), 12 live sighting/incident markers, multi-touch gestures (from the ali PR).
+- Data: map/grid GeoJSON + MBTiles atlas fetched from the backend API, cached locally, with bundled assets as offline fallback (see 10.4); sighting/incident markers seeded locally (`seedIncidents()`).
 - API: `[x]` `GET /api/gis/beats`, `GET /api/gis/compartments` (GeoJSON), `GET /api/gis/assets/NSTR.mbtiles` (atlas download) — wired.
-- Working: `[x]` renders basemap + beat/compartment overlays; layer toggles verified.
+- Working: `[x]` renders basemap + beat/compartment overlays; layer toggles verified; full-screen + markers from merged ali branch build clean.
 
 ### 7.4 All Patrols (Patrol tab)
 - Flow: tab root.
@@ -198,10 +198,10 @@ store + map/grid source).
 
 ### 7.14 Settings
 - Flow: tab root.
-- UI: profile section (name R. Sharma, Field Officer), general settings rows (Language, Sync Interval, Map Layer), LOG OUT (wired).
-- Data: `SettingsData` (mock).
-- API: `[ ]` none — needs profile/settings sync.
-- Working: `[x]` logout → Login verified; rows are display-only.
+- UI: profile section (**real user**: name, designation derived from role/cader, email, phone), general settings rows (Language, Sync Interval, Map Layer), LOG OUT (wired).
+- Data: user profile from the auth session; `SettingsData` (mock) for general rows.
+- API: `[x]` profile from the stored `AuthUser` (from `/api/auth/login` + `/api/auth/me`).
+- Working: `[x]` logout clears auth session + returns to Login; profile shows the signed-in user.
 
 ---
 
@@ -215,9 +215,11 @@ data is the first wired slice** — see 10.4 for the full data flow.
 - `[x]` **Map reference data sync (GIS):** backend serves beats + compartments GeoJSON and the
   MBTiles atlas from PostGIS; mobile downloads & caches them (10.4). Backend ingestion via
   `npm run import:gis` (reads the former mobile assets → PostGIS tables).
-- `[ ]` Shared API contract (endpoints, DTOs, error format, sync semantics) for the remaining domains (patrols, incidents, auth, sync).
+- `[x]` **Auth (login + session):** `AuthSession` logs in via `POST /api/auth/login`, persists
+  tokens + user in SharedPreferences, restores on app start, registers the device via
+  `POST /api/devices`. `BackendApiClient` carries the bearer token on authenticated calls.
+- `[ ]` Shared API contract (endpoints, DTOs, error format, sync semantics) for the remaining domains (patrols, incidents, sync).
 - `[ ]` Room entities + sync-state columns; backend models already exist (Patrol, PatrolPoint, SensorReading, Incident, SyncLog).
-- `[ ]` Auth: login/token handling; replace mock login.
 - `[ ]` Reference-data download: forests, boundaries, grids, option lists → cached in SQLite.
 - `[ ]` Sync worker: batch upload PENDING patrols/points/sensor readings/incidents to Postgres; mark SYNCED.
 - `[ ]` Download of server-side changes (e.g. assigned patrols, incoming alerts) back into SQLite.
@@ -242,10 +244,10 @@ data is the first wired slice** — see 10.4 for the full data flow.
 
 ### 9.1 Auth (Login 7.1, Settings 7.14)
 
-- `POST /api/auth/login` — body `{email, password}` → `{token, user}` (User model). Replaces mock login.
-- `GET /api/auth/me` — current user profile (fullName, role, phone). Used by Settings profile + auto-details.
-- `POST /api/auth/logout` — invalidate token (optional).
-- `POST /api/devices` — register device for push/sync (`deviceId`, `pushToken`; Device model).
+- `[x]` `POST /api/auth/login` — body `{email, password}` → `{accessToken, refreshToken, user}` (User model). Wired via `AuthSession`.
+- `[x]` `GET /api/auth/me` — current user profile (fullName, role, phone). Used by Settings profile + auto-details (available via `AuthSession`).
+- `[ ]` `POST /api/auth/logout` — invalidate token (mobile currently clears the local session only; backend endpoint exists).
+- `[x]` `POST /api/devices` — register device for push/sync (`deviceId`, `deviceName`, `deviceModel`; Device model) — auto-called on login.
 
 ### 9.2 Dashboard 7.2
 
@@ -412,7 +414,6 @@ Moves the hardcoded maps out of the APK into the PostGIS database. The bundled a
 - `[ ]` Mobile: surface data source in the map UI (e.g. chip shows "Backend" / "Cache" / "Offline assets") and a "Refresh map data" action.
 - `[ ]` Reports screen: add **"Reported Incidents"** section below the category grid (list of previously reported incidents; tap → incident detail). Design in Penpot first, then app UI code; mock data until persistence exists.
 - `[ ]` Replace mock layer with Room + repository pattern (SQLite-first storage).
-- `[ ]` Wire authentication to backend API (replace mock login).
 - `[ ]` Persist Patrol Start to SQLite (save actually inserts a local patrol).
 - `[ ]` Make Save Draft / Submit Report write to SQLite (DRAFT vs PENDING rows).
 - `[ ]` Implement sync worker (WorkManager): upload PENDING rows, download server changes.
@@ -422,7 +423,8 @@ Moves the hardcoded maps out of the APK into the PostGIS database. The bundled a
 - `[ ]` Release build + R8 shrinking check.
 - `[ ]` Add unit tests (navigation, mock data) and Compose UI tests.
 - `[ ]` BE-verified patrol start anchor (method 1 of anti-cheat) once sync exists.
+- `[ ]` Surface auth error states (401 on stale token → re-login), token refresh via `POST /api/auth/refresh`.
 
 ---
 
-*Last updated: 2026-08-08. 2026-08-08: map reference data moved into PostGIS — backend ingests beats/compartments/MBTiles via `npm run import:gis`, exposes `GET /api/gis/*`; mobile downloads & caches them with bundled assets as offline fallback (10.4). 2026-08-07: multi-photo capture per slot + camera flip + EXIF-upright decode (10.1); Reports screen to gain a "Reported Incidents" section (7.7/backlog); Penpot MCP configured as a remote HTTP stream server in opencode.*
+*Last updated: 2026-08-10. Auth wired to the backend: `AuthSession` login (`POST /api/auth/login`), token+user persistence, device registration (`POST /api/devices`), session restore on app start; Login/Dashboard/Settings show real user data; assigned-patrol banner from `GET /api/patrols?assignedTo=me`. Merged the ali PR full-screen maps UI (mini+full dual-map, 12 sighting/incident markers, multi-touch) into `main`; `API_BASE_URL` fixed (provider `.get()`). 2026-08-08: map reference data moved into PostGIS — backend ingests beats/compartments/MBTiles via `npm run import:gis`, exposes `GET /api/gis/*`; mobile downloads & caches them with bundled assets as offline fallback (10.4). 2026-08-07: multi-photo capture per slot + camera flip + EXIF-upright decode (10.1); Reports screen to gain a "Reported Incidents" section (7.7/backlog); Penpot MCP configured as a remote HTTP stream server in opencode.*
