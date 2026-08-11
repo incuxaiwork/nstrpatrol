@@ -60,7 +60,29 @@ export default function CreateAuthorizationPage() {
   const authIds = authBeat ? [authBeat] : [];
 
   const step2Valid = authDivision && authRange && authBeat;
-  const step3Valid = reason.trim().length >= 5 && instruction.trim().length >= 5 && validFrom < validUntil;
+
+  const fromTime = new Date(validFrom).getTime();
+  const untilTime = new Date(validUntil).getTime();
+  const detailsErrors = {
+    reason: reason.trim().length < 5 ? "Enter a reason (at least 5 characters)" : undefined,
+    instruction: instruction.trim().length < 5 ? "Enter an operational instruction (at least 5 characters)" : undefined,
+    validity:
+      !validFrom || !validUntil
+        ? "Set both validity dates"
+        : Number.isNaN(fromTime) || Number.isNaN(untilTime)
+          ? "Enter valid dates"
+          : untilTime <= fromTime
+            ? "Valid until must be after valid from"
+            : undefined,
+  };
+  const step3Valid = !detailsErrors.reason && !detailsErrors.instruction && !detailsErrors.validity;
+
+  const setFrom = (v: string) => {
+    setValidFrom(v);
+    if (v && validUntil && new Date(v).getTime() >= new Date(validUntil).getTime()) {
+      setValidUntil(dateInput(new Date(new Date(v).getTime() + 86_400_000)));
+    }
+  };
 
   if (roster.loading || !roster.data) return <SkeletonRows rows={7} />;
   if (roster.error) return <ErrorState message={roster.error.message} onRetry={roster.reload} />;
@@ -228,12 +250,12 @@ export default function CreateAuthorizationPage() {
           <Card>
             <div className="grid gap-4 p-5 sm:grid-cols-2">
               <div className="sm:col-span-2">
-                <Field label="Reason" required hint="Operational justification for the exception">
+                <Field label="Reason" required error={detailsErrors.reason} hint="Operational justification for the exception">
                   <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Census support — beat C1-A needs extra foot teams" />
                 </Field>
               </div>
               <div className="sm:col-span-2">
-                <Field label="Operational instruction" required>
+                <Field label="Operational instruction" required error={detailsErrors.instruction}>
                   <Textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} rows={3} placeholder="e.g. Report to C1-A guard post; join census transect 3; follow census supervisor direction" />
                 </Field>
               </div>
@@ -245,10 +267,10 @@ export default function CreateAuthorizationPage() {
               <Field label="Operational objective" hint="Optional but recommended">
                 <Input value={objective} onChange={(e) => setObjective(e.target.value)} placeholder="e.g. Assist one-horned rhino census count" />
               </Field>
-              <Field label="Valid from" required>
-                <Input type="datetime-local" value={validFrom} onChange={(e) => setValidFrom(e.target.value)} />
+              <Field label="Valid from" required error={detailsErrors.validity}>
+                <Input type="datetime-local" value={validFrom} onChange={(e) => setFrom(e.target.value)} />
               </Field>
-              <Field label="Valid until" required>
+              <Field label="Valid until" required error={detailsErrors.validity}>
                 <Input type="datetime-local" value={validUntil} onChange={(e) => setValidUntil(e.target.value)} />
               </Field>
               <Field label="Priority" required>
@@ -333,7 +355,7 @@ export default function CreateAuthorizationPage() {
       </div>
 
       {/* Wizard footer */}
-      <div className="mt-4 flex items-center justify-between">
+      <div className="mt-4 flex items-center justify-between gap-3">
         <button
           onClick={() => setStep((s) => Math.max(1, s - 1))}
           disabled={step === 1}
@@ -341,15 +363,22 @@ export default function CreateAuthorizationPage() {
         >
           <Icon name="chevronLeft" size={14} /> Back
         </button>
-        {step < 5 && (
-          <button
-            onClick={() => setStep((s) => s + 1)}
-            disabled={(step === 1 && !rangerId) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid)}
-            className="inline-flex h-9 items-center gap-1.5 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
-          >
-            {step === 3 ? "Review" : step === 2 ? "Continue to details" : "Continue"} <Icon name="chevronRight" size={14} />
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {step === 3 && !step3Valid && (
+            <p className="text-right text-xs text-danger">
+              {detailsErrors.reason ?? detailsErrors.instruction ?? detailsErrors.validity}
+            </p>
+          )}
+          {step < 5 && (
+            <button
+              onClick={() => setStep((s) => s + 1)}
+              disabled={(step === 1 && !rangerId) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid)}
+              className="inline-flex h-9 items-center gap-1.5 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
+            >
+              {step === 3 ? "Review" : step === 2 ? "Continue to details" : "Continue"} <Icon name="chevronRight" size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
