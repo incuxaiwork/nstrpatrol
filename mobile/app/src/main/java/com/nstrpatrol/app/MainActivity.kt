@@ -253,6 +253,7 @@ fun NstrApp() {
             manager = telemetryManager,
             recorder = telemetryRecorder,
             timeState = timeState,
+            trustedUtcNow = { timeManager.trustedUtcNow() },
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab
         )

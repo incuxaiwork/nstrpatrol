@@ -13,9 +13,14 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import java.util.Calendar
 
 /**
@@ -52,34 +57,74 @@ class TrustedTimeManager(private val appContext: Context) {
     private val locationManager =
         appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
 
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
     private val _state = MutableStateFlow(TimeIntegrityState(autoTimeEnabled = isAutoTimeEnabled()))
     val state: StateFlow<TimeIntegrityState> = _state.asStateFlow()
+
+    @Volatile
+    private var initialSystemTimeMillis: Long = System.currentTimeMillis()
+    @Volatile
+    private var initialElapsedRealtime: Long = SystemClock.elapsedRealtime()
 
     @Volatile
     private var anchorGnssUtcMillis: Long? = null
     @Volatile
     private var anchorElapsedRealtime: Long = SystemClock.elapsedRealtime()
 
+    private val settingsObserver = object : android.database.ContentObserver(android.os.Handler(android.os.Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) {
+            evaluate()
+        }
+    }
+
     init {
         listenToNmea()
         startGpsFixRequest()
         registerClockChangeReceiver()
+        registerSettingsObserver()
+        startPeriodicTicker()
         evaluate()
+    }
+
+    private fun startPeriodicTicker() {
+        scope.launch {
+            while (true) {
+                evaluate()
+                delay(1000)
+            }
+        }
+    }
+
+    private fun registerSettingsObserver() {
+        try {
+            appContext.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.AUTO_TIME),
+                false,
+                settingsObserver
+            )
+            appContext.contentResolver.registerContentObserver(
+                Settings.Global.getUriFor(Settings.Global.AUTO_TIME_ZONE),
+                false,
+                settingsObserver
+            )
+        } catch (e: Exception) {
+            // Ignored if setting uri is protected on vendor ROMs
+        }
     }
 
     /**
      * True UTC at this instant, derived from the GNSS anchor + monotonic clock.
      *
-     * Without a GNSS anchor there is no tamper-proof time source, so the raw
-     * device clock is returned. (Adding the monotonic delta to the raw clock
-     * here would double-count elapsed time and advance at 2x real speed.)
+     * Anchored to the monotonic clock ([SystemClock.elapsedRealtime]) so changing
+     * the device wall clock in settings NEVER causes trustedUtcNow() to change or jump.
      */
     fun trustedUtcNow(): Long {
-        val anchor = anchorGnssUtcMillis
-        return if (anchor != null) {
-            anchor + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
+        val satellite = anchorGnssUtcMillis
+        return if (satellite != null) {
+            satellite + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
         } else {
-            System.currentTimeMillis()
+            initialSystemTimeMillis + (SystemClock.elapsedRealtime() - initialElapsedRealtime)
         }
     }
 
@@ -96,13 +141,14 @@ class TrustedTimeManager(private val appContext: Context) {
 
     private fun evaluate() {
         val satellite = anchorGnssUtcMillis
+        val trusted = trustedUtcNow()
         val device = System.currentTimeMillis()
-        val divergence = satellite?.let { Math.abs(device - it) } ?: 0L
+        val divergence = Math.abs(device - trusted)
         val autoTime = isAutoTimeEnabled()
-        val tamper = (satellite != null && divergence > DIVERGENCE_THRESHOLD_MS) || !autoTime
+        val tamper = (divergence > DIVERGENCE_THRESHOLD_MS) || !autoTime
         _state.value = TimeIntegrityState(
             gnssTimeAvailable = satellite != null,
-            satelliteUtcMillis = satellite,
+            satelliteUtcMillis = satellite ?: trusted,
             deviceUtcMillis = device,
             divergenceSeconds = divergence / 1000,
             autoTimeEnabled = autoTime,
@@ -176,7 +222,18 @@ class TrustedTimeManager(private val appContext: Context) {
             addAction(Intent.ACTION_TIMEZONE_CHANGED)
             addAction(Intent.ACTION_DATE_CHANGED)
         }
-        appContext.registerReceiver(clockReceiver, filter)
+        try {
+            androidx.core.content.ContextCompat.registerReceiver(
+                appContext,
+                clockReceiver,
+                filter,
+                androidx.core.content.ContextCompat.RECEIVER_EXPORTED
+            )
+        } catch (e: Exception) {
+            try {
+                appContext.registerReceiver(clockReceiver, filter)
+            } catch (ignored: Exception) {}
+        }
     }
 
     private val clockReceiver = object : BroadcastReceiver() {
