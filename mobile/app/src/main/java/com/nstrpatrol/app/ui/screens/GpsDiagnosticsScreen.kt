@@ -143,12 +143,12 @@ fun GpsDiagnosticsScreen(
 
     var reportVisible by remember { mutableStateOf(false) }
 
-    // 1-second tick so device-clock displays stay live even without a fix.
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    // 1-second tick driven by GPS satellite time anchor so clock does not change on manual tamper.
+    var now by remember { mutableLongStateOf(trustedUtcNow()) }
     LaunchedEffect(Unit) {
         while (true) {
             delay(1000)
-            now = System.currentTimeMillis()
+            now = trustedUtcNow()
         }
     }
 

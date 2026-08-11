@@ -63,6 +63,11 @@ class TrustedTimeManager(private val appContext: Context) {
     val state: StateFlow<TimeIntegrityState> = _state.asStateFlow()
 
     @Volatile
+    private var initialSystemTimeMillis: Long = System.currentTimeMillis()
+    @Volatile
+    private var initialElapsedRealtime: Long = SystemClock.elapsedRealtime()
+
+    @Volatile
     private var anchorGnssUtcMillis: Long? = null
     @Volatile
     private var anchorElapsedRealtime: Long = SystemClock.elapsedRealtime()
@@ -111,16 +116,15 @@ class TrustedTimeManager(private val appContext: Context) {
     /**
      * True UTC at this instant, derived from the GNSS anchor + monotonic clock.
      *
-     * Without a GNSS anchor there is no tamper-proof time source, so the raw
-     * device clock is returned. (Adding the monotonic delta to the raw clock
-     * here would double-count elapsed time and advance at 2x real speed.)
+     * Anchored to the monotonic clock ([SystemClock.elapsedRealtime]) so changing
+     * the device wall clock in settings NEVER causes trustedUtcNow() to change or jump.
      */
     fun trustedUtcNow(): Long {
-        val anchor = anchorGnssUtcMillis
-        return if (anchor != null) {
-            anchor + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
+        val satellite = anchorGnssUtcMillis
+        return if (satellite != null) {
+            satellite + (SystemClock.elapsedRealtime() - anchorElapsedRealtime)
         } else {
-            System.currentTimeMillis()
+            initialSystemTimeMillis + (SystemClock.elapsedRealtime() - initialElapsedRealtime)
         }
     }
 
@@ -137,13 +141,14 @@ class TrustedTimeManager(private val appContext: Context) {
 
     private fun evaluate() {
         val satellite = anchorGnssUtcMillis
+        val trusted = trustedUtcNow()
         val device = System.currentTimeMillis()
-        val divergence = satellite?.let { Math.abs(device - it) } ?: 0L
+        val divergence = Math.abs(device - trusted)
         val autoTime = isAutoTimeEnabled()
-        val tamper = (satellite != null && divergence > DIVERGENCE_THRESHOLD_MS) || !autoTime
+        val tamper = (divergence > DIVERGENCE_THRESHOLD_MS) || !autoTime
         _state.value = TimeIntegrityState(
             gnssTimeAvailable = satellite != null,
-            satelliteUtcMillis = satellite,
+            satelliteUtcMillis = satellite ?: trusted,
             deviceUtcMillis = device,
             divergenceSeconds = divergence / 1000,
             autoTimeEnabled = autoTime,
