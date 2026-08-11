@@ -19,9 +19,12 @@ export const navModules: NavItem[] = [
     icon: "route",
     children: [
       { label: "Patrol Dashboard", href: "/patrols" },
-      { label: "Create Patrol", href: "/patrols/new" },
+      { label: "All Patrols", href: "/patrols/all" },
+      { label: "Ongoing Patrols", href: "/patrols/all?status=ongoing" },
+      { label: "Completed Patrols", href: "/patrols/all?status=completed" },
+      { label: "Patrol History", href: "/patrols/history" },
       { label: "Patrol Reports", href: "/patrols/reports" },
-      { label: "Patrol Templates", href: "/patrols/templates" },
+      { label: "Patrol Permissions", href: "/patrols/permissions" },
     ],
   },
   {
@@ -158,9 +161,11 @@ export function breadcrumbsFor(pathname: string): { label: string; href?: string
   if (segs.length > 1) {
     const child = mod?.children?.find((c) => c.href.split("/")[1] === segs[0] && c.href.split("/")[2] === segs[1]);
     if (child) crumbs.push({ label: child.label, href: child.href });
+    else if (segs[1] === "all") crumbs.push({ label: "All Patrols", href: "/patrols/all" });
+    else if (segs[1] === "history") crumbs.push({ label: "Patrol History", href: "/patrols/history" });
+    else if (segs[1] === "permissions") crumbs.push({ label: "Patrol Permissions", href: "/patrols/permissions" });
     else if (segs[1] === "new") crumbs.push({ label: "Create" });
     else if (segs[1] === "replay") crumbs.push({ label: "Replay" });
-    else if (segs[1] === "templates") crumbs.push({ label: "Templates", href: `/patrols/templates` });
     else if (/^[a-z0-9-]+$/.test(segs[1]) && segs[1].length < 24) crumbs.push({ label: decapitalize(segs[1]) });
   }
   return crumbs;

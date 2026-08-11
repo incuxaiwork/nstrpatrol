@@ -23,6 +23,7 @@ import { unitName } from "@/lib/mock/hierarchy";
 import type { MapLayerDef } from "@/lib/types";
 import { mockRangers } from "@/lib/mock/people";
 import { mockObservations, categoryMeta } from "@/lib/mock/observations";
+import { mockAuthorizations } from "@/lib/mock/authorizations";
 
 const VIEW = { w: 1000, h: 700 };
 
@@ -47,7 +48,6 @@ export interface MapProps {
 
 export function MapWorkspace({
   layers,
-  mode = "workspace",
   heightClass = "h-[560px]",
   selectedId,
   onSelect,
@@ -229,6 +229,41 @@ export function MapWorkspace({
                 </polygon>
               ))}
 
+            {/* patrol authorization areas */}
+            {visible("authareas") &&
+              authAreaBeats(beats).map(({ b, auth }) => (
+                <g key={`auth-${b.id}`}>
+                  <polygon
+                    points={b.points}
+                    fill="#FF8F00"
+                    opacity="0.12"
+                    stroke="#FF8F00"
+                    strokeWidth="2.5"
+                    strokeDasharray="7 5"
+                    className="pointer-events-none"
+                  />
+                  <text
+                    x={midX(b)}
+                    y={midY(b)}
+                    textAnchor="middle"
+                    fontSize="13"
+                    fontWeight="700"
+                    fill="#8a4b00"
+                  >
+                    AUTH
+                  </text>
+                  <text
+                    x={midX(b)}
+                    y={midY(b) + 18}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="#8a4b00"
+                  >
+                    {auth.id}
+                  </text>
+                </g>
+              ))}
+
             {/* patrol routes */}
             {visible("patrols") &&
               gisRoutes.map((r) => {
@@ -324,6 +359,7 @@ export function MapWorkspace({
               <LegendRow color="#B3261E" label="Observation" />
               <LegendRow color="#FF8F00" label="Incident" />
               <LegendRow color="#B3261E" dashed label="Zero patrol zone" />
+              <LegendRow color="#FF8F00" dashed label="Authorization area" />
               <LegendRow color="#9db8c9" label="Water body" />
             </div>
           )}
@@ -417,6 +453,15 @@ const midY = (b: BeatPolygon) => {
   const ys = b.points.split(" ").map((p) => Number(p.split(",")[1]));
   return (Math.min(...ys) + Math.max(...ys)) / 2;
 };
+
+const authAreaBeats = (beats: BeatPolygon[]) =>
+  mockAuthorizations
+    .filter((a) => a.status === "active")
+    .map((auth) => ({
+      auth,
+      b: beats.find((b) => b.id === auth.authBeat),
+    }))
+    .filter((x): x is { auth: (typeof mockAuthorizations)[number]; b: BeatPolygon } => Boolean(x.b));
 
 const rangerCode = (label: string) => {
   const m = label.match(/^([A-Z]+-\d+)/i);

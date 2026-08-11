@@ -115,6 +115,7 @@ export const defaultLayers: MapLayerDef[] = [
   { id: "rangers", name: "Ranger positions", group: "activity", visible: true, color: "#1B365D" },
   { id: "observations", name: "Observations", group: "activity", visible: true, color: "#B3261E" },
   { id: "incidents", name: "Incidents / SOS", group: "activity", visible: true, color: "#B3261E" },
+  { id: "authareas", name: "Patrol authorization areas", group: "analysis", visible: false, color: "#FF8F00", description: "Active special patrol authorizations outside the normal jurisdiction" },
   { id: "coverage", name: "Coverage density", group: "analysis", visible: false, color: "#FF8F00" },
   { id: "heat", name: "Activity heatmap", group: "analysis", visible: false, color: "#B3261E" },
   { id: "zeropatrol", name: "Zero patrol zones", group: "analysis", visible: true, color: "#B3261E" },

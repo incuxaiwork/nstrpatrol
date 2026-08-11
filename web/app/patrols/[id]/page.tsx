@@ -1,23 +1,26 @@
 "use client";
 
 /**
- * Patrol detail (PRD §6.3) — full operational record: stats, route map,
- * unit context, crew, timeline, notes, and status actions (dispatch /
- * complete / cancel via mock confirm dialogs). Print and export are
- * wired to the global export dialog.
+ * Patrol detail (PRD §6.3 — new operating model) — full operational record.
+ * Read-only from the admin perspective: the portal monitors and reviews
+ * patrols recorded by rangers in the field. The jurisdiction banner shows
+ * whether the patrol lies within the ranger's normal jurisdiction or was
+ * covered by a special authorization.
  */
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
-import { useState } from "react";
-import { patrols } from "@/lib/services";
+import { useMemo, useState } from "react";
+import { authorizations, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone } from "@/components/ui";
 import { StatRow, Timeline } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
-import { ConfirmDialog, ExportDialog, ExportButton } from "@/components/overlays";
+import { JurisdictionBanner } from "@/components/jurisdiction";
+import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
+import { ExportDialog, ExportButton } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
@@ -27,14 +30,19 @@ import type { PatrolEvent } from "@/lib/types";
 
 export default function PatrolDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const [confirm, setConfirm] = useState<"cancel" | "complete" | null>(null);
+  const auths = useAsyncData(() => authorizations.list());
   const [exportOpen, setExportOpen] = useState(false);
 
-  if (loading || !patrol) return <SkeletonRows rows={8} />;
+  const jurisdiction = useMemo(
+    () => (patrol && auths.data ? resolveJurisdiction(patrol, auths.data) : undefined),
+    [patrol, auths.data]
+  );
+
+  if (loading || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
+  if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the mock records")} />;
 
   const eventTone = (k: PatrolEvent["kind"]): BadgeTone =>
     k === "incident" ? "danger" : k === "sos" ? "danger" : k === "observation" ? "warning" : k === "checkpoint" ? "info" : "forest";
@@ -42,6 +50,7 @@ export default function PatrolDetailPage() {
     k === "incident" ? "alert" : k === "sos" ? "sos" : k === "observation" ? "binoculars" : k === "checkpoint" ? "pin" : "check";
 
   const crew = [patrol.leader, ...patrol.members];
+  const auth = jurisdiction.authorization;
 
   return (
     <div>
@@ -64,36 +73,31 @@ export default function PatrolDetailPage() {
             >
               <Icon name="play" size={14} /> Replay
             </Link>
-            {patrol.status === "ongoing" || patrol.status === "delayed" ? (
-              <button
-                onClick={() => setConfirm("complete")}
-                className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
-              >
-                <Icon name="check" size={15} /> Complete
-              </button>
-            ) : null}
-            {patrol.status === "planned" || patrol.status === "assigned" ? (
-              <button
-                onClick={() => setConfirm("cancel")}
-                className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/40 bg-white px-4 text-sm font-medium text-danger hover:bg-danger-soft"
-              >
-                <Icon name="x" size={15} /> Cancel patrol
-              </button>
-            ) : null}
           </>
         }
       />
 
-      <StatRow
-        items={[
-          { label: "Distance", value: patrol.distanceKm > 0 ? formatKm(patrol.distanceKm) : "—" },
-          { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
-          { label: "Checkpoints", value: patrol.checkpoints },
-          { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },
-          { label: "Observations", value: patrol.observations },
-          { label: "Photos", value: patrol.photos },
-        ]}
-      />
+      <div className="mt-2">
+        <JurisdictionBanner
+          state={jurisdiction.state}
+          authorization={auth}
+          homeArea={jurisdiction.homeBeat ? unitName(jurisdiction.homeDivision) + " / " + unitName(jurisdiction.homeRange) + " / " + unitName(jurisdiction.homeBeat) : undefined}
+          patrolArea={`${unitName(patrol.division)} / ${unitName(patrol.range)} / ${unitName(patrol.beat)}`}
+        />
+      </div>
+
+      <div className="mt-4">
+        <StatRow
+          items={[
+            { label: "Distance", value: patrol.distanceKm > 0 ? formatKm(patrol.distanceKm) : "—" },
+            { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
+            { label: "Checkpoints", value: patrol.checkpoints },
+            { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },
+            { label: "Observations", value: patrol.observations },
+            { label: "Photos", value: patrol.photos },
+          ]}
+        />
+      </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
@@ -136,7 +140,7 @@ export default function PatrolDetailPage() {
               <DetailRow label="Division" value={unitName(patrol.division)} />
               <DetailRow label="Range" value={unitName(patrol.range)} />
               <DetailRow label="Beat" value={unitName(patrol.beat)} />
-              <DetailRow label="Team" value={patrol.teamId} />
+              <DetailRow label="Team" value={unitName(patrol.teamId)} />
               <DetailRow label="Objective" value={patrol.objective} />
               <DetailRow label="Scheduled" value={formatDateTime(patrol.startScheduled)} />
               {patrol.startActual && <DetailRow label="Started" value={formatDateTime(patrol.startActual)} />}
@@ -145,8 +149,26 @@ export default function PatrolDetailPage() {
             </dl>
           </Card>
 
+          {auth && (
+            <Card>
+              <CardHeader title="Special authorization" icon="lock" iconTone="navy" subtitle="Patrol performed under this permission" />
+              <dl className="space-y-2.5 p-4 text-sm">
+                <DetailRow label="Authorization" value={<span className="font-mono">{auth.id}</span>} />
+                <DetailRow label="Status" value={<Badge tone={authStatusTone[auth.status]} dot>{authStatusLabel[auth.status]}</Badge>} />
+                <DetailRow label="Authorized area" value={`${unitName(auth.authDivision)} / ${unitName(auth.authRange)} / ${unitName(auth.authBeat)}`} />
+                <DetailRow label="Approved by" value={auth.approvedBy ?? "—"} />
+                <DetailRow label="Valid until" value={formatDateTime(auth.validUntil)} />
+              </dl>
+              <div className="border-t border-line p-4">
+                <Link href={`/patrols/permissions/${auth.id}`} className="text-xs font-medium text-forest-700 hover:underline">
+                  View authorization details →
+                </Link>
+              </div>
+            </Card>
+          )}
+
           <Card>
-            <CardHeader title="Crew" icon="users" subtitle={`${crew.length} rangers`} />
+            <CardHeader title="Rangers" icon="users" subtitle={`${crew.length} rangers`} />
             <div className="space-y-2.5 p-4">
               {crew.map((name, i) => (
                 <div key={name} className="flex items-center gap-2.5">
@@ -183,26 +205,6 @@ export default function PatrolDetailPage() {
         </div>
       </div>
 
-      <ConfirmDialog
-        open={confirm !== null}
-        danger={confirm === "cancel"}
-        title={confirm === "cancel" ? "Cancel this patrol?" : "Complete this patrol?"}
-        message={
-          confirm === "cancel"
-            ? `Patrol ${patrol.code} will be marked as cancelled. This cannot be undone (mock action — no backend call).`
-            : `Mark ${patrol.code} as completed? Duration and coverage are finalised from the field log (mock action).`
-        }
-        confirmLabel={confirm === "cancel" ? "Cancel patrol" : "Complete patrol"}
-        onClose={() => setConfirm(null)}
-        onConfirm={() => {
-          pushToast(
-            confirm === "cancel" ? "warning" : "success",
-            confirm === "cancel" ? "Patrol cancelled" : "Patrol completed",
-            `${patrol.code} ${confirm === "cancel" ? "cancelled" : "completed"} (mock)`
-          );
-          router.refresh();
-        }}
-      />
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );
@@ -210,7 +212,24 @@ export default function PatrolDetailPage() {
 
 // -- helpers -----------------------------------------------------------
 
-function DetailRow({ label, value }: { label: string; value: string }) {
+function NotFound({ what, id, onBack }: { what: string; id: string; onBack(): void }) {
+  return (
+    <div className="flex min-h-64 flex-col items-center justify-center gap-3 rounded-card border border-line bg-white p-6 text-center">
+      <Icon name="search" size={28} className="text-ink-faint" />
+      <p className="text-sm font-medium text-ink">
+        {what[0].toUpperCase() + what.slice(1)} <span className="font-mono">{id}</span> not found
+      </p>
+      <p className="max-w-sm text-xs text-ink-soft">
+        It may not exist in the mock records, or the record is still syncing from the field.
+      </p>
+      <button onClick={onBack} className="inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700">
+        <Icon name="chevronLeft" size={12} /> Back to patrols
+      </button>
+    </div>
+  );
+}
+
+function DetailRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <dt className="shrink-0 text-xs text-ink-soft">{label}</dt>

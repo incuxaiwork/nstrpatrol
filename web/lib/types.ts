@@ -45,6 +45,63 @@ export type PatrolMethod =
   | "horse"
   | "camel";
 
+/**
+ * Lifecycle of a special patrol authorization (PRD §6 — Patrol Permissions).
+ * Rangers patrol their normal jurisdiction freely; anything outside it must
+ * be covered by an authorization in one of these states.
+ */
+export type AuthorizationStatus =
+  | "draft"
+  | "pending"
+  | "active"
+  | "expired"
+  | "revoked"
+  | "completed"
+  | "rejected";
+
+/**
+ * Jurisdiction validation of a patrol against the ranger's home area and any
+ * special authorization that covers the patrol.
+ */
+export type JurisdictionState =
+  | "normal"
+  | "authorized-exception"
+  | "pending-review"
+  | "requires-review";
+
+export interface AuthorizationEvent {
+  time: string;
+  user: string;
+  action: string;
+  description: string;
+}
+
+/** Special patrol authorization granted by a Super Admin / senior officer. */
+export interface PatrolAuthorization {
+  id: string;
+  rangerId: string;
+  homeDivision: string;
+  homeRange: string;
+  homeBeat: string;
+  authDivision: string;
+  authRange: string;
+  authBeat: string;
+  reason: string;
+  instruction: string;
+  patrolType: PatrolType;
+  objective?: string;
+  validFrom: string;
+  validUntil: string;
+  priority: "low" | "medium" | "high" | "critical";
+  restrictions?: string;
+  notes?: string;
+  approvedBy?: string;
+  approvalDate?: string;
+  status: AuthorizationStatus;
+  createdDate: string;
+  history: AuthorizationEvent[];
+}
+
 export interface RangerRef {
   id: string;
   name: string;
@@ -64,6 +121,8 @@ export interface Patrol {
   compartment?: string;
   teamId: string;
   leader: string;
+  rangerId?: string;
+  authorizationId?: string;
   members: string[];
   startScheduled: string;
   endScheduled?: string;
@@ -251,7 +310,14 @@ export interface Observation {
 
 export interface DashboardSummary {
   activePatrols: number;
-  completedToday: number;
+  patrolsStartedToday: number;
+  patrolsCompletedToday: number;
+  rangersPatrolling: number;
+  activeAuthorizations: number;
+  crossJurisdictionPatrols: number;
+  requiringReview: number;
+  normalToday: number;
+  authorizedToday: number;
   openIncidents: number;
   reportsToday: number;
   rangersOnDuty: number;

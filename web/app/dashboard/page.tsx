@@ -12,11 +12,11 @@ import { useApp } from "@/lib/store";
 import { dashboard } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
-import { KpiCard, Timeline } from "@/components/data";
+import { KpiCard } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
 import { LineChart, Donut, DonutLegend } from "@/components/charts";
-import { LoadingState, ErrorState } from "@/components/ui/loading";
+import { ErrorState } from "@/components/ui/loading";
 import {
   patrolStatusLabel,
   patrolStatusTone,
@@ -92,11 +92,11 @@ export default function DashboardPage() {
               Refresh
             </button>
             <button
-              onClick={() => router.push("/patrols/new")}
+              onClick={() => router.push("/patrols/permissions/new")}
               className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
             >
-              <Icon name="plus" size={15} />
-              Create patrol
+              <Icon name="lock" size={15} />
+              Create authorization
             </button>
           </div>
         }
@@ -105,9 +105,9 @@ export default function DashboardPage() {
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <KpiCard label="Active patrols" value={data.activePatrols} icon="route" tone="success" onClick={() => router.push("/patrols")} />
-        <KpiCard label="Completed today" value={data.completedToday} icon="check" tone="forest" onClick={() => router.push("/patrols?status=completed")} />
+        <KpiCard label="Normal patrols today" value={data.normalToday} icon="check" tone="forest" onClick={() => router.push("/patrols?area=normal")} />
+        <KpiCard label="Authorized patrols today" value={data.authorizedToday} icon="lock" tone="info" onClick={() => router.push("/patrols?area=authorized")} />
         <KpiCard label="Open incidents" value={data.openIncidents} icon="alert" tone="danger" onClick={() => router.push("/observations")} />
-        <KpiCard label="Reports today" value={data.reportsToday} icon="file" tone="info" onClick={() => router.push("/observations/list")} />
         <KpiCard label="Rangers on duty" value={`${data.rangersOnDuty}/${data.rangersTotal}`} icon="users" tone="khaki" onClick={() => router.push("/rangers")} />
         <KpiCard label="Coverage" value={data.coveragePct} unit="%" icon="target" tone="warning" onClick={() => router.push("/gis")} />
       </div>
@@ -381,7 +381,7 @@ export default function DashboardPage() {
         <div className="grid grid-cols-2 gap-3 p-4 sm:grid-cols-3 xl:grid-cols-6">
           {[
             { label: "Patrol operations", icon: "route" as const, href: "/patrols" },
-            { label: "Create patrol", icon: "plus" as const, href: "/patrols/new" },
+            { label: "Patrol permissions", icon: "lock" as const, href: "/patrols/permissions" },
             { label: "Review reports", icon: "binoculars" as const, href: "/observations" },
             { label: "GIS intelligence", icon: "map" as const, href: "/gis" },
             { label: "Ranger management", icon: "users" as const, href: "/rangers" },

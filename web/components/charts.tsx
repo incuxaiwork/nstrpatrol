@@ -179,6 +179,7 @@ export function LineChart({
         ))}
         {series.map((s, j) => {
           const pts = toXY(s.values);
+          if (pts.length === 0) return null;
           const d = pts.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(" ");
           const col = PALETTE[j % PALETTE.length];
           return (

@@ -8,7 +8,9 @@
  * that real network requests will use.
  */
 
-import { mockPatrols, mockPatrolReports, mockPatrolTemplates, patrolMethodLabels, patrolTypeLabels } from "@/lib/mock/patrols";
+import { mockPatrols, mockPatrolReports, patrolMethodLabels, patrolTypeLabels } from "@/lib/mock/patrols";
+import { mockAuthorizations } from "@/lib/mock/authorizations";
+import { resolveJurisdiction } from "@/lib/jurisdiction";
 import {
   mockEquipment,
   mockRangers,
@@ -56,8 +58,10 @@ import type {
   AnalyticsDataset,
   AdminUser,
   AuditEntry,
+  AuthorizationStatus,
   DashboardSummary,
   EquipmentItem,
+  JurisdictionState,
   KpiSeries,
   MapLayerDef,
   MasterData,
@@ -65,9 +69,9 @@ import type {
   NotificationTemplate,
   Observation,
   Patrol,
+  PatrolAuthorization,
   PatrolReport,
   PatrolStatus,
-  PatrolTemplate,
   Ranger,
   Role,
   SearchResult,
@@ -96,16 +100,96 @@ export const patrols = {
     await delay();
     return mockPatrols.filter((p) => p.status === status);
   },
-  templates: async (): Promise<PatrolTemplate[]> => {
-    await delay();
-    return mockPatrolTemplates;
-  },
   reports: async (): Promise<PatrolReport[]> => {
     await delay();
     return mockPatrolReports;
   },
   typeLabels: patrolTypeLabels,
   methodLabels: patrolMethodLabels,
+};
+
+/* ------------------------------------------------------------------ */
+/* Patrol authorizations (special patrol permissions)                 */
+/* ------------------------------------------------------------------ */
+
+/** In-session store so create / approve / revoke work without a backend. */
+let authStore: PatrolAuthorization[] = [...mockAuthorizations];
+
+let authSeq = 125;
+
+export const authorizations = {
+  list: async (): Promise<PatrolAuthorization[]> => {
+    await delay();
+    return [...authStore];
+  },
+  get: async (id: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    return authStore.find((a) => a.id === id);
+  },
+  /** Related patrols performed under an authorization (PRD §18). */
+  relatedPatrols: async (id: string): Promise<Patrol[]> => {
+    await delay();
+    return mockPatrols.filter((p) => p.authorizationId === id);
+  },
+  create: async (
+    input: Omit<PatrolAuthorization, "id" | "status" | "createdDate" | "history"> & { status?: AuthorizationStatus }
+  ): Promise<PatrolAuthorization> => {
+    await delay();
+    const auth: PatrolAuthorization = {
+      ...input,
+      id: `AUTH-2026-${String(authSeq++).padStart(5, "0")}`,
+      status: input.status ?? "draft",
+      createdDate: new Date().toISOString(),
+      history: [
+        {
+          time: new Date().toISOString(),
+          user: "V. Kulkarni · Super Admin",
+          action: "Created",
+          description: `Authorization ${input.status === "active" ? "created and approved" : "created as draft"}`,
+        },
+      ],
+    };
+    if (auth.status === "active") {
+      auth.approvedBy = "V. Kulkarni · Super Admin";
+      auth.approvalDate = auth.createdDate;
+      auth.history.push({
+        time: auth.createdDate,
+        user: "V. Kulkarni · Super Admin",
+        action: "Approved",
+        description: "Approved by Super Admin; authorization activated",
+      });
+    }
+    authStore = [auth, ...authStore];
+    return auth;
+  },
+  approve: async (id: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth || auth.status !== "pending") return auth;
+    auth.status = "active";
+    auth.approvedBy = "V. Kulkarni · Super Admin";
+    auth.approvalDate = new Date().toISOString();
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Approved",
+      description: "Approved by Super Admin; authorization activated",
+    });
+    return { ...auth };
+  },
+  revoke: async (id: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth || auth.status !== "active") return auth;
+    auth.status = "revoked";
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Revoked",
+      description: "Revoked by Super Admin",
+    });
+    return { ...auth };
+  },
 };
 
 /* ------------------------------------------------------------------ */
@@ -172,13 +256,30 @@ export const dashboard = {
   summary: async (): Promise<DashboardSummary> => {
     await delay(420);
     const active = mockPatrols.filter((p) => p.status === "ongoing").length;
-    const completed = mockPatrols.filter((p) => p.status === "completed").length;
+    const today = mockPatrols.filter(
+      (p) => new Date(p.startScheduled).toDateString() === new Date().toDateString()
+    );
+    const patrolsStartedToday = today.length;
+    const patrolsCompletedToday = mockPatrols.filter(
+      (p) => p.status === "completed" && new Date(p.endActual ?? p.startScheduled).toDateString() === new Date().toDateString()
+    ).length;
     const openIncidents = mockObservations.filter(
       (o) => o.severity === "critical" || o.severity === "high"
     ).length;
+    const jurisdiction = mockPatrols.map((p) => resolveJurisdiction(p, authStore).state);
+    const count = (s: JurisdictionState) => jurisdiction.filter((x) => x === s).length;
+    const todayJurisdiction = today.map((p) => resolveJurisdiction(p, authStore).state);
+    const activeAuthorizations = authStore.filter((a) => a.status === "active").length;
     return {
       activePatrols: active,
-      completedToday: completed,
+      patrolsStartedToday,
+      patrolsCompletedToday,
+      rangersPatrolling: mockRangers.filter((r) => r.dutyStatus === "field").length,
+      activeAuthorizations,
+      crossJurisdictionPatrols: count("authorized-exception"),
+      requiringReview: count("requires-review") + count("pending-review"),
+      normalToday: todayJurisdiction.filter((x) => x === "normal").length,
+      authorizedToday: todayJurisdiction.filter((x) => x === "authorized-exception").length,
       openIncidents,
       reportsToday: mockObservations.length,
       rangersOnDuty: mockRangers.filter(
@@ -194,9 +295,9 @@ export const dashboard = {
       ],
       byStatus: [
         { status: "planned", count: 2 },
-        { status: "assigned", count: 1 },
+        { status: "assigned", count: 0 },
         { status: "ongoing", count: active },
-        { status: "completed", count: completed },
+        { status: "completed", count: mockPatrols.filter((p) => p.status === "completed").length },
         { status: "cancelled", count: 1 },
         { status: "delayed", count: 1 },
       ],
@@ -206,9 +307,7 @@ export const dashboard = {
         { title: "Elephant herd near village road", severity: "high", time: "10:05" },
       ],
       recentReports: mockObservations.slice(0, 5),
-      todayPatrols: mockPatrols.filter(
-        (p) => new Date(p.startScheduled).toDateString() === new Date().toDateString()
-      ),
+      todayPatrols: today,
       activity: [
         { hour: "06", patrols: 2, reports: 1 },
         { hour: "07", patrols: 4, reports: 2 },
@@ -284,6 +383,22 @@ export const analytics = {
   heatmap: async () => {
     await delay();
     return heatmapPatrol;
+  },
+  jurisdiction: async () => {
+    await delay();
+    const states = mockPatrols.map((p) => resolveJurisdiction(p, authStore).state);
+    const count = (s: JurisdictionState) => states.filter((x) => x === s).length;
+    const total = Math.max(states.length, 1);
+    return {
+      normal: count("normal"),
+      authorized: count("authorized-exception"),
+      pending: count("pending-review"),
+      review: count("requires-review"),
+      total,
+      normalPct: Math.round((count("normal") / total) * 100),
+      authorizedPct: Math.round((count("authorized-exception") / total) * 100),
+      reviewPct: Math.round(((count("requires-review") + count("pending-review")) / total) * 100),
+    };
   },
 };
 
