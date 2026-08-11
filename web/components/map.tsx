@@ -57,6 +57,7 @@ export function MapWorkspace({
 }: MapProps) {
   const [zoom, setZoom] = useState(1);
   const [replayOn, setReplayOn] = useState(false);
+  const [replaySpeed, setReplaySpeed] = useState(1);
   const [progress, setProgress] = useState(0);
   const [legendOpen, setLegendOpen] = useState(false);
   const beats = liveBeats ?? mapBeatsRaw;
@@ -84,11 +85,11 @@ export function MapWorkspace({
           setReplayOn(false);
           return 1;
         }
-        return p + 0.01;
+        return p + 0.01 * replaySpeed;
       });
     }, 60);
     return () => clearInterval(id);
-  }, [replayOn, replaySegments.length]);
+  }, [replayOn, replaySegments.length, replaySpeed]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">
@@ -354,7 +355,7 @@ export function MapWorkspace({
             <span className="w-12 text-right text-xs tabular-nums text-ink-soft">
               {Math.round(progress * 100)}%
             </span>
-            <ReplaySpeed onSpeed={() => {}} />
+            <ReplaySpeed onSpeed={setReplaySpeed} />
           </div>
         )}
       </div>

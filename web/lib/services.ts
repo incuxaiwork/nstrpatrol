@@ -8,13 +8,14 @@
  * that real network requests will use.
  */
 
-import { mockPatrols, mockPatrolTemplates, patrolTypeLabels } from "@/lib/mock/patrols";
+import { mockPatrols, mockPatrolReports, mockPatrolTemplates, patrolMethodLabels, patrolTypeLabels } from "@/lib/mock/patrols";
 import {
   mockEquipment,
   mockRangers,
   mockTeams,
   mockVehicles,
   mockWeapons,
+  rangerTrends,
 } from "@/lib/mock/people";
 import {
   categoryMeta,
@@ -33,9 +34,12 @@ import {
   beatCoverage,
   comparativeSeries,
   heatmapPatrol,
+  humanImpactTrend,
   incidentTrend,
   monthlyTrend,
+  mortalityTrend,
   scopeKpis,
+  waterBodyStatus,
   weeklyActivity,
   wildlifeSightings,
 } from "@/lib/mock/analytics";
@@ -61,6 +65,7 @@ import type {
   NotificationTemplate,
   Observation,
   Patrol,
+  PatrolReport,
   PatrolStatus,
   PatrolTemplate,
   Ranger,
@@ -95,7 +100,12 @@ export const patrols = {
     await delay();
     return mockPatrolTemplates;
   },
+  reports: async (): Promise<PatrolReport[]> => {
+    await delay();
+    return mockPatrolReports;
+  },
   typeLabels: patrolTypeLabels,
+  methodLabels: patrolMethodLabels,
 };
 
 /* ------------------------------------------------------------------ */
@@ -110,6 +120,15 @@ export const rangers = {
   get: async (id: string): Promise<Ranger | undefined> => {
     await delay();
     return mockRangers.find((r) => r.id === id);
+  },
+  trend: async (id: string): Promise<AnalyticsDataset> => {
+    await delay();
+    return (
+      rangerTrends[id] ?? {
+        labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+        series: [{ name: "Patrols", values: [10, 11, 10, 12, 11, 10] }],
+      }
+    );
   },
   teams: async (): Promise<Team[]> => {
     await delay();
@@ -168,6 +187,11 @@ export const dashboard = {
       rangersTotal: mockRangers.length,
       coveragePct: 82,
       zeroPatrolZones: 3,
+      zeroPatrolList: [
+        { beat: "C1-B", days: 16 },
+        { beat: "S1-B", days: 21 },
+        { beat: "N2-B", days: 13 },
+      ],
       byStatus: [
         { status: "planned", count: 2 },
         { status: "assigned", count: 1 },
@@ -182,6 +206,9 @@ export const dashboard = {
         { title: "Elephant herd near village road", severity: "high", time: "10:05" },
       ],
       recentReports: mockObservations.slice(0, 5),
+      todayPatrols: mockPatrols.filter(
+        (p) => new Date(p.startScheduled).toDateString() === new Date().toDateString()
+      ),
       activity: [
         { hour: "06", patrols: 2, reports: 1 },
         { hour: "07", patrols: 4, reports: 2 },
@@ -231,6 +258,18 @@ export const analytics = {
   wildlife: async (): Promise<AnalyticsDataset> => {
     await delay();
     return wildlifeSightings;
+  },
+  humanImpact: async (): Promise<AnalyticsDataset> => {
+    await delay();
+    return humanImpactTrend;
+  },
+  waterBodies: async (): Promise<AnalyticsDataset> => {
+    await delay();
+    return waterBodyStatus;
+  },
+  mortality: async (): Promise<AnalyticsDataset> => {
+    await delay();
+    return mortalityTrend;
   },
   beatCoverage: async () => {
     await delay();

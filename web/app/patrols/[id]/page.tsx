@@ -8,6 +8,7 @@
  */
 
 import { useParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import { useState } from "react";
 import { patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
@@ -57,6 +58,12 @@ export default function PatrolDetailPage() {
               <Icon name="copy" size={14} /> Copy code
             </button>
             <ExportButton />
+            <Link
+              href={`/patrols/${patrol.id}/replay`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+            >
+              <Icon name="play" size={14} /> Replay
+            </Link>
             {patrol.status === "ongoing" || patrol.status === "delayed" ? (
               <button
                 onClick={() => setConfirm("complete")}

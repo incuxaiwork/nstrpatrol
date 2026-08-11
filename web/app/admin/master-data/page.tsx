@@ -1,6 +1,6 @@
 "use client";
 
-/** Master data (PRD §11.4) — species, categories, water bodies, patrol types, objectives, vehicle types */
+/** Master data (PRD §11.4) — species, categories, water bodies, patrol types, objectives, vehicle & weapon types */
 
 import { useState } from "react";
 import { admin } from "@/lib/services";
@@ -11,7 +11,7 @@ import { DataTable } from "@/components/data";
 import { Tabs } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 
-type TabKey = "species" | "categories" | "water" | "patrolTypes" | "objectives" | "vehicles";
+type TabKey = "species" | "categories" | "water" | "patrolTypes" | "objectives" | "vehicles" | "weapons";
 
 export default function MasterDataPage() {
   const { pushToast } = useApp();
@@ -29,6 +29,7 @@ export default function MasterDataPage() {
     patrolTypes: d.patrolTypes.length,
     objectives: d.patrolObjectives.length,
     vehicles: d.vehicleTypes.length,
+    weapons: d.weaponTypes.length,
   };
 
   return (
@@ -54,6 +55,7 @@ export default function MasterDataPage() {
           { value: "patrolTypes", label: "Patrol types", count: counts.patrolTypes },
           { value: "objectives", label: "Objectives", count: counts.objectives },
           { value: "vehicles", label: "Vehicle types", count: counts.vehicles },
+          { value: "weapons", label: "Weapon types", count: counts.weapons },
         ]}
         value={tab}
         onChange={setTab}
@@ -119,6 +121,16 @@ export default function MasterDataPage() {
             columns={[
               { key: "name", header: "Vehicle type", render: (v) => <span className="font-medium text-ink">{v.name}</span> },
               { key: "active", header: "Active", render: (v) => <Badge tone={v.active ? "success" : "neutral"}>{v.active ? "Yes" : "No"}</Badge> },
+            ]}
+          />
+        )}
+        {tab === "weapons" && (
+          <DataTable
+            rows={d.weaponTypes.map((w) => ({ ...w, id: w.id }))}
+            loading={false}
+            columns={[
+              { key: "name", header: "Weapon type", render: (w) => <span className="font-medium text-ink">{w.name}</span> },
+              { key: "active", header: "Active", render: (w) => <Badge tone={w.active ? "success" : "neutral"}>{w.active ? "Yes" : "No"}</Badge> },
             ]}
           />
         )}

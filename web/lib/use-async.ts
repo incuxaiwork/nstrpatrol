@@ -13,15 +13,20 @@ export function useAsyncData<T>(loader: () => Promise<T>, deps: unknown[] = []) 
   const [loading, setLoading] = useState(true);
   const [tick, setTick] = useState(0);
 
-  const reload = useCallback(() => setTick((t) => t + 1), []);
+  const reload = useCallback(() => {
+    setLoading(true);
+    setError(undefined);
+    setTick((t) => t + 1);
+  }, []);
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    setError(undefined);
     loader()
       .then((d) => {
-        if (alive) setData(d);
+        if (alive) {
+          setData(d);
+          setError(undefined);
+        }
       })
       .catch((e: Error) => {
         if (alive) setError(e);

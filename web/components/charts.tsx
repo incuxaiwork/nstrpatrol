@@ -238,16 +238,22 @@ export function Donut({
   const total = segments.reduce((a, s) => a + s.value, 0) || 1;
   const r = (size - thick) / 2;
   const c = 2 * Math.PI * r;
-  let acc = 0;
+  const placed = segments.reduce(
+    (acc, s) => {
+      const rot = (acc.offset / total) * 360;
+      acc.items.push({ ...s, rot });
+      acc.offset += s.value;
+      return acc;
+    },
+    { items: [] as { label: string; value: number; color: string; rot: number }[], offset: 0 }
+  );
   return (
     <div className="relative inline-flex items-center justify-center">
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label="Donut chart">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="#f0f2f4" strokeWidth={thick} />
-        {segments.map((s) => {
+        {placed.items.map((s) => {
           const frac = s.value / total;
           const dash = `${frac * c} ${c}`;
-          const rot = (acc / total) * 360;
-          acc += s.value;
           return (
             <circle
               key={s.label}
@@ -258,7 +264,7 @@ export function Donut({
               stroke={s.color}
               strokeWidth={thick}
               strokeDasharray={dash}
-              transform={`rotate(${rot} ${size / 2} ${size / 2})`}
+              transform={`rotate(${s.rot} ${size / 2} ${size / 2})`}
             >
               <title>{`${s.label}: ${s.value}`}</title>
             </circle>

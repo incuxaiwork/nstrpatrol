@@ -12,13 +12,12 @@ import { patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, type BadgeTone } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, KpiCard, PrimaryLink, Timeline } from "@/components/data";
-import { Icon, type IconName } from "@/components/icons";
+import type { IconName } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { timeAgo, formatMinutes } from "@/lib/utils";
 import { unitName } from "@/lib/mock/hierarchy";
-import type { PatrolStatus } from "@/lib/types";
 
 export default function PatrolsPage() {
   const router = useRouter();
@@ -138,24 +137,6 @@ export default function PatrolsPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Status breakdown" icon="chart" />
-            <div className="space-y-2.5 p-4">
-              {Object.entries(statusSeg).map(([s, n]) => (
-                <div key={s} className="flex items-center gap-2">
-                  <span className="w-24 text-xs text-ink-soft">{patrolStatusLabel[s as PatrolStatus]}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className={cn("h-full rounded-full", toneColor(patrolStatusTone[s as PatrolStatus]))}
-                      style={{ width: `${(n / data.length) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-6 text-right text-xs font-medium text-ink">{n}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
-          <Card>
             <CardHeader title="Recent activity" icon="history" />
             <div className="p-4">
               <Timeline
@@ -202,16 +183,4 @@ function CoveragePct({ value }: { value: number }) {
       <span className="text-xs text-ink-soft">{value}%</span>
     </div>
   );
-}
-
-function toneColor(tone: string) {
-  switch (tone) {
-    case "success": return "bg-success";
-    case "warning": return "bg-warning";
-    case "danger": return "bg-danger";
-    case "info": return "bg-info";
-    case "forest": return "bg-forest-600";
-    case "khaki": return "bg-khaki-500";
-    default: return "bg-zinc-300";
-  }
 }

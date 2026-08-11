@@ -12,6 +12,7 @@ import { rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, Avatar, SearchInput } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, type ViewMode } from "@/components/data";
+import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
@@ -57,9 +58,15 @@ export default function RangersPage() {
         title="Ranger Management"
         subtitle="Roster, duty status and field performance of all rangers"
         actions={
-          <Link href="/rangers/teams" className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800">
-            Teams & assets
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link href="/rangers/new" className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700">
+              <Icon name="plus" size={15} />
+              Create ranger
+            </Link>
+            <Link href="/rangers/teams" className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800">
+              Teams & assets
+            </Link>
+          </div>
         }
       />
 

@@ -2,7 +2,7 @@
  * Mock data — rangers, teams, vehicles, weapons, equipment.
  */
 
-import { EquipmentItem, Ranger, Team, Vehicle, Weapon } from "@/lib/types";
+import { AnalyticsDataset, EquipmentItem, Ranger, Team, Vehicle, Weapon } from "@/lib/types";
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
@@ -119,3 +119,77 @@ export const mockEquipment: EquipmentItem[] = [
   { id: "e5", name: "Flashlight", category: "Field Kit", quantity: 20, distributed: 19, division: "d-south", status: "low" },
   { id: "e6", name: "First Aid Kit", category: "Medical", quantity: 6, distributed: 6, division: "d-south", status: "maintenance" },
 ];
+
+/** Monthly performance trend per ranger (PRD §7 — performance trend review). */
+export const rangerTrends: Record<string, AnalyticsDataset> = {
+  "r-001": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [16, 18, 15, 21, 19, 17] },
+      { name: "Coverage %", values: [84, 88, 86, 94, 92, 91] },
+    ],
+  },
+  "r-002": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [19, 22, 18, 20, 24, 21] },
+      { name: "Coverage %", values: [82, 86, 84, 90, 91, 88] },
+    ],
+  },
+  "r-003": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [21, 19, 23, 20, 22, 18] },
+      { name: "Coverage %", values: [86, 83, 87, 85, 88, 83] },
+    ],
+  },
+  "r-004": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [15, 17, 19, 18, 20, 16] },
+      { name: "Coverage %", values: [80, 85, 87, 89, 91, 90] },
+    ],
+  },
+  "r-006": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [11, 13, 12, 15, 14, 12] },
+      { name: "Coverage %", values: [62, 66, 64, 72, 70, 71] },
+    ],
+  },
+  "r-007": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [13, 15, 14, 17, 16, 14] },
+      { name: "Coverage %", values: [78, 82, 81, 88, 86, 87] },
+    ],
+  },
+  "r-008": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [9, 11, 10, 12, 11, 9] },
+      { name: "Coverage %", values: [55, 58, 57, 63, 62, 64] },
+    ],
+  },
+  "r-009": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [14, 16, 15, 18, 17, 15] },
+      { name: "Coverage %", values: [76, 80, 79, 85, 84, 84] },
+    ],
+  },
+  "r-010": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [6, 8, 9, 10, 9, 7] },
+      { name: "Coverage %", values: [48, 52, 55, 60, 58, 58] },
+    ],
+  },
+  "r-011": {
+    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+    series: [
+      { name: "Patrols", values: [24, 26, 25, 28, 27, 24] },
+      { name: "Coverage %", values: [90, 93, 92, 96, 95, 96] },
+    ],
+  },
+};

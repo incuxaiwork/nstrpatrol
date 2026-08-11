@@ -26,9 +26,15 @@ import {
   observationStatusTone,
 } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { mockDivisions } from "@/lib/mock/hierarchy";
+import { mockDivisions, unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import type { AnalyticsDataset } from "@/lib/types";
+
+const heatRows = [
+  { division: "North", ranges: ["N-1", "N-2"], cells: [87, 45] },
+  { division: "Central", ranges: ["C-1", "C-2"], cells: [95, 61] },
+  { division: "South", ranges: ["S-1", "S-2"], cells: [70, 44] },
+];
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -268,6 +274,106 @@ export default function DashboardPage() {
           </div>
         </Card>
       </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        {/* Today's patrols */}
+        <Card>
+          <CardHeader
+            title="Today's patrols"
+            icon="route"
+            actions={
+              <Link href="/patrols" className="text-xs font-medium text-forest-700 hover:underline">
+                All patrols →
+              </Link>
+            }
+          />
+          <div className="divide-y divide-line">
+            {data.todayPatrols.length === 0 && (
+              <p className="px-4 py-6 text-center text-sm text-ink-soft">No patrols scheduled today.</p>
+            )}
+            {data.todayPatrols.slice(0, 6).map((p) => (
+              <Link
+                key={p.id}
+                href={`/patrols/${p.id}`}
+                className="flex items-center gap-3 px-4 py-2.5 hover:bg-forest-50/40"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-forest-50 text-forest-800">
+                  <Icon name="route" size={14} />
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-ink">{p.title}</p>
+                  <p className="text-xs text-ink-soft">
+                    {p.code} · {unitName(p.beat)} · {p.leader}
+                  </p>
+                </div>
+                <Badge tone={patrolStatusTone[p.status]}>{patrolStatusLabel[p.status]}</Badge>
+              </Link>
+            ))}
+          </div>
+        </Card>
+
+        {/* Zero patrol zones */}
+        <Card>
+          <CardHeader
+            title="Zero patrol zones"
+            icon="alert"
+            iconTone="danger"
+            actions={<Badge tone="danger">{data.zeroPatrolZones} beats</Badge>}
+          />
+          <div className="divide-y divide-line">
+            {data.zeroPatrolList.map((z) => (
+              <div key={z.beat} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="size-2.5 shrink-0 rounded-full bg-danger" />
+                <p className="flex-1 text-sm text-ink">{z.beat}</p>
+                <p className="text-xs text-ink-soft">No patrol for {z.days} days</p>
+                <Link href="/gis" className="text-xs font-medium text-forest-700 hover:underline">
+                  View →
+                </Link>
+              </div>
+            ))}
+          </div>
+          <div className="border-t border-line p-4">
+            <p className="text-xs text-ink-soft">
+              Beats without patrol coverage for 12+ days. Review in{" "}
+              <Link href="/gis" className="font-medium text-forest-700 hover:underline">GIS Intelligence</Link>.
+            </p>
+          </div>
+        </Card>
+      </div>
+
+      {/* Heatmap preview */}
+      <Card className="mt-4">
+        <CardHeader
+          title="Patrol heatmap preview"
+          icon="grid"
+          subtitle="Activity density across divisions × ranges"
+          actions={
+            <Link href="/analytics" className="text-xs font-medium text-forest-700 hover:underline">
+              Open analytics →
+            </Link>
+          }
+        />
+        <div className="p-4">
+          <div className="grid gap-1" style={{ gridTemplateColumns: "auto repeat(6, minmax(40px, 1fr))" }}>
+            {heatRows.map((row, ri) => (
+              <div key={row.division} className="contents">
+                <div className="pr-2 text-[11px] font-medium text-ink-soft">{row.division}</div>
+                {row.cells.map((c, ci) => (
+                  <div
+                    key={`${ri}-${ci}`}
+                    className="flex h-9 items-center justify-center rounded text-[11px] font-medium"
+                    style={{ background: `rgba(29, 70, 38, ${0.12 + c * 0.55})`, color: c > 0.45 ? "#fff" : "#1F4626" }}
+                    title={`${row.ranges[ci]}: ${c}`}
+                  >
+                    {c}
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+          <p className="mt-2 text-[11px] text-ink-faint">Patrol count per division × range, last 30 days (mock).</p>
+        </div>
+      </Card>
 
       {/* Quick actions */}
       <Card className="mt-4">

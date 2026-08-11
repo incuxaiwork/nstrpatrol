@@ -108,6 +108,7 @@ export const mockMasterData: MasterData = {
     { id: "c4", name: "Animal Mortality", mappedTo: "mortality", active: true },
     { id: "c5", name: "Forest Health", mappedTo: "forest-health", active: true },
     { id: "c6", name: "Infrastructure", mappedTo: "infrastructure", active: true },
+    { id: "c7", name: "Others", mappedTo: "others", active: true },
   ],
   waterBodyTypes: [
     { id: "wb1", name: "Waterhole", active: true },
@@ -116,11 +117,8 @@ export const mockMasterData: MasterData = {
     { id: "wb4", name: "Reservoir", active: true },
   ],
   patrolTypes: [
-    { id: "pt1", name: "Routine", active: true },
-    { id: "pt2", name: "Night", active: true },
-    { id: "pt3", name: "Special", active: true },
-    { id: "pt4", name: "Response", active: true },
-    { id: "pt5", name: "Combing", active: true },
+    { id: "pt1", name: "General Duties", active: true },
+    { id: "pt2", name: "Combing & Surveillance", active: true },
   ],
   patrolObjectives: [
     { id: "po1", name: "Anti-poaching sweep", active: true },
@@ -133,5 +131,12 @@ export const mockMasterData: MasterData = {
     { id: "vt1", name: "Patrol Jeep", active: true },
     { id: "vt2", name: "Pickup", active: true },
     { id: "vt3", name: "Motorcycle", active: true },
+  ],
+  weaponTypes: [
+    { id: "wt1", name: "0.315 bolt-action rifle", active: true },
+    { id: "wt2", name: "12-gauge shotgun", active: true },
+    { id: "wt3", name: "Non-lethal launcher", active: true },
+    { id: "wt4", name: "Tranquilizer gun", active: true },
+    { id: "wt5", name: "Pump-action shotgun", active: false },
   ],
 };

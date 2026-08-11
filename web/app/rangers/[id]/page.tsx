@@ -11,6 +11,7 @@ import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar, Progress } from "@/components/ui";
 import { StatRow, Timeline } from "@/components/data";
 import { Icon } from "@/components/icons";
+import { LineChart } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
@@ -21,6 +22,7 @@ export default function RangerDetailPage() {
   const router = useRouter();
   const { pushToast } = useApp();
   const { data: ranger, error, loading, reload } = useAsyncData(() => rangers.get(params.id));
+  const trend = useAsyncData(() => rangers.trend(params.id));
 
   if (loading || !ranger) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
@@ -77,7 +79,22 @@ export default function RangerDetailPage() {
           />
 
           <Card>
-            <CardHeader title="Coverage trend" icon="target" subtitle="Field coverage vs team average (mock)" />
+            <CardHeader title="Performance trend" icon="chart" subtitle="Monthly patrols and beat coverage, last 6 months (mock)" />
+            <div className="p-4">
+              <LineChart
+                dataset={
+                  trend.data ?? {
+                    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+                    series: [{ name: "Patrols", values: [] }],
+                  }
+                }
+                height={200}
+              />
+            </div>
+          </Card>
+
+          <Card>
+            <CardHeader title="Coverage vs beat target" icon="target" subtitle="Field coverage vs team average (mock)" />
             <div className="space-y-3 p-5">
               <Progress value={s.coveragePct} tone={s.coveragePct >= 80 ? "forest" : "warning"} />
               <p className="text-xs text-ink-soft">

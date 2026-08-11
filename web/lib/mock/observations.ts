@@ -27,6 +27,7 @@ export const categoryMeta: Record<
   mortality: { label: "Animal Mortality", plural: "Mortality cases", color: "#6d4c41" },
   "forest-health": { label: "Forest Health", plural: "Forest health checks", color: "#1F4626" },
   infrastructure: { label: "Infrastructure", plural: "Infrastructure issues", color: "#FF8F00" },
+  others: { label: "Others", plural: "Other reports", color: "#757575" },
 };
 
 export const mockObservations: Observation[] = [

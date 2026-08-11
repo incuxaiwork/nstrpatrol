@@ -39,6 +39,29 @@ export const wildlifeSightings: AnalyticsDataset = {
   series: [{ name: "Sightings", values: [23, 41, 12, 96, 58, 17] }],
 };
 
+export const humanImpactTrend: AnalyticsDataset = {
+  labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+  series: [
+    { name: "Poaching / trapping", values: [8, 6, 5, 4, 3, 2, 1] },
+    { name: "Fire hazard", values: [1, 2, 3, 5, 7, 6, 3] },
+    { name: "Encroachment", values: [4, 3, 4, 2, 2, 1, 1] },
+  ],
+};
+
+export const waterBodyStatus: AnalyticsDataset = {
+  labels: ["Waterhole", "Stream", "Seasonal pond", "Reservoir"],
+  series: [{ name: "Sites surveyed", values: [14, 9, 7, 3] }],
+};
+
+export const mortalityTrend: AnalyticsDataset = {
+  labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+  series: [
+    { name: "Natural death", values: [3, 2, 4, 3, 2, 3, 2] },
+    { name: "Poaching / snaring", values: [2, 1, 1, 0, 1, 0, 0] },
+    { name: "Road / rail hit", values: [1, 2, 1, 2, 1, 2, 1] },
+  ],
+};
+
 export const beatCoverage = {
   labels: ["N1-A", "N1-B", "N1-C", "N2-A", "N2-B", "C1-A", "C1-B", "C1-C", "S1-A", "S1-B"],
   values: [92, 74, 88, 91, 66, 95, 61, 82, 87, 55],

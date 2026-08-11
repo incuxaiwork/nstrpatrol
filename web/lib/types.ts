@@ -32,7 +32,18 @@ export type PatrolStatus =
   | "cancelled"
   | "delayed";
 
-export type PatrolType = "routine" | "night" | "special" | "response" | "combing";
+export type PatrolType = "general-duties" | "combing-surveillance";
+
+export type PatrolMethod =
+  | "foot"
+  | "motorcycle"
+  | "four-wheeler"
+  | "boat"
+  | "cycle"
+  | "aerial"
+  | "elephant"
+  | "horse"
+  | "camel";
 
 export interface RangerRef {
   id: string;
@@ -44,6 +55,7 @@ export interface Patrol {
   code: string;
   title: string;
   type: PatrolType;
+  method?: PatrolMethod;
   status: PatrolStatus;
   objective: string;
   division: string;
@@ -87,6 +99,28 @@ export interface PatrolTemplate {
   checkpoints: number;
   areas: string;
   usedCount: number;
+}
+
+export interface PatrolReport {
+  id: string;
+  patrolId: string;
+  code: string;
+  title: string;
+  type: PatrolType;
+  division: string;
+  range: string;
+  beat: string;
+  leader: string;
+  reportDate: string;
+  period: string;
+  durationMin: number;
+  distanceKm: number;
+  coveragePct: number;
+  checkpoints: number;
+  observations: number;
+  incidents: number;
+  photos: number;
+  summary: string;
 }
 
 export type DutyStatus = "on-duty" | "off-duty" | "field" | "leave" | "offline";
@@ -177,7 +211,8 @@ export type ObservationCategory =
   | "water-body"
   | "mortality"
   | "forest-health"
-  | "infrastructure";
+  | "infrastructure"
+  | "others";
 
 export type ObservationSeverity = "low" | "medium" | "high" | "critical";
 export type ObservationStatus = "open" | "under-review" | "resolved" | "escalated";
@@ -223,9 +258,11 @@ export interface DashboardSummary {
   rangersTotal: number;
   coveragePct: number;
   zeroPatrolZones: number;
+  zeroPatrolList: { beat: string; days: number }[];
   byStatus: { status: PatrolStatus; count: number }[];
   incidentsToday: { title: string; severity: ObservationSeverity; time: string }[];
   recentReports: Observation[];
+  todayPatrols: Patrol[];
   activity: { hour: string; patrols: number; reports: number }[];
   alerts: NotificationItem[];
   quickStats?: Record<string, number>;
@@ -304,6 +341,7 @@ export interface MasterData {
   patrolTypes: { id: string; name: string; active: boolean }[];
   patrolObjectives: { id: string; name: string; active: boolean }[];
   vehicleTypes: { id: string; name: string; active: boolean }[];
+  weaponTypes: { id: string; name: string; active: boolean }[];
 }
 
 export interface SearchResult {

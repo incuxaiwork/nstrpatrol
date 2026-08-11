@@ -20,6 +20,7 @@ export const navModules: NavItem[] = [
     children: [
       { label: "Patrol Dashboard", href: "/patrols" },
       { label: "Create Patrol", href: "/patrols/new" },
+      { label: "Patrol Reports", href: "/patrols/reports" },
       { label: "Patrol Templates", href: "/patrols/templates" },
     ],
   },
@@ -30,6 +31,7 @@ export const navModules: NavItem[] = [
     icon: "users",
     children: [
       { label: "Ranger Directory", href: "/rangers" },
+      { label: "Create Ranger", href: "/rangers/new" },
       { label: "Teams", href: "/rangers/teams" },
       { label: "Vehicles", href: "/rangers/vehicles" },
       { label: "Weapons", href: "/rangers/weapons" },

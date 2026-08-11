@@ -22,10 +22,11 @@ export default function AnalyticsPage() {
 
   const weekly = useAsyncData(() => analytics.weeklyTrend());
   const durations = useAsyncData(() => analytics.monthly());
-  const incidents = useAsyncData(() => analytics.incidents());
   const wildlife = useAsyncData(() => analytics.wildlife());
+  const humanImpact = useAsyncData(() => analytics.humanImpact());
+  const waterBodies = useAsyncData(() => analytics.waterBodies());
+  const mortality = useAsyncData(() => analytics.mortality());
   const coverage = useAsyncData(() => analytics.beatCoverage());
-  const comparison = useAsyncData(() => analytics.comparison());
   const heatmap = useAsyncData(() => analytics.heatmap());
 
   const loading = weekly.loading || wildlife.loading;
@@ -84,14 +85,30 @@ export default function AnalyticsPage() {
 
       <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <Card>
-          <CardHeader title="Incident trend" icon="fire" subtitle="Reported incidents by type, last 7 months" />
+          <CardHeader title="Human impact trend" icon="fire" subtitle="Poaching, fire hazards and encroachment, last 7 months" />
           <div className="p-4">
-            <LineChart dataset={incidents.data ?? emptyDataset("incidents")} height={230} />
+            <LineChart dataset={humanImpact.data ?? emptyDataset("human impact")} height={230} />
           </div>
         </Card>
 
         <Card>
-          <CardHeader title="Wildlife sightings" icon="paw" subtitle="Sightings by species, YTD (mock)" />
+          <CardHeader title="Water body status" icon="droplet" subtitle="Surveyed water sites by type, YTD (mock)" />
+          <div className="p-4">
+            <BarChart dataset={waterBodies.data ?? emptyDataset("water bodies")} height={230} />
+          </div>
+        </Card>
+      </div>
+
+      <div className="mt-4 grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardHeader title="Animal mortality" icon="paw" subtitle="Mortality by cause, last 7 months" />
+          <div className="p-4">
+            <LineChart dataset={mortality.data ?? emptyDataset("mortality")} height={230} />
+          </div>
+        </Card>
+
+        <Card>
+          <CardHeader title="Wildlife sightings" icon="binoculars" subtitle="Sightings by species, YTD (mock)" />
           <div className="p-4">
             <BarChart dataset={wildlife.data ?? emptyDataset("wildlife")} height={230} />
           </div>
@@ -108,7 +125,7 @@ export default function AnalyticsPage() {
           </Card>
         </div>
 
-<Card>
+        <Card>
           <CardHeader title="Patrol activity heatmap" icon="grid" subtitle="Patrol counts per division × range (mock)" />
           <div className="p-4">
             <GridHeatmap
@@ -119,17 +136,6 @@ export default function AnalyticsPage() {
           </div>
         </Card>
       </div>
-
-      <Card className="mt-4">
-        <CardHeader title="Patrol activity heatmap" icon="grid" subtitle="Patrol counts per division × range (mock)" />
-        <div className="p-4">
-          <GridHeatmap
-            rowLabels={heatmap.data?.divisions ?? []}
-            colLabels={heatmap.data?.ranges ?? []}
-            values={heatmap.data?.values ?? []}
-          />
-        </div>
-      </Card>
     </div>
   );
 }
