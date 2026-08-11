@@ -581,7 +581,6 @@ function Topbar({ onMenu }: { onMenu(): void }) {
       >
         <Icon name="search" size={15} />
         <span className="flex-1 truncate text-left">Search patrols, rangers, reports…</span>
-        <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-[10px] text-ink-faint">/</kbd>
       </button>
       <button
         onClick={() => setSearchOpen(true)}
