@@ -566,7 +566,7 @@ private fun CurrentLocationCard(
 ) {
     val satUtc = telemetry.satelliteUtcMillis
     val fixTime = telemetry.fixTimeMillis
-    val headerTime = satUtc?.let { hhmmFormat.format(Date(it)) } ?: hhmmFormat.format(Date(currentDeviceTime))
+    val headerTime = hhmmFormat.format(Date(currentDeviceTime))
     val coordinateText = if (telemetry.latitude != null && telemetry.longitude != null) {
         String.format(Locale.US, "%.6f, %.6f", telemetry.latitude, telemetry.longitude)
     } else {
