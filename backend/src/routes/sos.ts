@@ -10,7 +10,7 @@ export const alertsRouter = Router();
 sosRouter.use(requireAuth);
 
 const sosSchema = z.object({
-  assignmentId: z.string().cuid().nullish(),
+  patrolId: z.string().cuid().nullish(),
   latitude: z.number().finite().min(-90).max(90).nullish(),
   longitude: z.number().finite().min(-180).max(180).nullish(),
   accuracy: z.number().finite().nonnegative().nullish(),
@@ -22,7 +22,7 @@ sosRouter.post('/', validateBody(sosSchema), async (req, res) => {
   const incident = await prisma.incident.create({
     data: {
       userId: req.user!.id,
-      assignmentId: body.assignmentId ?? null,
+      patrolId: body.patrolId ?? null,
       type: 'QUICK_CAPTURE',
       title: 'SOS',
       description: body.message ?? 'Emergency alert fired from ranger device',
@@ -84,7 +84,7 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
       },
       orderBy: { timestamp: 'desc' },
       take,
-      include: { assignment: { select: { id: true, userId: true } } },
+      include: { patrol: { select: { id: true, userId: true } } },
     }),
     prisma.coverageEvent.findMany({
       where: {
@@ -93,7 +93,7 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
       },
       orderBy: { timestamp: 'desc' },
       take,
-      include: { assignment: { select: { id: true, userId: true } } },
+      include: { patrol: { select: { id: true, userId: true } } },
     }),
   ]);
 
@@ -110,16 +110,16 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
     ...tamperLogs.map((t) => ({
       type: 'TAMPER',
       timestamp: t.timestamp,
-      assignmentId: t.assignmentId,
-      rangerId: t.assignment.userId,
+      patrolId: t.patrolId,
+      rangerId: t.patrol.userId,
       details: `Time tamper detected (divergence ${t.divergenceSeconds}s)`,
     })),
     ...coverageEvents.map((c) => ({
       type: 'COVERAGE',
       eventType: c.type,
       timestamp: c.timestamp,
-      assignmentId: c.assignmentId,
-      rangerId: c.assignment.userId,
+      patrolId: c.patrolId,
+      rangerId: c.patrol.userId,
       latitude: c.latitude,
       longitude: c.longitude,
     })),

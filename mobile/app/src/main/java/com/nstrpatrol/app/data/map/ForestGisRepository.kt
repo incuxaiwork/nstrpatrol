@@ -83,7 +83,7 @@ class ForestGisRepository(private val context: Context) {
             writeCache("beats.geojson", backendBeats)
             backendComps?.let { writeCache("compartments.geojson", it) }
             applyData(backendBeats, backendComps ?: readCache("compartments.geojson") ?: "")
-            source = "backend"
+
             isDataLoaded = beatGeoJsonString.isNotEmpty()
             Log.d("ForestGisRepository", "Loaded beats/compartments from backend")
             return

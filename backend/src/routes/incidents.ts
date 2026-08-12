@@ -17,7 +17,7 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 export const incidentCreateSchema = z.object({
-  assignmentId: z.string().cuid().nullish(),
+  patrolId: z.string().cuid().nullish(),
   type: z.enum(['HUMAN_IMPACT', 'ANIMAL_MORTALITY', 'SIGHTING', 'WATER_SOURCE', 'QUICK_CAPTURE', 'GENERAL']),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).nullish(),
@@ -32,18 +32,12 @@ export const incidentCreateSchema = z.object({
 
 incidentsRouter.post('/', validateBody(incidentCreateSchema), async (req, res) => {
   const body = req.body;
-  if (body.assignmentId != null) {
-    const assignment = await prisma.patrolAssignment.findUnique({ where: { id: body.assignmentId } });
-    if (!assignment) throw new HttpError(404, 'not_found', 'Assignment not found');
-    if (!isAdmin(req) && assignment.userId !== req.user!.id) {
-      throw new HttpError(403, 'forbidden', 'Incident assignment does not belong to you');
-    }
-  }
+  const patrolId = body.patrolId ?? null;
 
   const incident = await prisma.incident.create({
     data: {
       userId: req.user!.id,
-      assignmentId: body.assignmentId ?? null,
+      patrolId,
       type: body.type,
       title: body.title,
       description: body.description ?? null,

@@ -53,7 +53,7 @@ syncRouter.post('/upload', validateBody(uploadSchema), async (req, res) => {
             prisma.incident.create({
               data: {
                 userId: req.user!.id,
-                assignmentId: r.assignmentId ?? null,
+                patrolId: r.patrolId ?? null,
                 type: r.type,
                 title: r.title,
                 description: r.description ?? null,
@@ -116,12 +116,11 @@ syncRouter.get('/changes', validateQuery(changesQuery), async (req, res) => {
     where: {
       ...(isAdmin(req)
         ? { updatedAt: { gte: since } }
-        : { assignments: { some: { userId: me.id } }, updatedAt: { gte: since } }),
+        : { userId: me.id, updatedAt: { gte: since } }),
     },
     include: {
-      assignments: {
-        select: { id: true, userId: true, status: true, startedAt: true, endedAt: true },
-      },
+      user: { select: { id: true, fullName: true } },
+      forest: { select: { id: true, name: true, code: true } },
     },
     orderBy: { updatedAt: 'asc' },
   });
@@ -146,19 +145,18 @@ syncRouter.get('/changes', validateQuery(changesQuery), async (req, res) => {
 
 syncRouter.get('/status', async (req, res) => {
   const me = req.user!;
-  const assignments = await prisma.patrolAssignment.findMany({
+  const patrolIds = (await prisma.patrol.findMany({
     where: isAdmin(req) ? {} : { userId: me.id },
     select: { id: true },
-  });
-  const assignmentIds = assignments.map((a) => a.id);
+  })).map((p) => p.id);
 
   const lastLog = await prisma.syncLog.findFirst({
     orderBy: { startedAt: 'desc' },
     where: isAdmin(req) ? {} : { deviceId: { not: undefined } },
   });
 
-  const assignmentFilter = isAdmin(req) ? {} : { assignmentId: { in: assignmentIds } };
-  const pendingWhere = (extra: Record<string, unknown>) => ({ syncStatus: 'PENDING', ...assignmentFilter, ...extra }) as never;
+  const patrolFilter = isAdmin(req) ? {} : { patrolId: { in: patrolIds } };
+  const pendingWhere = (extra: Record<string, unknown>) => ({ syncStatus: 'PENDING', ...patrolFilter, ...extra }) as never;
 
   const [points, steps, barometer, accelerometer, gyroscope, magnetometer, segments, coverage, integrity, incidents] =
     await Promise.all([

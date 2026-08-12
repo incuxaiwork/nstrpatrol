@@ -13,24 +13,24 @@ telemetryRouter.use(requireAuth);
 const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
-async function authorizeAssignments(
+async function authorizePatrols(
   user: { id: string; role: string; isAdmin: boolean },
-  records: { assignmentId: string }[],
+  records: { patrolId: string }[],
 ): Promise<void> {
-  const unique = [...new Set(records.map((r) => r.assignmentId))];
+  const unique = [...new Set(records.map((r) => r.patrolId))];
   if (unique.length === 0) throw new HttpError(400, 'validation_error', 'No records provided');
-  const assignments = await prisma.patrolAssignment.findMany({
+  const patrols = await prisma.patrol.findMany({
     where: { id: { in: unique } },
     select: { id: true, userId: true },
   });
-  const found = new Set(assignments.map((a) => a.id));
+  const found = new Set(patrols.map((p) => p.id));
   for (const id of unique) {
-    if (!found.has(id)) throw new HttpError(404, 'not_found', `Assignment ${id} does not exist`);
+    if (!found.has(id)) throw new HttpError(404, 'not_found', `Patrol ${id} does not exist`);
   }
   if (!user.isAdmin) {
-    for (const a of assignments) {
-      if (a.userId !== user.id) {
-        throw new HttpError(403, 'forbidden', 'You can only upload telemetry for your own assignments');
+    for (const p of patrols) {
+      if (p.userId !== user.id) {
+        throw new HttpError(403, 'forbidden', 'You can only upload telemetry for your own patrols');
       }
     }
   }
@@ -38,7 +38,7 @@ async function authorizeAssignments(
 
 const MAX_BATCH = 2000;
 const dateTime = z.coerce.date();
-const ts = z.object({ assignmentId: z.string().cuid(), timestamp: dateTime });
+const ts = z.object({ patrolId: z.string().cuid(), timestamp: dateTime });
 const axis = { x: z.number().finite().nullish(), y: z.number().finite().nullish(), z: z.number().finite().nullish() };
 
 const schemas = {
@@ -70,7 +70,7 @@ const schemas = {
   'magnetometer': z.array(ts.extend(axis)),
   'activity-segments': z.array(
     z.object({
-      assignmentId: z.string().cuid(),
+      patrolId: z.string().cuid(),
       startTime: dateTime,
       endTime: dateTime,
       mode: z.enum(['WALK', 'BICYCLE', 'VEHICLE', 'STATIONARY']),
@@ -140,8 +140,8 @@ export async function ingestEntity(
   user: { id: string; role: string; isAdmin: boolean },
 ): Promise<{ id: string }[]> {
   const schema = schemas[key] as z.ZodArray<z.ZodType<Record<string, unknown>>>;
-  const records = schema.max(MAX_BATCH).parse(input) as { assignmentId: string }[];
-  await authorizeAssignments(user, records);
+  const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string }[];
+  await authorizePatrols(user, records);
 
   const data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
   const model = (prisma as unknown as Record<string, { createManyAndReturn: (args: { data: unknown[] }) => Promise<{ id: string }[]> }>)[
@@ -150,12 +150,12 @@ export async function ingestEntity(
   return model.createManyAndReturn({ data });
 }
 
-telemetryRouter.post('/assignment/:id/aggregates', async (req, res) => {
+telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {
   const id = param(req, 'id');
-  const assignment = await prisma.patrolAssignment.findUnique({ where: { id } });
-  if (!assignment) throw new HttpError(404, 'not_found', 'Assignment not found');
-  if (!isAdmin(req) && assignment.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only compute aggregates for your own assignments');
+  const patrol = await prisma.patrol.findUnique({ where: { id } });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only compute aggregates for your own patrols');
   }
 
   const agg = await prisma.$queryRaw<
@@ -172,13 +172,13 @@ telemetryRouter.post('/assignment/:id/aggregates', async (req, res) => {
           ELSE 0
         END AS moving_seconds
       FROM "PatrolPoint"
-      WHERE "assignmentId" = ${id}
+      WHERE "patrolId" = ${id}
     )
     SELECT
       COUNT(*)::bigint AS points,
       COALESCE(
         (SELECT ST_Length(ST_MakeLine(geom ORDER BY timestamp)::geography) / 1000.0
-         FROM "PatrolPoint" WHERE "assignmentId" = ${id}),
+         FROM "PatrolPoint" WHERE "patrolId" = ${id}),
         0
       )::float8 AS "distanceKm",
       COALESCE(SUM(moving_seconds), 0)::float8 AS "movingSeconds",
@@ -188,7 +188,7 @@ telemetryRouter.post('/assignment/:id/aggregates', async (req, res) => {
   `;
   const a = agg[0];
   res.json({
-    assignmentId: id,
+    patrolId: id,
     points: Number(a?.points ?? 0n),
     distanceKm: Math.round((a?.distanceKm ?? 0) * 100) / 100,
     movingSeconds: Math.round(a?.movingSeconds ?? 0),
