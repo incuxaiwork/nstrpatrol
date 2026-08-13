@@ -6,13 +6,15 @@
 
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { authorizations, patrols, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
+import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar, Progress } from "@/components/ui";
 import { StatRow, Timeline } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { LineChart } from "@/components/charts";
+import { ConfirmDialog } from "@/components/overlays";
 import { JurisdictionBadge } from "@/components/jurisdiction";
 import { authStatusLabel, authStatusTone, resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -23,10 +25,12 @@ import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
 export default function RangerDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
+  const { pushToast } = useApp();
   const { data: ranger, error, loading, reload } = useAsyncData(() => rangers.get(params.id));
   const trend = useAsyncData(() => rangers.trend(params.id));
   const auths = useAsyncData(() => authorizations.list());
   const patrolData = useAsyncData(() => patrols.list());
+  const [removeOpen, setRemoveOpen] = useState(false);
 
   const myAuths = useMemo(
     () => (auths.data ?? []).filter((a) => a.rangerId === params.id),
@@ -63,6 +67,18 @@ export default function RangerDetailPage() {
         actions={
           <>
             <Badge tone={dutyStatusTone[ranger.dutyStatus]} dot>{dutyStatusLabel[ranger.dutyStatus]}</Badge>
+            <Link
+              href={`/rangers/${ranger.id}/edit`}
+              className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+            >
+              <Icon name="edit" size={13} /> Edit
+            </Link>
+            <button
+              onClick={() => setRemoveOpen(true)}
+              className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/30 bg-white px-3 text-sm font-medium text-danger hover:bg-danger/5"
+            >
+              <Icon name="trash" size={13} /> Remove
+            </button>
             <Link
               href="/patrols/permissions"
               className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
@@ -325,6 +341,20 @@ export default function RangerDetailPage() {
           </Card>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={removeOpen}
+        onClose={() => setRemoveOpen(false)}
+        danger
+        title="Remove ranger"
+        message={`Remove ${ranger.name} (${ranger.code}) from the directory? Historical patrol and authorization records are kept.`}
+        confirmLabel="Remove ranger"
+        onConfirm={async () => {
+          await rangers.remove(ranger.id);
+          pushToast("warning", "Ranger removed", `${ranger.name} removed from the directory (mock store)`);
+          router.push("/rangers");
+        }}
+      />
     </div>
   );
 }

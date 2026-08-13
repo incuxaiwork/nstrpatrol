@@ -251,14 +251,48 @@ export const authorizations = {
 /* Rangers                                                            */
 /* ------------------------------------------------------------------ */
 
+const createdRangers: Ranger[] = [];
+const rangerUpdates = new Map<string, Partial<Ranger>>();
+const removedRangerIds = new Set<string>();
+
+const rangerRecord = (id: string): Ranger | undefined => {
+  if (removedRangerIds.has(id)) return undefined;
+  const base = mockRangers.find((r) => r.id === id);
+  const created = createdRangers.find((r) => r.id === id);
+  const src = created ?? base;
+  if (!src) return undefined;
+  if (created) return created;
+  return { ...src, ...rangerUpdates.get(id) };
+};
+
 export const rangers = {
   list: async (): Promise<Ranger[]> => {
     await delay();
-    return mockRangers;
+    return [...mockRangers.filter((r) => !removedRangerIds.has(r.id)).map((r) => ({ ...r, ...rangerUpdates.get(r.id) })), ...createdRangers];
   },
   get: async (id: string): Promise<Ranger | undefined> => {
     await delay();
-    return mockRangers.find((r) => r.id === id);
+    return rangerRecord(id);
+  },
+  create: async (input: Omit<Ranger, "id"> & { id?: string }): Promise<Ranger> => {
+    await delay();
+    const id = input.id ?? `r-created-${String(createdRangers.length + 1).padStart(3, "0")}`;
+    const record: Ranger = { ...input, id, code: input.code ?? `NEW-${id.slice(-3).toUpperCase()}` };
+    createdRangers.unshift(record);
+    return record;
+  },
+  update: async (id: string, patch: Partial<Ranger>): Promise<Ranger | undefined> => {
+    await delay();
+    const existing = rangerRecord(id);
+    if (!existing) return undefined;
+    rangerUpdates.set(id, { ...rangerUpdates.get(id), ...patch });
+    return { ...existing, ...patch };
+  },
+  remove: async (id: string): Promise<boolean> => {
+    await delay();
+    if (!rangerRecord(id)) return false;
+    removedRangerIds.add(id);
+    return true;
   },
   trend: async (id: string): Promise<AnalyticsDataset> => {
     await delay();

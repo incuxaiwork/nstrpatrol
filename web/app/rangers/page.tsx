@@ -12,11 +12,13 @@ import { rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, Avatar, SearchInput } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, type ViewMode } from "@/components/data";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { exportRows, stamp } from "@/lib/export";
 import type { DutyStatus } from "@/lib/types";
 
 export default function RangersPage() {
@@ -52,6 +54,27 @@ export default function RangersPage() {
     return acc;
   }, {});
 
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    exportRows(kind, `rangers-${stamp()}`, filtered.map((r) => ({
+      code: r.code,
+      name: r.name,
+      designation: r.designation,
+      dutyStatus: dutyStatusLabel[r.dutyStatus],
+      division: unitName(r.division),
+      range: unitName(r.range),
+      beat: unitName(r.beat),
+      team: r.teamId,
+      phone: r.phone ?? "",
+      bloodGroup: r.bloodGroup ?? "",
+      joinYear: r.joinYear,
+      coveragePct: r.stats.coveragePct,
+      patrols: r.stats.patrols,
+      distanceKm: r.stats.distanceKm,
+      fieldHours: r.stats.fieldHours,
+      lastSync: r.lastSync ?? "",
+    })));
+  };
+
   return (
     <div>
       <PageHeader
@@ -63,6 +86,7 @@ export default function RangersPage() {
               <Icon name="plus" size={15} />
               Create ranger
             </Link>
+            <ExportButton onExport={handleExport} />
             <Link href="/rangers/teams" className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800">
               Teams & assets
             </Link>
