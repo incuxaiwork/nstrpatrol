@@ -2,21 +2,23 @@
 
 /** Ranger analytics (PRD §10.4) — crew performance leaderboards */
 
-import { useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { rangers, analytics } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
 import { BarChart } from "@/components/charts";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatKm } from "@/lib/utils";
+import { exportRows, stamp } from "@/lib/export";
 import type { Ranger } from "@/lib/types";
 
 export default function RangerAnalyticsPage() {
+  const router = useRouter();
   const { data, error, loading, reload } = useAsyncData(() => rangers.list());
   const patrolStats = useAsyncData(() => analytics.monthly());
 
@@ -27,12 +29,30 @@ export default function RangerAnalyticsPage() {
   const byDistance = [...data].sort((a, b) => b.stats.distanceKm - a.stats.distanceKm);
   const byHours = [...data].sort((a, b) => b.stats.fieldHours - a.stats.fieldHours);
 
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    exportRows(kind, `ranger-ranking-${stamp()}`, data.map((r) => ({
+      code: r.code,
+      name: r.name,
+      designation: r.designation,
+      division: unitName(r.division),
+      range: unitName(r.range),
+      beat: unitName(r.beat),
+      dutyStatus: dutyStatusLabel[r.dutyStatus],
+      patrols: r.stats.patrols,
+      distanceKm: r.stats.distanceKm,
+      fieldHours: r.stats.fieldHours,
+      coveragePct: r.stats.coveragePct,
+      observations: r.stats.observations,
+      incidents: r.stats.incidents,
+    })));
+  };
+
   return (
     <div>
       <PageHeader
         title="Ranger Analytics"
         subtitle="Individual contribution: patrols, distance, field hours and cover"
-        actions={<ExportButton />}
+        actions={<ExportButton onExport={handleExport} />}
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -84,7 +104,7 @@ export default function RangerAnalyticsPage() {
         <DataTable
           rows={data}
           loading={loading}
-          onRowClick={(r) => undefined}
+          onRowClick={(r) => router.push(`/rangers/${r.id}`)}
           columns={[
             { key: "code", header: "Code", sortValue: (r) => r.code, render: (r) => <span className="font-mono text-xs text-forest-800">{r.code}</span> },
             { key: "name", header: "Ranger", sortValue: (r) => r.name, render: (r) => (

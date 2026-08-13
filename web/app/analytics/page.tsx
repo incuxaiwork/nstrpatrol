@@ -16,8 +16,9 @@ import { Card, CardHeader, PageHeader } from "@/components/ui";
 import { KpiCard } from "@/components/data";
 import { LineChart, BarChart, GroupBars, DonutLegend, GridHeatmap, CoverageBars, Donut } from "@/components/charts";
 import { Icon } from "@/components/icons";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows } from "@/components/ui/loading";
+import { exportRows, stamp } from "@/lib/export";
 
 export default function AnalyticsPage() {
   const { scope } = useApp();
@@ -40,12 +41,43 @@ export default function AnalyticsPage() {
   const kpis = analytics.kpisBy(level);
   const j = jurisdiction.data;
 
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    const rows = [
+      ...kpis.map((k) => ({ metric: k.label, value: k.value, unit: k.unit ?? "", changePct: k.changePct ?? null })),
+      {
+        metric: "patrols-normal",
+        value: j?.normal ?? 0,
+        unit: "patrols",
+        changePct: j?.normalPct ?? null,
+      },
+      {
+        metric: "patrols-authorized",
+        value: j?.authorized ?? 0,
+        unit: "patrols",
+        changePct: j?.authorizedPct ?? null,
+      },
+      {
+        metric: "patrols-pending-review",
+        value: j?.pending ?? 0,
+        unit: "patrols",
+        changePct: null,
+      },
+      {
+        metric: "patrols-out-of-authorization",
+        value: j?.review ?? 0,
+        unit: "patrols",
+        changePct: j?.reviewPct ?? null,
+      },
+    ];
+    exportRows(kind, `analytics-${level}-${stamp()}`, rows);
+  };
+
   return (
     <div>
       <PageHeader
         title="Analytics & Insights"
         subtitle={`Operational analytics — scope ${scope.forest} / ${level}`}
-        actions={<ExportButton />}
+        actions={<ExportButton onExport={handleExport} />}
       />
 
       <ScopeTabs level={level} onChange={setLevel} />

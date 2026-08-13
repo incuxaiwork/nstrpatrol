@@ -8,10 +8,11 @@ import { useMemo } from "react";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
 import { CoverageBars, BarChart } from "@/components/charts";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
 import { zeroPatrolZones } from "@/lib/mock/gis";
+import { exportRows, stamp } from "@/lib/export";
 
 export default function BeatAnalyticsPage() {
   const coverage = useAsyncData(() => analytics.beatCoverage());
@@ -27,7 +28,28 @@ export default function BeatAnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="Beat Analytics" subtitle="Coverage and activity by operational beat" actions={<ExportButton />} />
+      <PageHeader
+        title="Beat Analytics"
+        subtitle="Coverage and activity by operational beat"
+        actions={
+          <ExportButton
+            onExport={(kind: ExportKind) =>
+              exportRows(kind, `beat-register-${stamp()}`, rows.map((r) => ({
+                id: r.id,
+                beat: r.beat,
+                coveragePct: r.coverage,
+                status: zeroPatrolZones.includes(r.beat)
+                  ? "zero-patrol"
+                  : r.coverage >= 80
+                    ? "healthy"
+                    : r.coverage >= 70
+                      ? "at-risk"
+                      : "needs-attention",
+              })))
+            }
+          />
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Beats tracked" value={data.labels.length} icon="pin" tone="forest" />

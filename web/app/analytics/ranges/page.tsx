@@ -8,9 +8,10 @@ import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
 import { CoverageBars, GroupBars } from "@/components/charts";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
+import { exportRows, stamp } from "@/lib/export";
 
 const rangesData = [
   { id: "r-n1", coverage: 88, patrols: 64, incidents: 6, observations: 132 },
@@ -32,7 +33,24 @@ export default function RangeAnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="Range Analytics" subtitle={`Range-level performance — ${scope.forest}`} actions={<ExportButton />} />
+      <PageHeader
+        title="Range Analytics"
+        subtitle={`Range-level performance — ${scope.forest}`}
+        actions={
+          <ExportButton
+            onExport={(kind: ExportKind) =>
+              exportRows(kind, `range-register-${stamp()}`, rangesData.map((r) => ({
+                id: r.id,
+                range: unitName(r.id),
+                coveragePct: r.coverage,
+                patrols: r.patrols,
+                observations: r.observations,
+                incidents: r.incidents,
+              })))
+            }
+          />
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Ranges" value={rangesData.length} icon="map" tone="forest" />

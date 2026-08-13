@@ -7,9 +7,10 @@ import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
 import { CoverageBars, GroupBars } from "@/components/charts";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
+import { exportRows, stamp } from "@/lib/export";
 
 const divisions = [
   { id: "d-north", coverage: 84, patrols: 117, observations: 230, incidents: 25, areaKm2: 4120 },
@@ -28,7 +29,25 @@ export default function DivisionAnalyticsPage() {
 
   return (
     <div>
-      <PageHeader title="Division Analytics" subtitle="Comparison across forest divisions" actions={<ExportButton />} />
+      <PageHeader
+        title="Division Analytics"
+        subtitle="Comparison across forest divisions"
+        actions={
+          <ExportButton
+            onExport={(kind: ExportKind) =>
+              exportRows(kind, `division-register-${stamp()}`, divisions.map((d) => ({
+                id: d.id,
+                division: unitName(d.id),
+                coveragePct: d.coverage,
+                patrols: d.patrols,
+                observations: d.observations,
+                incidents: d.incidents,
+                areaKm2: d.areaKm2,
+              })))
+            }
+          />
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Divisions" value={divisions.length} icon="tree" tone="forest" />
