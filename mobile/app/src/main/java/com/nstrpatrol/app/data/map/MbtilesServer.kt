@@ -133,6 +133,17 @@ class MbtilesServer(private val context: Context, private val port: Int = 8888) 
         val file = File(context.filesDir, "NSTR.mbtiles")
         if (file.exists() && file.length() > 0) return file
 
+        // 1. Download the atlas from the backend (stored in PostGIS).
+        if (BackendApiClient().downloadTo("/api/gis/assets/NSTR.mbtiles", file)) {
+            Log.d("MbtilesServer", "Downloaded NSTR.mbtiles from backend to ${file.absolutePath}")
+            return file
+        }
+
+        // 2. Fall back to the bundled asset.
+        return copyFromAssets(file)
+    }
+
+    private fun copyFromAssets(file: File): File? {
         return try {
             context.assets.open("NSTR.mbtiles").use { input ->
                 FileOutputStream(file).use { output ->

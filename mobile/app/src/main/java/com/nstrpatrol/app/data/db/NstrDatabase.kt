@@ -10,10 +10,11 @@ import androidx.room.RoomDatabase
         PatrolPointEntity::class,
         SensorReadingEntity::class,
         DailyActivityEntity::class,
-        PatrolSessionEntity::class
+        PatrolSessionEntity::class,
+        IncidentEntity::class
     ],
-    version = 3,
-    exportSchema = true
+    version = 4,
+    exportSchema = false
 )
 abstract class NstrDatabase : RoomDatabase() {
 

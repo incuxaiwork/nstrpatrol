@@ -11,6 +11,18 @@ interface TelemetryDao {
     @Insert
     suspend fun insertPoint(point: PatrolPointEntity)
 
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insertIncident(incident: IncidentEntity)
+
+    @Query("SELECT * FROM incidents WHERE syncStatus = 'PENDING'")
+    suspend fun pendingIncidents(): List<IncidentEntity>
+
+    @Query("UPDATE incidents SET syncStatus = 'SYNCED' WHERE syncStatus = 'PENDING'")
+    suspend fun markIncidentsSynced()
+
+    @Query("SELECT * FROM incidents ORDER BY occurredAt DESC")
+    suspend fun allIncidents(): List<IncidentEntity>
+
     @Insert
     suspend fun insertPoints(points: List<PatrolPointEntity>)
 
@@ -121,6 +133,30 @@ interface TelemetryDao {
 
     @Query("UPDATE patrol_sessions SET status = :status WHERE patrolId = :patrolId")
     suspend fun updatePatrolStatus(patrolId: String, status: String)
+
+    @Query("SELECT * FROM patrol_sessions WHERE syncStatus = 'PENDING'")
+    suspend fun sessionsToSync(): List<PatrolSessionEntity>
+
+    @Query("UPDATE patrol_sessions SET syncStatus = :status WHERE patrolId = :patrolId")
+    suspend fun updateSessionSyncStatus(patrolId: String, status: String)
+
+    @Query("SELECT * FROM patrol_points WHERE syncStatus = 'PENDING'")
+    suspend fun pendingPointRows(): List<PatrolPointEntity>
+
+    @Query(
+        "UPDATE patrol_points SET syncStatus = 'SYNCED' " +
+        "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
+    )
+    suspend fun markPointsSynced(patrolId: String)
+
+    @Query("SELECT * FROM sensor_readings WHERE syncStatus = 'PENDING'")
+    suspend fun pendingReadingRows(): List<SensorReadingEntity>
+
+    @Query(
+        "UPDATE sensor_readings SET syncStatus = 'SYNCED' " +
+        "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
+    )
+    suspend fun markReadingsSynced(patrolId: String)
 
     @Query(
         "UPDATE patrol_sessions SET endTime = :endTime, status = 'COMPLETED', " +

@@ -17,6 +17,12 @@ android {
         versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Backend base URL. Default targets the host machine from the Android
+        // emulator (10.0.2.2). Override with -PapiBaseUrl=http://192.168.x.x:3000
+        // when running on a physical device.
+        val apiBaseUrl = providers.gradleProperty("apiBaseUrl").orElse("http://10.0.2.2:3000").get()
+        buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
     buildTypes {

@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -37,10 +39,12 @@ import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.ActivityRings
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.navigation.BottomTab
+import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.ForestGreen
 import com.nstrpatrol.app.ui.theme.MapCanvas
 import com.nstrpatrol.app.ui.theme.MapGridLine
@@ -49,27 +53,52 @@ import com.nstrpatrol.app.ui.theme.OutlineSoft
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import java.util.TimeZone
 
 @Composable
 fun PatrolReportScreen(
     patrolId: String,
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
-    dao: TelemetryDao
+    dao: TelemetryDao,
+    api: BackendApiClient,
+    onEndPatrol: (() -> Unit)? = null
 ) {
     var session by remember { mutableStateOf<PatrolSessionEntity?>(null) }
     var points by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
     var totalDistance by remember { mutableStateOf(0.0) }
     var moveMinutes by remember { mutableStateOf(0) }
+    var showEndConfirm by remember { mutableStateOf(false) }
 
     LaunchedEffect(patrolId) {
-        session = dao.patrolSession(patrolId)
-        points = dao.patrolPointsOrdered(patrolId)
-        totalDistance = computeReportDistance(points)
-        moveMinutes = dao.activeMovementSamplesForPatrol(patrolId) * 5 / 60
+        val local = dao.patrolSession(patrolId)
+        if (local != null) {
+            session = local
+            points = dao.patrolPointsOrdered(patrolId)
+            totalDistance = computeReportDistance(points)
+            moveMinutes = dao.activeMovementSamplesForPatrol(patrolId) * 5 / 60
+        } else {
+            // No local record (e.g. patrol created on another device): pull from backend.
+            runCatching {
+                val obj = withContext(Dispatchers.IO) { api.getJson("/api/patrols/$patrolId") } ?: return@LaunchedEffect
+                val stats = obj.optJSONObject("stats")
+                val distanceKm = stats?.optDouble("distanceKm", 0.0) ?: 0.0
+                val durationSeconds = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
+                totalDistance = distanceKm * 1000
+                moveMinutes = (durationSeconds / 60).toInt()
+                session = patrolSessionFromBackend(obj)
+                // Draw the route from server points for patrols recorded elsewhere.
+                points = api.getPatrolPoints(patrolId)
+                if (points.size >= 2) {
+                    totalDistance = computeReportDistance(points)
+                }
+            }
+        }
     }
 
     val s = session
@@ -85,8 +114,19 @@ fun PatrolReportScreen(
         Spacer(Modifier.height(12.dp))
 
         Column(
-            modifier = Modifier.verticalScroll(rememberScrollState())
+            modifier = Modifier
         ) {
+            if (onEndPatrol != null) {
+                Button(
+                    onClick = { showEndConfirm = true },
+                    colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("End Patrol", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+
             // Route map
             SectionHeader(text = "Route")
             Spacer(Modifier.height(8.dp))
@@ -238,6 +278,30 @@ fun PatrolReportScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+
+        if (showEndConfirm) {
+            AlertDialog(
+                onDismissRequest = { showEndConfirm = false },
+                title = { Text("End patrol?") },
+                text = {
+                    Text(
+                        "This stops live tracking and finalizes the patrol report. " +
+                            "The patrol will move to Completed and sync to the server."
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showEndConfirm = false
+                            onEndPatrol?.invoke()
+                        }
+                    ) { Text("End patrol", color = ErrorRed) }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showEndConfirm = false }) { Text("Cancel") }
+                }
+            )
+        }
     }
 }
 
@@ -295,4 +359,45 @@ private fun computeReportDistance(points: List<PatrolPointEntity>): Double {
         total += 6_371_000.0 * c
     }
     return total
+}
+
+/** Builds a display-only session from a backend patrol detail payload. */
+private fun patrolSessionFromBackend(o: org.json.JSONObject): PatrolSessionEntity {
+    val startedMs = parseIsoMillis(o.optString("startedAt"))
+    val endedMs = o.optString("endedAt").takeIf { it.isNotEmpty() }?.let { parseIsoMillis(it) }
+    val stats = o.optJSONObject("stats")
+    val distanceKm = stats?.optDouble("distanceKm", 0.0) ?: 0.0
+    val durationSeconds = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
+    val steps = stats?.optInt("points", 0) ?: 0
+    val avgSpeed = if (durationSeconds > 0) (distanceKm / (durationSeconds / 3600.0)) else 0.0
+    return PatrolSessionEntity(
+        patrolId = o.optString("id"),
+        startTime = startedMs,
+        endTime = endedMs,
+        status = o.optString("status", "COMPLETED"),
+        patrolType = o.optString("type").ifEmpty { null },
+        totalDistanceMeters = distanceKm * 1000,
+        moveMinutes = (durationSeconds / 60).toInt(),
+        totalSteps = steps,
+        avgSpeedKmh = avgSpeed,
+        pointCount = steps,
+        syncStatus = "SYNCED"
+    )
+}
+
+private fun parseIsoMillis(iso: String): Long {
+    if (iso.isEmpty()) return System.currentTimeMillis()
+    val patterns = listOf(
+        "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss'Z'",
+        "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+        "yyyy-MM-dd'T'HH:mm:ssXXX"
+    )
+    for (pattern in patterns) {
+        runCatching {
+            val sdf = SimpleDateFormat(pattern, Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
+            return sdf.parse(iso)!!.time
+        }
+    }
+    return System.currentTimeMillis()
 }

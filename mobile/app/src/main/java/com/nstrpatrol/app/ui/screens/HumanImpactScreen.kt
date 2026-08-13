@@ -11,11 +11,16 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.submitIncident
+import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.AutoCapturedPanel
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
@@ -32,8 +37,12 @@ import com.nstrpatrol.app.ui.navigation.BottomTab
 fun HumanImpactScreen(
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
-    onOpenCamera: (String) -> Unit = {}
+    onOpenCamera: (String) -> Unit = {},
+    patrolTimer: PatrolTimer,
+    dao: TelemetryDao,
+    api: BackendApiClient
 ) {
+    val context = LocalContext.current
     var impactType by remember { mutableStateOf<String?>(null) }
     var actionTaken by remember { mutableStateOf<String?>(null) }
     var timeElapsed by remember { mutableStateOf<String?>(null) }
@@ -125,7 +134,21 @@ fun HumanImpactScreen(
             Spacer(Modifier.height(20.dp))
             PrimaryButton(
                 text = "SUBMIT INFORMATION",
-                onClick = onBack,
+                onClick = {
+                    submitIncident(
+                        dao = dao, api = api, patrolTimer = patrolTimer, context = context,
+                        type = "HUMAN_IMPACT", title = impactType ?: "Human Impact",
+                        description = remarks.ifEmpty { null },
+                        severity = severity,
+                        details = mapOf(
+                            "impactType" to impactType,
+                            "actionTaken" to actionTaken,
+                            "timeElapsed" to timeElapsed
+                        ),
+                        photos = PhotoStore.paths(photoSlot)
+                    )
+                    onBack()
+                },
                 textSize = 15,
                 textWeight = FontWeight.Bold
             )

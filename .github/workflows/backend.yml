@@ -22,6 +22,10 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    env:
+      DATABASE_URL: "postgresql://nstrpatrol:nstrpatrol@localhost:5432/nstrpatrol?schema=public"
+      JWT_SECRET: "ci-test-jwt-secret-000000000000000000000000"
+      JWT_REFRESH_SECRET: "ci-test-refresh-secret-000000000000000000"
     steps:
       - name: Checkout
         uses: actions/checkout@v4

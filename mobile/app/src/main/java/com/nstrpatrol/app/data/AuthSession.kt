@@ -1,0 +1,142 @@
+package com.nstrpatrol.app.data
+
+import android.content.Context
+import android.os.Build
+import android.provider.Settings
+import com.nstrpatrol.app.data.map.ApiException
+import com.nstrpatrol.app.data.map.BackendApiClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+
+/** Signed-in user profile as returned by /api/auth/login and /api/auth/me. */
+data class AuthUser(
+    val id: String,
+    val email: String,
+    val fullName: String,
+    val role: String,
+    val cader: String?,
+    val phone: String?,
+    val isAdmin: Boolean
+) {
+    val initial: String
+        get() = fullName.trim().firstOrNull()?.uppercase() ?: "?"
+
+    val firstName: String
+        get() = fullName.trim().split(Regex("\\s+")).firstOrNull()?.takeIf { it.isNotEmpty() } ?: fullName
+
+    val designation: String
+        get() = when {
+            role == "ADMIN" || isAdmin -> "Administrator"
+            cader == "FRO" -> "Field Range Officer"
+            cader == "DyRO" -> "Deputy Range Officer"
+            cader == "FSO" -> "Forest Section Officer"
+            cader == "FBO" -> "Forest Beat Officer"
+            cader == "ABO" -> "Assistant Beat Officer"
+            else -> "Field Officer"
+        }
+
+    companion object {
+        fun fromJson(o: JSONObject?): AuthUser? {
+            o ?: return null
+            return AuthUser(
+                id = o.optString("id"),
+                email = o.optString("email"),
+                fullName = o.optString("fullName"),
+                role = o.optString("role", "RANGER"),
+                cader = o.optString("cader").ifEmpty { null },
+                phone = o.optString("phone").ifEmpty { null },
+                isAdmin = o.optBoolean("isAdmin", false)
+            )
+        }
+    }
+}
+
+/**
+ * Owns the login session: access/refresh tokens and the signed-in user, persisted
+ * in SharedPreferences so the session survives app restarts.
+ */
+class AuthSession(context: Context) {
+
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences("nstr_auth", Context.MODE_PRIVATE)
+    private val client = BackendApiClient()
+
+    /** Whether a session is stored. Call [restore] after creation to activate it. */
+    fun hasSession(): Boolean = prefs.getString("accessToken", null) != null
+
+    /** Loads a cached session (if any) into the API client. Returns true when restored. */
+    fun restore(): Boolean {
+        val token = prefs.getString("accessToken", null) ?: return false
+        client.setAccessToken(token)
+        return true
+    }
+
+    /** Current user from the cached session, or null when not signed in. */
+    val currentUser: AuthUser?
+        get() = prefs.getString("user", null)
+            ?.let { runCatching { AuthUser.fromJson(JSONObject(it)) }.getOrNull() }
+
+    /**
+     * Authenticates against the backend (POST /api/auth/login), stores the
+     * session, registers this device, and returns the signed-in user.
+     * Throws on wrong credentials / network failure.
+     */
+    suspend fun login(email: String, password: String): AuthUser = withContext(Dispatchers.IO) {
+        val body = JSONObject()
+            .put("email", email.trim())
+            .put("password", password)
+        val res = client.postJson("/api/auth/login", body)
+        val accessToken = res.optString("accessToken")
+        val refreshToken = res.optString("refreshToken")
+        val user = AuthUser.fromJson(res.optJSONObject("user"))
+            ?: throw ApiException(0, "bad_response", "Unexpected server response")
+        val userJson = res.optJSONObject("user").toString()
+        prefs.edit()
+            .putString("accessToken", accessToken)
+            .putString("refreshToken", refreshToken)
+            .putString("user", userJson)
+            .apply()
+        client.setAccessToken(accessToken)
+        registerDevice()
+        user
+    }
+
+    /** Registers this handset with the backend so patrols can be assigned to it. */
+    private fun registerDevice() {
+        val deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+            ?: Build.FINGERPRINT
+        val body = JSONObject()
+            .put("deviceId", deviceId)
+            .put("deviceName", "NSTR Patrol")
+            .put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
+        runCatching { client.postJson("/api/devices", body) }
+            .onFailure { /* device registration is best-effort */ }
+    }
+
+    /** Currently assigned patrol name (first ACTIVE/AUTO assignment), best-effort. */
+    suspend fun currentPatrolName(): String? = withContext(Dispatchers.IO) {
+        if (!hasSession()) return@withContext null
+        val arr = runCatching { client.getJsonArray("/api/patrols?assignedTo=me") }.getOrNull()
+            ?: return@withContext null
+        var fallback: String? = null
+        for (i in 0 until arr.length()) {
+            val p = arr.optJSONObject(i) ?: continue
+            val status = p.optString("status")
+            val name = p.optString("name")
+            if (name.isEmpty()) continue
+            if (status == "ACTIVE") return@withContext name
+            if (status == "ASSIGNED" && fallback == null) fallback = name
+        }
+        fallback
+    }
+
+    /** Clears the stored session and the bearer token. */
+    fun logout() {
+        prefs.edit().clear().apply()
+        client.setAccessToken(null)
+    }
+
+    /** The authenticated API client used for backend calls (patrol/telemetry sync). */
+    fun apiClient(): BackendApiClient = client
+}

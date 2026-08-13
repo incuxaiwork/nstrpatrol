@@ -21,11 +21,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.submitIncident
+import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.AutoCapturedPanel
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
@@ -47,8 +52,12 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 fun AnimalMortalityScreen(
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
-    onOpenCamera: (String) -> Unit = {}
+    onOpenCamera: (String) -> Unit = {},
+    patrolTimer: PatrolTimer,
+    dao: TelemetryDao,
+    api: BackendApiClient
 ) {
+    val context = LocalContext.current
     var speciesType by remember { mutableStateOf<String?>(null) }
     var species by remember { mutableStateOf<String?>(null) }
     var causeOfDeath by remember { mutableStateOf<String?>(null) }
@@ -184,7 +193,26 @@ fun AnimalMortalityScreen(
             AutoCapturedPanel()
 
             Spacer(Modifier.height(20.dp))
-            PrimaryButton(text = "SAVE DETAILS", onClick = onBack, textSize = 15, textWeight = FontWeight.Bold)
+            PrimaryButton(text = "SAVE DETAILS", onClick = {
+                submitIncident(
+                    dao = dao, api = api, patrolTimer = patrolTimer, context = context,
+                    type = "ANIMAL_MORTALITY", title = species ?: "Animal Mortality",
+                    description = remarks.ifEmpty { null },
+                    severity = severity,
+                    details = mapOf(
+                        "speciesType" to speciesType,
+                        "species" to species,
+                        "causeOfDeath" to causeOfDeath,
+                        "carcassState" to carcassState,
+                        "sex" to sex,
+                        "adultMale" to adultMale,
+                        "subAdultMale" to subAdultMale,
+                        "youngMale" to youngMale
+                    ),
+                    photos = PhotoStore.paths(photoSlot)
+                )
+                onBack()
+            }, textSize = 15, textWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
         }
 

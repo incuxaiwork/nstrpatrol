@@ -21,7 +21,6 @@ import androidx.compose.material.icons.filled.DirectionsWalk
 import androidx.compose.material.icons.filled.DirectionsBike
 import androidx.compose.material.icons.filled.DirectionsCar
 import androidx.compose.material.icons.filled.DirectionsRun
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -52,7 +51,6 @@ fun ActivePatrolOverlay(
     moveMinutes: Int,
     durationFormatted: String,
     currentMode: MovementMode,
-    onStopPatrol: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var animProgress by remember { mutableFloatStateOf(0f) }
@@ -86,23 +84,6 @@ fun ActivePatrolOverlay(
                     color = TextPrimary,
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(CircleShape)
-                    .background(ErrorRed)
-                    .padding(0.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.Stop,
-                    contentDescription = "Stop patrol",
-                    tint = Color.White,
-                    modifier = Modifier
-                        .size(24.dp)
-                        .padding(0.dp)
                 )
             }
         }
