@@ -6,10 +6,11 @@ import { useState } from "react";
 import { admin } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
-import { Badge, Card, PageHeader } from "@/components/ui";
+import { Badge, Card, Field, Input, PageHeader, Select } from "@/components/ui";
 import { DataTable } from "@/components/data";
-import { Tabs } from "@/components/overlays";
+import { Dialog, ExportButton, Tabs, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
+import { exportRows, stamp } from "@/lib/export";
 
 type TabKey = "species" | "categories" | "water" | "patrolTypes" | "objectives" | "vehicles" | "weapons";
 
@@ -17,6 +18,11 @@ export default function MasterDataPage() {
   const { pushToast } = useApp();
   const md = useAsyncData(() => admin.masterData());
   const [tab, setTab] = useState<TabKey>("species");
+  const [addOpen, setAddOpen] = useState(false);
+  const [name, setName] = useState("");
+  const [category, setCategory] = useState("Mammal");
+  const [status, setStatus] = useState<"present" | "rare" | "threatened">("present");
+  const [busy, setBusy] = useState(false);
 
   if (md.loading || !md.data) return <SkeletonRows rows={7} />;
   if (md.error) return <ErrorState message={md.error.message} onRetry={md.reload} />;
@@ -32,18 +38,33 @@ export default function MasterDataPage() {
     weapons: d.weaponTypes.length,
   };
 
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    let rows: Record<string, unknown>[] = [];
+    if (tab === "species") rows = d.species.map((s) => ({ name: s.name, category: s.category, status: s.status }));
+    if (tab === "categories") rows = d.categories.map((c) => ({ name: c.name, mappedTo: c.mappedTo, active: c.active }));
+    if (tab === "water") rows = d.waterBodyTypes.map((w) => ({ name: w.name, active: w.active }));
+    if (tab === "patrolTypes") rows = d.patrolTypes.map((p) => ({ name: p.name, active: p.active }));
+    if (tab === "objectives") rows = d.patrolObjectives.map((o) => ({ name: o.name, active: o.active }));
+    if (tab === "vehicles") rows = d.vehicleTypes.map((v) => ({ name: v.name, active: v.active }));
+    if (tab === "weapons") rows = d.weaponTypes.map((w) => ({ name: w.name, active: w.active }));
+    exportRows(kind, `master-data-${tab}-${stamp()}`, rows);
+  };
+
   return (
     <div>
       <PageHeader
         title="Master Data"
         subtitle="Reference lists used across the portal (species, categories, types)"
         actions={
-          <button
-            onClick={() => pushToast("info", "Master data", "Add/edit is a backend write — not available on mock (planned)")}
-            className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
-          >
-            Add entry
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportButton onExport={handleExport} />
+            <button
+              onClick={() => setAddOpen(true)}
+              className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+            >
+              Add species
+            </button>
+          </div>
         }
       />
 
@@ -135,6 +156,46 @@ export default function MasterDataPage() {
           />
         )}
       </Card>
+
+      <Dialog open={addOpen} onClose={() => setAddOpen(false)} title="Add species" icon="paw">
+        <div className="space-y-4">
+          <Field label="Species name" required>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sambar Deer" />
+          </Field>
+          <Field label="Category">
+            <Select value={category} onChange={(e) => setCategory(e.target.value)}>
+              {["Mammal", "Bird", "Reptile", "Amphibian", "Fish"].map((c) => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Conservation status">
+            <Select value={status} onChange={(e) => setStatus(e.target.value as "present" | "rare" | "threatened")}>
+              {["present", "rare", "threatened"].map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button onClick={() => setAddOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">Cancel</button>
+          <button
+            disabled={name.trim().length < 3 || busy}
+            onClick={async () => {
+              setBusy(true);
+              await admin.createSpecies({ name: name.trim(), category, status });
+              setBusy(false);
+              setAddOpen(false);
+              setName("");
+              md.reload();
+              pushToast("success", "Species added", `${name.trim()} added to master data (mock store)`);
+            }}
+            className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
+          >
+            {busy ? "Adding…" : "Add species"}
+          </button>
+        </div>
+      </Dialog>
     </div>
   );
 }

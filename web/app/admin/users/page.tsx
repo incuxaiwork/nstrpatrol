@@ -8,10 +8,13 @@ import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Avatar, Badge, Card, Field, Input, PageHeader, SearchInput, Select } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination } from "@/components/data";
-import { Dialog } from "@/components/overlays";
+import { ConfirmDialog, Dialog, ExportButton, type ExportKind } from "@/components/overlays";
+import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
+import { exportRows, stamp } from "@/lib/export";
+import type { AdminUser } from "@/lib/types";
 
 const statusTone: Record<string, "success" | "info" | "danger" | "neutral"> = {
   active: "success",
@@ -33,6 +36,9 @@ export default function AdminUsersPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [roleId, setRoleId] = useState("forest-officer");
+  const [busy, setBusy] = useState(false);
+  const [actionUser, setActionUser] = useState<AdminUser | null>(null);
+  const [intent, setIntent] = useState<"toggle" | "remove" | null>(null);
 
   if (users.loading || !users.data) return <SkeletonRows rows={7} />;
   if (users.error) return <ErrorState message={users.error.message} onRetry={users.reload} />;
@@ -46,6 +52,19 @@ export default function AdminUsersPage() {
   );
 
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id;
+  const validInvite = name.trim().length >= 3 && email.includes("@");
+
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    exportRows(kind, `admin-users-${stamp()}`, filtered.map((u) => ({
+      name: u.name,
+      email: u.email,
+      role: roleName(u.roleId),
+      division: unitName(u.division),
+      status: statusLabel[u.status],
+      lastActive: u.lastActive ?? "",
+      created: u.created,
+    })));
+  };
 
   return (
     <div>
@@ -53,12 +72,15 @@ export default function AdminUsersPage() {
         title="Users"
         subtitle="Administrative accounts, roles and access state"
         actions={
-          <button
-            onClick={() => setInviteOpen(true)}
-            className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
-          >
-            Invite user
-          </button>
+          <div className="flex items-center gap-2">
+            <ExportButton onExport={handleExport} />
+            <button
+              onClick={() => setInviteOpen(true)}
+              className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+            >
+              Invite user
+            </button>
+          </div>
         }
       />
 
@@ -95,6 +117,37 @@ export default function AdminUsersPage() {
               render: (u) => <span className="text-ink-soft">{u.lastActive ? timeAgo(u.lastActive) : "—"}</span> },
             { key: "created", header: "Created", render: (u) => <span className="text-ink-soft">{u.created}</span> },
             { key: "status", header: "Status", sortValue: (u) => u.status, render: (u) => <Badge tone={statusTone[u.status]} dot>{statusLabel[u.status]}</Badge> },
+            {
+              key: "actions", header: "",
+              render: (u) => (
+                <div className="flex items-center justify-end gap-1">
+                  {u.status === "disabled" ? (
+                    <button
+                      onClick={() => { setActionUser(u); setIntent("toggle"); }}
+                      title="Enable user"
+                      className="flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-forest-50 hover:text-forest-800"
+                    >
+                      <Icon name="check" size={14} />
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => { setActionUser(u); setIntent("toggle"); }}
+                      title="Disable user"
+                      className="flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-danger/10 hover:text-danger"
+                    >
+                      <Icon name="power" size={14} />
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setActionUser(u); setIntent("remove"); }}
+                    title="Remove user"
+                    className="flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-danger/10 hover:text-danger"
+                  >
+                    <Icon name="trash" size={14} />
+                  </button>
+                </div>
+              ),
+            },
           ]}
           empty={<p className="py-8 text-center text-sm text-ink-soft">No users match the filters.</p>}
         />
@@ -120,17 +173,59 @@ export default function AdminUsersPage() {
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={() => setInviteOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">Cancel</button>
           <button
-            onClick={() => {
+            disabled={!validInvite || busy}
+            onClick={async () => {
+              setBusy(true);
+              await admin.createUser({ name: name.trim(), email: email.trim(), roleId });
+              setBusy(false);
               setInviteOpen(false);
               setName(""); setEmail("");
-              pushToast("success", "Invitation sent", `Invite dispatched to ${email || "the new user"} (mock)`);
+              users.reload();
+              pushToast("success", "Invitation sent", `Invite dispatched to ${email.trim()} (mock store)`);
             }}
-            className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700"
+            className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
             Send invite
           </button>
         </div>
       </Dialog>
+
+      <ConfirmDialog
+        open={actionUser !== null}
+        onClose={() => { setActionUser(null); setIntent(null); }}
+        danger={intent === "remove"}
+        title={
+          intent === "remove"
+            ? `Remove ${actionUser?.name}`
+            : actionUser?.status === "disabled"
+              ? `Enable ${actionUser?.name}`
+              : `Disable ${actionUser?.name}`
+        }
+        message={
+          intent === "remove"
+            ? `Delete ${actionUser?.name}'s account permanently? Their audit history is kept.`
+            : actionUser?.status === "disabled"
+              ? `Reactivate ${actionUser?.name}? They regain access per their role.`
+              : `${actionUser?.name} will be locked out until re-enabled.`
+        }
+        confirmLabel={intent === "remove" ? "Remove user" : actionUser?.status === "disabled" ? "Enable user" : "Disable user"}
+        onConfirm={async () => {
+          if (!actionUser) return;
+          const u = actionUser;
+          const nextAction = intent;
+          setActionUser(null);
+          setIntent(null);
+          if (nextAction === "remove") {
+            await admin.removeUser(u.id);
+            pushToast("warning", "User removed", `${u.name} removed from the system (mock store)`);
+          } else {
+            const next = u.status === "disabled" ? "active" : "disabled";
+            await admin.setUserStatus(u.id, next);
+            pushToast("info", "User updated", `${u.name} is now ${statusLabel[next].toLowerCase()} (mock store)`);
+          }
+          users.reload();
+        }}
+      />
     </div>
   );
 }

@@ -84,7 +84,8 @@ export type IconName =
   | "zap"
   | "link"
   | "edit"
-  | "flag";
+  | "flag"
+  | "power";
 
 const paths: Record<IconName, React.ReactNode> = {
   dashboard: (<><rect x="3" y="3" width="7" height="9" rx="1" /><rect x="14" y="3" width="7" height="5" rx="1" /><rect x="14" y="12" width="7" height="9" rx="1" /><rect x="3" y="16" width="7" height="5" rx="1" /></>),
@@ -166,6 +167,7 @@ const paths: Record<IconName, React.ReactNode> = {
   link: (<><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" /><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" /></>),
   edit: (<><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z" /><path d="m15 5 4 4" /></>),
   flag: (<><path d="M4 22V4" /><path d="M4 4c4-3 8 3 12 0v9c-4 3-8-3-12 0" /></>),
+  power: (<><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.77.04" /></>),
 };
 
 export interface IconProps extends SVGProps<SVGSVGElement> {

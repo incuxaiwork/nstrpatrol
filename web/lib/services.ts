@@ -495,14 +495,42 @@ export const analytics = {
 /* Administration                                                     */
 /* ------------------------------------------------------------------ */
 
+const createdUsers: AdminUser[] = [];
+const userStatusOverrides = new Map<string, AdminUser["status"]>();
+const removedUserIds = new Set<string>();
+const createdRoles: Role[] = [];
+const roleUpdates = new Map<string, Partial<Role>>();
+const removedRoleIds = new Set<string>();
+let settingsOverride: SiteSettings | undefined;
+const templateEnabledOverride = new Map<string, boolean>();
+const createdSpecies: { id: string; name: string; category: string; status: SpeciesStatus }[] = [];
+
+type SpeciesStatus = "present" | "rare" | "introduced" | "threatened";
+
+const userRecord = (id: string): AdminUser | undefined => {
+  if (removedUserIds.has(id)) return undefined;
+  const base = mockUsers.find((u) => u.id === id) ?? createdUsers.find((u) => u.id === id);
+  if (!base) return undefined;
+  return { ...base, status: userStatusOverrides.get(id) ?? base.status };
+};
+
+const roleRecord = (id: string): Role | undefined => {
+  if (removedRoleIds.has(id)) return undefined;
+  const created = createdRoles.find((r) => r.id === id);
+  if (created) return created;
+  const base = mockRoles.find((r) => r.id === id);
+  if (!base) return undefined;
+  return { ...base, ...roleUpdates.get(id) };
+};
+
 export const admin = {
   users: async (): Promise<AdminUser[]> => {
     await delay();
-    return mockUsers;
+    return [...mockUsers.filter((u) => !removedUserIds.has(u.id)).map((u) => ({ ...u, status: userStatusOverrides.get(u.id) ?? u.status })), ...createdUsers];
   },
   roles: async (): Promise<Role[]> => {
     await delay();
-    return mockRoles;
+    return [...mockRoles.filter((r) => !removedRoleIds.has(r.id)).map((r) => ({ ...r, ...roleUpdates.get(r.id) })), ...createdRoles];
   },
   audit: async (): Promise<AuditEntry[]> => {
     await delay();
@@ -510,15 +538,74 @@ export const admin = {
   },
   masterData: async (): Promise<MasterData> => {
     await delay();
-    return mockMasterData;
+    return { ...mockMasterData, species: [...mockMasterData.species, ...createdSpecies] };
+  },
+  createSpecies: async (input: { name: string; category: string; status: SpeciesStatus }): Promise<void> => {
+    await delay();
+    createdSpecies.unshift({ id: `sp-created-${createdSpecies.length + 1}`, ...input });
   },
   settings: async (): Promise<SiteSettings> => {
     await delay();
-    return mockSettings;
+    return settingsOverride ?? mockSettings;
+  },
+  saveSettings: async (patch: Partial<SiteSettings>): Promise<SiteSettings> => {
+    await delay();
+    settingsOverride = { ...(settingsOverride ?? mockSettings), ...patch };
+    return settingsOverride;
   },
   notificationTemplates: async (): Promise<NotificationTemplate[]> => {
     await delay();
-    return mockNotificationTemplates;
+    return mockNotificationTemplates.map((t) => ({ ...t, enabled: templateEnabledOverride.get(t.id) ?? t.enabled }));
+  },
+  setTemplateEnabled: async (id: string, enabled: boolean): Promise<void> => {
+    await delay();
+    templateEnabledOverride.set(id, enabled);
+  },
+  createUser: async (input: { name: string; email: string; roleId: string; division?: string }): Promise<AdminUser> => {
+    await delay();
+    const id = `u-created-${String(createdUsers.length + 1)}`;
+    const record: AdminUser = {
+      id,
+      name: input.name,
+      email: input.email,
+      roleId: input.roleId,
+      status: "invited",
+      division: input.division ?? "d-north",
+      created: new Date().toISOString().slice(0, 10),
+    };
+    createdUsers.unshift(record);
+    return record;
+  },
+  setUserStatus: async (id: string, status: AdminUser["status"]): Promise<AdminUser | undefined> => {
+    await delay();
+    if (!userRecord(id)) return undefined;
+    userStatusOverrides.set(id, status);
+    return userRecord(id);
+  },
+  removeUser: async (id: string): Promise<boolean> => {
+    await delay();
+    if (!userRecord(id)) return false;
+    removedUserIds.add(id);
+    return true;
+  },
+  createRole: async (input: { name: string; description: string; permissions: Role["permissions"] }): Promise<Role> => {
+    await delay();
+    const id = `role-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
+    const record: Role = { id, name: input.name, description: input.description, userCount: 0, system: false, permissions: input.permissions };
+    createdRoles.unshift(record);
+    return record;
+  },
+  updateRole: async (id: string, patch: Partial<Role>): Promise<Role | undefined> => {
+    await delay();
+    if (!roleRecord(id)) return undefined;
+    roleUpdates.set(id, { ...roleUpdates.get(id), ...patch });
+    return roleRecord(id);
+  },
+  removeRole: async (id: string): Promise<boolean> => {
+    await delay();
+    if (!roleRecord(id) || roleRecord(id)?.system) return false;
+    removedRoleIds.add(id);
+    return true;
   },
 };
 
