@@ -97,6 +97,7 @@ export function ConfirmDialog({
   message,
   confirmLabel = "Confirm",
   danger,
+  children,
 }: {
   open: boolean;
   onClose(): void;
@@ -105,10 +106,12 @@ export function ConfirmDialog({
   message: string;
   confirmLabel?: string;
   danger?: boolean;
+  children?: ReactNode;
 }) {
   return (
     <Dialog open={open} onClose={onClose} title={title} icon="alert">
       <p className="text-sm text-ink-soft">{message}</p>
+      {children}
       <div className="mt-5 flex justify-end gap-2">
         <button
           onClick={onClose}
@@ -422,10 +425,44 @@ export function DateRangePicker({
 /* Export dialog                                                      */
 /* ------------------------------------------------------------------ */
 
-export function ExportDialog({ open, onClose }: { open: boolean; onClose(): void }) {
+export type ExportKind = "CSV" | "JSON";
+
+/**
+ * Renders rows into a real downloadable file. When `rows` is provided the
+ * dialog produces the file directly; otherwise it falls back to the
+ * supplied `onExport` callback or a notice toast.
+ */
+export function ExportDialog({
+  open,
+  onClose,
+  rows,
+  filename,
+  onExport,
+}: {
+  open: boolean;
+  onClose(): void;
+  rows?: Record<string, unknown>[];
+  filename?: string;
+  onExport?(kind: ExportKind, scope: string): void;
+}) {
   const { pushToast } = useApp();
-  const [format, setFormat] = useState("PDF");
+  const [format, setFormat] = useState<ExportKind>("CSV");
   const [scope, setScope] = useState("");
+
+  const generate = () => {
+    if (onExport) {
+      onExport(format, scope);
+    } else if (rows && rows.length > 0) {
+      const base = filename ?? "nstr-patrol-export";
+      const fname = `${base}-${new Date().toISOString().slice(0, 10)}.${format.toLowerCase()}`;
+      import("@/lib/export").then(({ exportRows }) => exportRows(format, fname, rows));
+      pushToast("success", "Export downloaded", `${fname} saved (${rows.length} rows)`);
+    } else {
+      pushToast("info", "Nothing to export", "No records match the current view.");
+    }
+    onClose();
+  };
+
   return (
     <Dialog
       open={open}
@@ -441,10 +478,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose(): void
             Cancel
           </button>
           <button
-            onClick={() => {
-              onClose();
-              pushToast("success", "Export started", "Your file will be ready shortly.");
-            }}
+            onClick={generate}
             className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700"
           >
             Generate report
@@ -456,7 +490,7 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose(): void
         <div>
           <label className="mb-1.5 block text-xs font-medium text-ink">Format</label>
           <div className="flex gap-2">
-            {["PDF", "CSV", "XLSX"].map((f) => (
+            {(["CSV", "JSON"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFormat(f)}
@@ -487,15 +521,23 @@ export function ExportDialog({ open, onClose }: { open: boolean; onClose(): void
           </select>
         </div>
         <p className="text-xs text-ink-soft">
-          Exports respect your current filters and selection. Formatting follows the approved report
-          layout.
+          Exports respect your current filters and selection. CSV/JSON files download immediately;
+          PDF printing is available from the browser.
         </p>
       </div>
     </Dialog>
   );
 }
 
-export function ExportButton() {
+export function ExportButton({
+  rows,
+  filename,
+  onExport,
+}: {
+  rows?: Record<string, unknown>[];
+  filename?: string;
+  onExport?(kind: ExportKind, scope: string): void;
+}) {
   const { exportOpen, setExportOpen } = useApp();
   return (
     <>
@@ -506,7 +548,13 @@ export function ExportButton() {
         <Icon name="export" size={15} />
         Export
       </button>
-      <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <ExportDialog
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        rows={rows}
+        filename={filename}
+        onExport={onExport}
+      />
     </>
   );
 }

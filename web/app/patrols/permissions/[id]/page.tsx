@@ -17,13 +17,14 @@ import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { DataTable, Timeline } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { AuthAreaMap } from "@/components/jurisdiction";
-import { ConfirmDialog } from "@/components/overlays";
+import { ConfirmDialog, ExportDialog } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
+import { downloadJson } from "@/lib/export";
 
 const CURRENT_ROLE = "super-admin";
 
@@ -34,7 +35,8 @@ export default function AuthorizationDetailPage() {
   const { data: auth, error, loading, reload } = useAsyncData(() => authorizations.get(params.id));
   const roster = useAsyncData(() => rangers.list());
   const allPatrols = useAsyncData(() => patrols.list());
-  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<"revoke" | "reject" | "complete" | null>(null);
+  const [extendUntil, setExtendUntil] = useState("");
 
   const canManage = CURRENT_ROLE === "super-admin";
 
@@ -60,25 +62,85 @@ export default function AuthorizationDetailPage() {
           <>
             <Badge tone={authStatusTone[auth.status]} dot>{authStatusLabel[auth.status]}</Badge>
             <Badge tone={priorityTone[auth.priority]}>{auth.priority[0].toUpperCase() + auth.priority.slice(1)} priority</Badge>
-            {canManage && auth.status === "pending" && (
-              <button
-                onClick={async () => {
-                  await authorizations.approve(auth.id);
-                  pushToast("success", "Authorization approved", `${auth.id} is now active.`);
-                  reload();
-                }}
-                className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+            <button
+              onClick={() =>
+                downloadJson(`authorization-${auth.id}.json`, {
+                  id: auth.id,
+                  ranger: ranger?.name ?? auth.rangerId,
+                  rangerCode: ranger?.code,
+                  homeDivision: auth.homeDivision,
+                  homeRange: auth.homeRange,
+                  homeBeat: auth.homeBeat,
+                  authDivision: auth.authDivision,
+                  authRange: auth.authRange,
+                  authBeat: auth.authBeat,
+                  reason: auth.reason,
+                  instruction: auth.instruction,
+                  objective: auth.objective,
+                  patrolType: auth.patrolType,
+                  validFrom: auth.validFrom,
+                  validUntil: auth.validUntil,
+                  priority: auth.priority,
+                  restrictions: auth.restrictions,
+                  notes: auth.notes,
+                  status: auth.status,
+                  approvedBy: auth.approvedBy,
+                  approvalDate: auth.approvalDate,
+                })
+              }
+              className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+            >
+              <Icon name="export" size={15} /> Export record
+            </button>
+            {canManage && auth.status === "draft" && (
+              <Link
+                href={`/patrols/permissions/new?edit=${auth.id}`}
+                className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
               >
-                <Icon name="check" size={15} /> Approve
-              </button>
+                <Icon name="edit" size={14} /> Continue draft
+              </Link>
+            )}
+            {canManage && auth.status === "pending" && (
+              <>
+                <button
+                  onClick={() => setConfirmAction("reject")}
+                  className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/40 bg-white px-3 text-sm font-medium text-danger hover:bg-danger-soft"
+                >
+                  <Icon name="x" size={15} /> Reject
+                </button>
+                <button
+                  onClick={async () => {
+                    await authorizations.approve(auth.id);
+                    pushToast("success", "Authorization approved", `${auth.id} is now active.`);
+                    reload();
+                  }}
+                  className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+                >
+                  <Icon name="check" size={15} /> Approve
+                </button>
+              </>
             )}
             {canManage && auth.status === "active" && (
-              <button
-                onClick={() => setConfirmRevoke(true)}
-                className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/40 bg-white px-4 text-sm font-medium text-danger hover:bg-danger-soft"
-              >
-                <Icon name="x" size={15} /> Revoke
-              </button>
+              <>
+                <button
+                  onClick={() => setExtendUntil(auth.validUntil.slice(0, 16))}
+                  className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+                >
+                  <Icon name="calendar" size={14} /> Extend validity
+                </button>
+                <button
+                  onClick={() => setConfirmAction("complete")}
+                  className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+                >
+                  <Icon name="flag" size={14} /> Mark complete
+                </button>
+                <button
+                  onClick={() => setConfirmAction("revoke")}
+                  className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/40 bg-white px-3 text-sm font-medium text-danger hover:bg-danger-soft"
+                >
+                  <Icon name="x" size={15} /> Revoke
+                </button>
+              </>
             )}
           </>
         }
@@ -261,19 +323,72 @@ export default function AuthorizationDetailPage() {
         </div>
       </div>
 
+      {confirmAction && (
+        <ConfirmDialog
+          open
+          danger={confirmAction !== "complete"}
+          title={
+            confirmAction === "revoke"
+              ? "Revoke this authorization?"
+              : confirmAction === "reject"
+                ? "Reject this authorization?"
+                : "Mark this authorization complete?"
+          }
+          message={
+            confirmAction === "revoke"
+              ? `${auth.id} will be revoked immediately. Patrols already conducted under it remain on record for audit.`
+              : confirmAction === "reject"
+                ? `${auth.id} will be rejected. The ranger is notified that the request was not approved.`
+                : `All patrols under ${auth.id} have concluded. The record stays available for audit.`
+          }
+          confirmLabel={
+            confirmAction === "revoke"
+              ? "Revoke authorization"
+              : confirmAction === "reject"
+                ? "Reject authorization"
+                : "Mark complete"
+          }
+          onClose={() => setConfirmAction(null)}
+          onConfirm={async () => {
+            if (confirmAction === "revoke") {
+              await authorizations.revoke(auth.id);
+              pushToast("warning", "Authorization revoked", `${auth.id} is no longer valid.`);
+            } else if (confirmAction === "reject") {
+              await authorizations.reject(auth.id);
+              pushToast("info", "Authorization rejected", `${auth.id} was not approved.`);
+            } else {
+              await authorizations.complete(auth.id);
+              pushToast("success", "Authorization completed", `${auth.id} marked complete.`);
+            }
+            reload();
+          }}
+        />
+      )}
+
       <ConfirmDialog
-        open={confirmRevoke}
-        danger
-        title="Revoke this authorization?"
-        message={`${auth.id} will be revoked immediately. Patrols already conducted under it remain on record for audit.`}
-        confirmLabel="Revoke authorization"
-        onClose={() => setConfirmRevoke(false)}
+        open={extendUntil !== ""}
+        title="Extend validity"
+        message="Set the new expiry date-time for this authorization."
+        confirmLabel="Extend validity"
+        onClose={() => setExtendUntil("")}
         onConfirm={async () => {
-          await authorizations.revoke(auth.id);
-          pushToast("warning", "Authorization revoked", `${auth.id} is no longer valid.`);
+          if (!extendUntil) return;
+          await authorizations.extend(auth.id, extendUntil);
+          pushToast("success", "Validity extended", `${auth.id} now valid until ${new Date(extendUntil).toLocaleString()}.`);
+          setExtendUntil("");
           reload();
         }}
-      />
+      >
+        <div className="mt-3">
+          <input
+            type="datetime-local"
+            value={extendUntil}
+            onChange={(e) => setExtendUntil(e.target.value)}
+            aria-label="New valid-until date"
+            className="w-full rounded-field border border-line-strong bg-white px-3 py-2 text-sm focus:border-forest-600 focus:outline-none"
+          />
+        </div>
+      </ConfirmDialog>
     </div>
   );
 }

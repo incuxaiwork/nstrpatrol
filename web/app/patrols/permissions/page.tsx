@@ -25,6 +25,7 @@ import { ConfirmDialog, ExportDialog, ExportButton } from "@/components/overlays
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { authStatusLabel, authStatusTone, areaLabel } from "@/lib/jurisdiction";
 import { timeAgo } from "@/lib/utils";
+import type { PatrolAuthorization } from "@/lib/types";
 
 /** Mock current role — in the live system this comes from the session. */
 const CURRENT_ROLE = "super-admin";
@@ -39,10 +40,55 @@ export default function PatrolPermissionsPage() {
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [revoking, setRevoking] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<{ id: string; kind: "approve" | "revoke" | "reject" | "complete" } | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
 
   const canManage = CURRENT_ROLE === "super-admin";
+
+  const confirmCopy: Record<NonNullable<typeof confirming>["kind"], { title: string; label: string; message: string; danger?: boolean }> = {
+    approve: {
+      title: "Approve this authorization?",
+      label: "Approve authorization",
+      message: "The authorization becomes active immediately and the ranger can patrol the authorized area.",
+    },
+    revoke: {
+      title: "Revoke this authorization?",
+      label: "Revoke authorization",
+      danger: true,
+      message: "The authorization will be revoked immediately. Patrols already conducted under it remain on record for audit.",
+    },
+    reject: {
+      title: "Reject this authorization?",
+      label: "Reject authorization",
+      danger: true,
+      message: "The ranger will be notified that the request was not approved.",
+    },
+    complete: {
+      title: "Mark this authorization complete?",
+      label: "Mark complete",
+      message: "All patrols under this authorization have concluded. The record stays available for audit.",
+    },
+  };
+
+  const runConfirm = async () => {
+    if (!confirming) return;
+    const { id, kind } = confirming;
+    if (kind === "approve") {
+      await authorizations.approve(id);
+      pushToast("success", "Authorization approved", `${id} activated`);
+    } else if (kind === "revoke") {
+      await authorizations.revoke(id);
+      pushToast("warning", "Authorization revoked", `${id} is no longer valid`);
+    } else if (kind === "reject") {
+      await authorizations.reject(id);
+      pushToast("info", "Authorization rejected", `${id} was not approved`);
+    } else {
+      await authorizations.complete(id);
+      pushToast("success", "Authorization completed", `${id} marked complete`);
+    }
+    setConfirming(null);
+    reload();
+  };
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -75,7 +121,22 @@ export default function PatrolPermissionsPage() {
         subtitle="Manage exceptional patrol access and operational authorizations"
         actions={
           <div className="flex items-center gap-2">
-            <ExportButton />
+            <ExportButton
+              rows={(data ?? []).map((a) => ({
+                id: a.id,
+                ranger: rangerOf(a.rangerId)?.name ?? a.rangerId,
+                homeArea: areaLabel(a.homeDivision, a.homeRange, a.homeBeat),
+                authorizedArea: areaLabel(a.authDivision, a.authRange, a.authBeat),
+                reason: a.reason,
+                status: a.status,
+                priority: a.priority,
+                validFrom: a.validFrom,
+                validUntil: a.validUntil,
+                approvedBy: a.approvedBy ?? "",
+                created: a.createdDate,
+              }))}
+              filename="patrol-authorizations"
+            />
             {canManage && (
               <Link
                 href="/patrols/permissions/new"
@@ -163,24 +224,54 @@ export default function PatrolPermissionsPage() {
                     <Icon name="eye" size={13} />
                   </Link>
                   {canManage && a.status === "pending" && (
-                    <button
-                      onClick={() => pushToast("info", "Approve", `Open ${a.id} and confirm approval`)}
-                      title="Approve (via details)"
-                      aria-label="Approve"
-                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-forest-700 transition-colors hover:border-forest-600"
+                    <>
+                      <button
+                        onClick={() => setConfirming({ id: a.id, kind: "approve" })}
+                        title="Approve"
+                        aria-label={`Approve ${a.id}`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-forest-700 transition-colors hover:border-forest-600"
+                      >
+                        <Icon name="check" size={13} />
+                      </button>
+                      <button
+                        onClick={() => setConfirming({ id: a.id, kind: "reject" })}
+                        title="Reject"
+                        aria-label={`Reject ${a.id}`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-danger transition-colors hover:border-danger/50"
+                      >
+                        <Icon name="x" size={13} />
+                      </button>
+                    </>
+                  )}
+                  {canManage && a.status === "draft" && (
+                    <Link
+                      href={`/patrols/permissions/new?edit=${a.id}`}
+                      title="Continue draft"
+                      aria-label={`Continue draft ${a.id}`}
+                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
                     >
-                      <Icon name="check" size={13} />
-                    </button>
+                      <Icon name="edit" size={13} />
+                    </Link>
                   )}
                   {canManage && a.status === "active" && (
-                    <button
-                      onClick={() => setRevoking(a.id)}
-                      title="Revoke"
-                      aria-label="Revoke"
-                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-danger transition-colors hover:border-danger/50"
-                    >
-                      <Icon name="x" size={13} />
-                    </button>
+                    <>
+                      <button
+                        onClick={() => setConfirming({ id: a.id, kind: "complete" })}
+                        title="Mark complete"
+                        aria-label={`Mark ${a.id} complete`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                      >
+                        <Icon name="flag" size={13} />
+                      </button>
+                      <button
+                        onClick={() => setConfirming({ id: a.id, kind: "revoke" })}
+                        title="Revoke"
+                        aria-label={`Revoke ${a.id}`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-danger transition-colors hover:border-danger/50"
+                      >
+                        <Icon name="x" size={13} />
+                      </button>
+                    </>
                   )}
                 </span>
               ),
@@ -191,25 +282,17 @@ export default function PatrolPermissionsPage() {
         <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
       </Card>
 
-      <ConfirmDialog
-        open={revoking !== null}
-        danger
-        title="Revoke this authorization?"
-        message={
-          revoking
-            ? `${revoking} will be revoked immediately. Patrols already conducted under it remain on record for audit.`
-            : ""
-        }
-        confirmLabel="Revoke authorization"
-        onClose={() => setRevoking(null)}
-        onConfirm={async () => {
-          if (revoking) {
-            await authorizations.revoke(revoking);
-            pushToast("warning", "Authorization revoked", `${revoking} is no longer valid.`);
-            reload();
-          }
-        }}
-      />
+      {confirming && (
+        <ConfirmDialog
+          open
+          danger={confirmCopy[confirming.kind].danger}
+          title={confirmCopy[confirming.kind].title}
+          message={`${confirming.id} — ${confirmCopy[confirming.kind].message}`}
+          confirmLabel={confirmCopy[confirming.kind].label}
+          onClose={() => setConfirming(null)}
+          onConfirm={runConfirm}
+        />
+      )}
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );

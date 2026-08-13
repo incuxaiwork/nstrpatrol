@@ -190,6 +190,61 @@ export const authorizations = {
     });
     return { ...auth };
   },
+  reject: async (id: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth || auth.status !== "pending") return auth;
+    auth.status = "rejected";
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Rejected",
+      description: "Rejected by Super Admin — authorization not granted",
+    });
+    return { ...auth };
+  },
+  complete: async (id: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth || auth.status !== "active") return auth;
+    auth.status = "completed";
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Completed",
+      description: "Marked complete — all patrols under it concluded",
+    });
+    return { ...auth };
+  },
+  update: async (
+    id: string,
+    patch: Partial<Omit<PatrolAuthorization, "id" | "history">>
+  ): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth) return auth;
+    Object.assign(auth, patch);
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Updated",
+      description: "Authorization details amended by Super Admin",
+    });
+    return { ...auth };
+  },
+  extend: async (id: string, validUntil: string): Promise<PatrolAuthorization | undefined> => {
+    await delay();
+    const auth = authStore.find((a) => a.id === id);
+    if (!auth || (auth.status !== "active" && auth.status !== "draft")) return auth;
+    auth.validUntil = validUntil;
+    auth.history.push({
+      time: new Date().toISOString(),
+      user: "V. Kulkarni · Super Admin",
+      action: "Validity extended",
+      description: `Valid until extended to ${new Date(validUntil).toLocaleDateString()}`,
+    });
+    return { ...auth };
+  },
 };
 
 /* ------------------------------------------------------------------ */

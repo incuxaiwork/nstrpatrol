@@ -42,6 +42,12 @@ export interface MapProps {
   selectedId?: string | null;
   onSelect?(id: string | null): void;
   replayPatrolId?: string | null;
+  /** Real patrol route (lat/lng) used to synthesize playback when no GIS route exists. */
+  replayPoints?: { lat: number; lng: number }[];
+  /** Progress of the active replay (0..1) — for timeline sync. */
+  onProgress?(p: number): void;
+  /** External seek: bump this value to jump the replay to a fraction. */
+  seekSignal?: { key: number; value: number } | null;
   liveBeats?: BeatPolygon[];
   headerActions?: React.ReactNode;
 }
@@ -52,6 +58,9 @@ export function MapWorkspace({
   selectedId,
   onSelect,
   replayPatrolId,
+  replayPoints,
+  onProgress,
+  seekSignal,
   liveBeats,
   headerActions,
 }: MapProps) {
@@ -69,13 +78,39 @@ export function MapWorkspace({
 
   const isZero = (b: BeatPolygon) => zeroPatrolZones.includes(b.id);
 
-  const replayRoute = replayPatrolId
-    ? gisRoutes.find((r) => r.patrolId === replayPatrolId)
-    : undefined;
+  const replayRoute = useMemo(() => {
+    if (!replayPatrolId) return undefined;
+    const found = gisRoutes.find(
+      (r) => r.patrolId.toLowerCase() === replayPatrolId.toLowerCase()
+    );
+    if (found) return found;
+    if (replayPoints && replayPoints.length >= 2) {
+      const svg = fitRouteToSvg(replayPoints);
+      return {
+        id: `${replayPatrolId}-synth`,
+        patrolId: replayPatrolId,
+        label: "Recorded route",
+        status: "replay",
+        color: "#2E7D32",
+        points: svg.map((p) => `${p.x},${p.y}`).join(" "),
+        timedPoints: svg.map((p, i) => ({
+          x: p.x,
+          y: p.y,
+          t: svg.length > 1 ? i / (svg.length - 1) : 0,
+        })),
+      };
+    }
+    return undefined;
+  }, [replayPatrolId, replayPoints]);
+
   const replaySegments = replayRoute?.timedPoints ?? [];
 
   const replayIndex = Math.floor(progress * Math.max(replaySegments.length - 1, 0));
   const shownPoints = replaySegments.slice(0, replayIndex + 1);
+
+  const emitProgress = useMemo(() => {
+    return (p: number) => onProgress?.(p);
+  }, [onProgress]);
 
   useEffect(() => {
     if (!replayOn || replaySegments.length < 2) return;
@@ -83,13 +118,23 @@ export function MapWorkspace({
       setProgress((p) => {
         if (p >= 1) {
           setReplayOn(false);
+          emitProgress(1);
           return 1;
         }
-        return p + 0.01 * replaySpeed;
+        const next = Math.min(1, p + 0.01 * replaySpeed);
+        emitProgress(next);
+        return next;
       });
     }, 60);
     return () => clearInterval(id);
-  }, [replayOn, replaySegments.length, replaySpeed]);
+  }, [replayOn, replaySegments.length, replaySpeed, emitProgress]);
+
+  useEffect(() => {
+    if (!seekSignal) return;
+    setProgress(seekSignal.value);
+    emitProgress(seekSignal.value);
+    setReplayOn(false);
+  }, [seekSignal, emitProgress]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">
@@ -267,7 +312,7 @@ export function MapWorkspace({
             {/* patrol routes */}
             {visible("patrols") &&
               gisRoutes.map((r) => {
-                if (replayPatrolId && r.patrolId !== replayPatrolId) return null;
+                if (replayPatrolId && r.patrolId.toLowerCase() !== replayPatrolId.toLowerCase()) return null;
                 if (replayOn && replayPatrolId === r.patrolId && shownPoints.length > 1) {
                   const pts = shownPoints.map((p) => `${p.x},${p.y}`).join(" ");
                   return (
@@ -467,6 +512,29 @@ const rangerCode = (label: string) => {
   const m = label.match(/^([A-Z]+-\d+)/i);
   return m ? m[1] : label;
 };
+
+/**
+ * Route-fit helper — maps a lat/lng polyline into the mock SVG viewBox,
+ * preserving the relative shape of the route (mock map coordinate space).
+ */
+function fitRouteToSvg(points: { lat: number; lng: number }[]) {
+  const lats = points.map((p) => p.lat);
+  const lngs = points.map((p) => p.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const spanLat = Math.max(maxLat - minLat, 1e-6);
+  const spanLng = Math.max(maxLng - minLng, 1e-6);
+  const padX = 110;
+  const padY = 90;
+  const availW = VIEW.w - padX * 2;
+  const availH = VIEW.h - padY * 2;
+  return points.map((p) => ({
+    x: Math.round(padX + ((p.lng - minLng) / spanLng) * availW),
+    y: Math.round(padY + ((maxLat - p.lat) / spanLat) * availH),
+  }));
+}
 
 /* ------------------------------------------------------------------ */
 /* Side panel bits used by the GIS workspace                          */

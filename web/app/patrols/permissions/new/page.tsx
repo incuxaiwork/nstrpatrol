@@ -13,8 +13,8 @@
  * Super Admin / authorized senior officer only.
  */
 
-import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useEffect, useState } from "react";
 import { authorizations, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
@@ -33,8 +33,11 @@ const STEP_LABELS = ["Select ranger", "Select area", "Details", "Review", "Appro
 
 export default function CreateAuthorizationPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
   const { pushToast } = useApp();
   const roster = useAsyncData(() => rangers.list());
+  const editing = useAsyncData(() => (editId ? authorizations.get(editId) : Promise.resolve(undefined)));
 
   const [step, setStep] = useState(1);
   const [rangerId, setRangerId] = useState("");
@@ -50,6 +53,26 @@ export default function CreateAuthorizationPage() {
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
   const [restrictions, setRestrictions] = useState("");
   const [notes, setNotes] = useState("");
+
+  const draft = editing.data;
+
+  useEffect(() => {
+    if (!draft) return;
+    setRangerId(draft.rangerId);
+    setAuthDivision(draft.authDivision);
+    setAuthRange(draft.authRange);
+    setAuthBeat(draft.authBeat);
+    setReason(draft.reason);
+    setInstruction(draft.instruction);
+    setPatrolType(draft.patrolType);
+    setObjective(draft.objective ?? "");
+    setValidFrom(dateInput(new Date(draft.validFrom)));
+    setValidUntil(dateInput(new Date(draft.validUntil)));
+    setPriority(draft.priority);
+    setRestrictions(draft.restrictions ?? "");
+    setNotes(draft.notes ?? "");
+    setStep(draft.status === "draft" ? 1 : 3);
+  }, [draft]);
 
   const ranger = roster.data?.find((r) => r.id === rangerId);
 
@@ -84,12 +107,13 @@ export default function CreateAuthorizationPage() {
     }
   };
 
-  if (roster.loading || !roster.data) return <SkeletonRows rows={7} />;
+  if (roster.loading || !roster.data || editing.loading) return <SkeletonRows rows={7} />;
   if (roster.error) return <ErrorState message={roster.error.message} onRetry={roster.reload} />;
+  if (editing.error) return <ErrorState message={editing.error.message} onRetry={editing.reload} />;
 
   const submit = async (status: "active" | "draft") => {
     if (!ranger) return;
-    const auth = await authorizations.create({
+    const payload = {
       rangerId,
       homeDivision: ranger.division,
       homeRange: ranger.range,
@@ -106,8 +130,28 @@ export default function CreateAuthorizationPage() {
       priority,
       restrictions: restrictions || undefined,
       notes: notes || undefined,
-      status,
-    });
+    };
+    if (editId && editing.data) {
+      await authorizations.update(
+        editId,
+        status === "active"
+          ? {
+              ...payload,
+              status,
+              approvedBy: APPROVER,
+              approvalDate: new Date().toISOString(),
+            }
+          : payload
+      );
+      pushToast(
+        status === "active" ? "success" : "info",
+        status === "active" ? "Authorization approved" : "Draft updated",
+        `${editId} ${status === "active" ? "is now active" : "updated"}`
+      );
+      router.push(`/patrols/permissions/${editId}`);
+      return;
+    }
+    const auth = await authorizations.create({ ...payload, status });
     pushToast(
       status === "active" ? "success" : "info",
       status === "active" ? "Authorization approved" : "Draft saved",
@@ -124,9 +168,17 @@ export default function CreateAuthorizationPage() {
   return (
     <div>
       <PageHeader
-        title="Create Authorization"
-        subtitle="Grant a ranger special permission to patrol outside their normal jurisdiction"
-        actions={<Badge tone="neutral">{STEP_LABELS[step - 1]}</Badge>}
+        title={editId ? "Edit Authorization" : "Create Authorization"}
+        subtitle={editId ? `Amend draft ${editId} and continue the approval flow` : "Grant a ranger special permission to patrol outside their normal jurisdiction"}
+        actions={
+          editId && editing.data ? (
+            <Badge tone={editing.data.status === "draft" ? "neutral" : "info"}>
+              {editing.data.status === "draft" ? "Draft — editable" : editing.data.status}
+            </Badge>
+          ) : (
+            <Badge tone="neutral">{STEP_LABELS[step - 1]}</Badge>
+          )
+        }
       />
 
       {/* Step indicator */}
@@ -328,25 +380,29 @@ export default function CreateAuthorizationPage() {
           <Card>
             <div className="p-6 text-center">
               <span className="mx-auto flex size-12 items-center justify-center rounded-full bg-forest-100 text-forest-800">
-                <Icon name="check" size={22} />
+                <Icon name={editId ? "save" : "check"} size={22} />
               </span>
-              <h2 className="mt-3 text-base font-semibold text-ink">Ready to publish</h2>
+              <h2 className="mt-3 text-base font-semibold text-ink">
+                {editId ? "Save changes" : "Ready to publish"}
+              </h2>
               <p className="mx-auto mt-1 max-w-md text-sm text-ink-soft">
-                Approving makes the authorization immediately visible to {ranger?.name ?? "the ranger"} in the mobile application.
-                Saving as draft keeps it out of the field until submitted and approved.
+                {editId
+                  ? "Save keeps the current status. Approving immediately activates the authorization for the ranger in the mobile application."
+                  : "Approving makes the authorization immediately visible to the ranger in the mobile application. Saving as draft keeps it out of the field until submitted and approved."}
               </p>
               <div className="mt-5 flex justify-center gap-3">
                 <button
                   onClick={() => submit("draft")}
                   className="inline-flex h-10 items-center gap-2 rounded-field border border-line-strong bg-white px-5 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
                 >
-                  <Icon name="save" size={15} /> Save draft
+                  <Icon name="save" size={15} /> {editId ? "Save changes" : "Save draft"}
                 </button>
                 <button
                   onClick={() => submit("active")}
                   className="inline-flex h-10 items-center gap-2 rounded-field bg-forest-800 px-5 text-sm font-medium text-white shadow-card hover:bg-forest-700"
                 >
-                  <Icon name="check" size={15} /> Approve authorization
+                  <Icon name="check" size={15} />
+                  {editId && editing.data?.status !== "active" ? "Approve authorization" : "Re-save as active"}
                 </button>
               </div>
             </div>
