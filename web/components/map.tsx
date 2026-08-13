@@ -50,6 +50,8 @@ export interface MapProps {
   seekSignal?: { key: number; value: number } | null;
   liveBeats?: BeatPolygon[];
   headerActions?: React.ReactNode;
+  /** Popup card rendered over the map (bottom-right) when a feature is selected. */
+  detailCard?: React.ReactNode;
 }
 
 export function MapWorkspace({
@@ -63,6 +65,7 @@ export function MapWorkspace({
   seekSignal,
   liveBeats,
   headerActions,
+  detailCard,
 }: MapProps) {
   const [zoom, setZoom] = useState(1);
   const [replayOn, setReplayOn] = useState(false);
@@ -409,6 +412,9 @@ export function MapWorkspace({
             </div>
           )}
         </div>
+
+        {/* feature detail popup */}
+        {detailCard && <div className="absolute bottom-3 right-3 z-10 max-w-72">{detailCard}</div>}
 
         {/* replay controls */}
         {replayRoute && (
