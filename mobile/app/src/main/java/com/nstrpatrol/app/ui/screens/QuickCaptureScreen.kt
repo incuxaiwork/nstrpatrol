@@ -10,10 +10,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.submitIncident
+import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -28,8 +33,12 @@ import com.nstrpatrol.app.ui.navigation.Route
 fun QuickCaptureScreen(
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
-    onOpenCamera: (String) -> Unit = {}
+    onOpenCamera: (String) -> Unit = {},
+    patrolTimer: PatrolTimer,
+    dao: TelemetryDao,
+    api: BackendApiClient
 ) {
+    val context = LocalContext.current
     var signType by remember { mutableStateOf<String?>(null) }
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
@@ -72,7 +81,17 @@ fun QuickCaptureScreen(
             )
 
             Spacer(Modifier.height(20.dp))
-            PrimaryButton(text = "SAVE DETAILS", onClick = onBack, textSize = 15, textWeight = FontWeight.Bold)
+            PrimaryButton(text = "SAVE DETAILS", onClick = {
+                submitIncident(
+                    dao = dao, api = api, patrolTimer = patrolTimer, context = context,
+                    type = "QUICK_CAPTURE", title = signType ?: "Quick Capture",
+                    description = remarks.ifEmpty { null },
+                    severity = "Low",
+                    details = mapOf("signType" to signType),
+                    photos = PhotoStore.paths(photoSlot)
+                )
+                onBack()
+            }, textSize = 15, textWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
         }
 

@@ -39,7 +39,9 @@ data class GisLayerState(
     val showBeats: Boolean = true,
     val showCompartments: Boolean = true,
     val showIncidents: Boolean = true,
-    val showMBTiles: Boolean = true
+    val showMBTiles: Boolean = true,
+    val showSatellite: Boolean = true,
+    val showTrack: Boolean = true
 )
 
 /**

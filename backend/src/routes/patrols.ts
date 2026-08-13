@@ -14,7 +14,8 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 const patrolCreateSchema = z.object({
-  forestId: z.string().cuid(),
+  id: z.string().min(1).max(40).optional(),
+  forestId: z.string().cuid().nullish(),
   name: z.string().trim().max(160).nullish(),
   description: z.string().trim().max(500).nullish(),
   type: z.enum(['WALK', 'BICYCLE', 'VEHICLE', 'STATIONARY']),
@@ -22,15 +23,18 @@ const patrolCreateSchema = z.object({
 
 // Rangers start patrols on their own initiative. The creating user is the
 // owner; a patrol starts ACTIVE immediately (no admin assignment step).
+// `id` lets the mobile supply a stable client-generated id (offline-first);
+// `forestId` is optional and resolved server-side when omitted.
 patrolsRouter.post('/', validateBody(patrolCreateSchema), async (req, res) => {
   const body = req.body;
-  const forest = await prisma.forest.findUnique({ where: { id: body.forestId } });
-  if (!forest) throw new HttpError(404, 'not_found', 'Forest not found');
+  const forestId = body.forestId ?? (await prisma.forest.findFirst())?.id;
+  if (!forestId) throw new HttpError(400, 'no_forest', 'No forest is configured for this deployment');
 
   const patrol = await prisma.patrol.create({
     data: {
+      id: body.id ?? undefined,
       userId: req.user!.id,
-      forestId: body.forestId,
+      forestId,
       name: body.name ?? null,
       description: body.description ?? null,
       type: body.type,
@@ -102,6 +106,36 @@ patrolsRouter.get('/:id', async (req, res) => {
       durationSeconds: Math.round(stats[0].durationSeconds ?? 0),
     },
   });
+});
+
+// Lightweight point feed for drawing a patrol's route on the report screen.
+// Returns plain lat/lng/altitude/speed/timestamp so the client can render a
+// track for patrols it did not record locally.
+patrolsRouter.get('/:id/points', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const pts = await prisma.patrolPoint.findMany({
+    where: { patrolId: id },
+    orderBy: { timestamp: 'asc' },
+    select: { latitude: true, longitude: true, altitude: true, speed: true, timestamp: true },
+  });
+  res.json(
+    pts.map((p) => ({
+      lat: p.latitude,
+      lng: p.longitude,
+      altitude: p.altitude,
+      speed: p.speed,
+      t: p.timestamp,
+    }))
+  );
 });
 
 const startSchema = z.object({ startedAt: z.coerce.date().optional() });

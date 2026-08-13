@@ -38,7 +38,7 @@ async function authorizePatrols(
 
 const MAX_BATCH = 2000;
 const dateTime = z.coerce.date();
-const ts = z.object({ patrolId: z.string().cuid(), timestamp: dateTime });
+const ts = z.object({ patrolId: z.string().min(1).max(40), timestamp: dateTime });
 const axis = { x: z.number().finite().nullish(), y: z.number().finite().nullish(), z: z.number().finite().nullish() };
 
 const schemas = {
@@ -70,7 +70,7 @@ const schemas = {
   'magnetometer': z.array(ts.extend(axis)),
   'activity-segments': z.array(
     z.object({
-      patrolId: z.string().cuid(),
+      patrolId: z.string().min(1).max(40),
       startTime: dateTime,
       endTime: dateTime,
       mode: z.enum(['WALK', 'BICYCLE', 'VEHICLE', 'STATIONARY']),

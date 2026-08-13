@@ -50,9 +50,11 @@ fun PatrolStartScreen(
     onSave: () -> Unit,
     onBack: () -> Unit,
     onTabSelected: (BottomTab) -> Unit,
+    onStartPatrol: () -> Unit,
     onOpenCamera: (String) -> Unit = {},
     patrolTimer: PatrolTimer,
-    dao: TelemetryDao
+    dao: TelemetryDao,
+    api: com.nstrpatrol.app.data.map.BackendApiClient
 ) {
     var patrolType by remember { mutableStateOf<String?>(null) }
     var patrolMethod by remember { mutableStateOf<String?>(null) }
@@ -200,22 +202,32 @@ fun PatrolStartScreen(
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = "SAVE DETAILS", onClick = {
-                val pid = patrolTimer.patrolId
-                if (pid != null) {
-                    scope.launch {
-                        dao.upsertPatrolSession(
-                            PatrolSessionEntity(
-                                patrolId = pid,
-                                startTime = patrolTimer.trustedNow(),
-                                patrolType = patrolType,
-                                patrolMethod = patrolMethod,
-                                beat = beat,
-                                teamLeader = teamLeader,
-                                armedStatus = armed,
-                                memberCount = memberCount
-                            )
+                onStartPatrol()
+                val pid = patrolTimer.patrolId ?: return@PrimaryButton
+                scope.launch {
+                    dao.upsertPatrolSession(
+                        PatrolSessionEntity(
+                            patrolId = pid,
+                            startTime = patrolTimer.trustedNow(),
+                            status = "ACTIVE",
+                            patrolType = patrolType,
+                            patrolMethod = patrolMethod,
+                            beat = beat,
+                            teamLeader = teamLeader,
+                            armedStatus = armed,
+                            memberCount = memberCount,
+                            syncStatus = "PENDING"
                         )
-                    }
+                    )
+                    runCatching {
+                        api.createPatrol(
+                            org.json.JSONObject().apply {
+                                put("id", pid)
+                                put("type", mapPatrolType(patrolType))
+                                put("name", buildPatrolName(patrolType, beat))
+                            }
+                        )
+                    }.onSuccess { dao.updateSessionSyncStatus(pid, "SYNCED") }
                 }
                 onSave()
             }, textSize = 15, textWeight = FontWeight.Bold)
@@ -265,4 +277,16 @@ fun PatrolStartScreen(
             )
         }
     }
+}
+
+private fun mapPatrolType(type: String?): String = when (type) {
+    "BICYCLE", "Cycle" -> "BICYCLE"
+    "VEHICLE", "Motor Cycle", "Four Wheeler", "Boat", "Aerial" -> "VEHICLE"
+    "STATIONARY" -> "STATIONARY"
+    else -> "WALK"
+}
+
+private fun buildPatrolName(type: String?, beat: String?): String {
+    val parts = listOfNotNull(type, beat).filter { it.isNotBlank() }
+    return if (parts.isEmpty()) "Patrol" else parts.joinToString(" – ")
 }

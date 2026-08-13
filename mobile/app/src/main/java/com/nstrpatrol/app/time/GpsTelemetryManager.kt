@@ -18,6 +18,7 @@ import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
+import com.nstrpatrol.app.AppConfig
 import android.view.Surface
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
@@ -454,7 +455,7 @@ class GpsTelemetryManager(private val appContext: Context) {
                 try {
                     locationManager.requestLocationUpdates(
                         provider,
-                        UPDATE_INTERVAL_MS,
+                        AppConfig.GPS_UPDATE_INTERVAL_MS,
                         0f,
                         locationListener,
                         Looper.getMainLooper()
@@ -510,7 +511,7 @@ class GpsTelemetryManager(private val appContext: Context) {
             override fun run() {
                 ensureStarted()
                 resync()
-                handler.postDelayed(this, POLL_INTERVAL_MS)
+                handler.postDelayed(this, AppConfig.GPS_POLL_INTERVAL_MS)
             }
         })
     }
@@ -561,8 +562,6 @@ class GpsTelemetryManager(private val appContext: Context) {
 
     companion object {
         private const val TAG = "GpsTelemetry"
-        const val UPDATE_INTERVAL_MS = 1000L
-        const val POLL_INTERVAL_MS = 2000L
         private val providers = listOf(
             LocationManager.GPS_PROVIDER,
             LocationManager.NETWORK_PROVIDER

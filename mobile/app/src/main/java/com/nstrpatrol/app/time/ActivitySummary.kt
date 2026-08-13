@@ -1,5 +1,6 @@
 package com.nstrpatrol.app.time
 
+import com.nstrpatrol.app.AppConfig
 import com.nstrpatrol.app.data.db.DailyActivityEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import java.text.SimpleDateFormat
@@ -21,8 +22,6 @@ import kotlin.math.sqrt
 object ActivitySummary {
 
     private const val EARTH_RADIUS_M = 6_371_000.0
-    private const val SAMPLE_INTERVAL_MS = 5000L
-    private const val DEFAULT_WEIGHT_KG = 70.0
 
     private val dayFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
 
@@ -36,7 +35,7 @@ object ActivitySummary {
         val endTime = points.lastOrNull()?.timestamp
         val durationMs = if (startTime != null && endTime != null) endTime - startTime else 0L
         val avgSpeedKmh = if (durationMs > 0) (distance / 1000.0) / (durationMs / 3_600_000.0) else 0.0
-        val moveMinutes = (activeSamples * SAMPLE_INTERVAL_MS) / 60_000
+        val moveMinutes = (activeSamples * AppConfig.METRICS_SAMPLE_INTERVAL_MS) / 60_000
 
         val calories = estimateCalories(
             moveMinutes = moveMinutes.toLong(),
@@ -76,7 +75,7 @@ object ActivitySummary {
             if (start != null && end != null) totalDurationMs += (end - start)
         }
 
-        val moveMinutes = (activeSamples * SAMPLE_INTERVAL_MS) / 60_000
+        val moveMinutes = (activeSamples * AppConfig.METRICS_SAMPLE_INTERVAL_MS) / 60_000
         val calories = estimateCalories(
             moveMinutes = moveMinutes.toLong(),
             durationMs = totalDurationMs,
@@ -130,8 +129,8 @@ object ActivitySummary {
         val moveHours = moveMinutes / 60.0
         val stillHours = (durationHours - moveHours).coerceAtLeast(0.0)
 
-        val activeCals = moveHours * 3.5 * DEFAULT_WEIGHT_KG
-        val restCals = stillHours * 1.0 * DEFAULT_WEIGHT_KG
+        val activeCals = moveHours * 3.5 * AppConfig.DEFAULT_RANGER_WEIGHT_KG
+        val restCals = stillHours * 1.0 * AppConfig.DEFAULT_RANGER_WEIGHT_KG
         return activeCals + restCals
     }
 

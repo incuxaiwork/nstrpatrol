@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
 import android.provider.Settings
+import com.nstrpatrol.app.AppConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -47,7 +48,7 @@ data class TimeIntegrityState(
  *
  * Tampering is flagged when:
  *  - the device auto-time setting (AUTO_TIME) is turned off, or
- *  - the device wall clock diverges from trusted satellite time beyond [DIVERGENCE_THRESHOLD_MS].
+ *  - the device wall clock diverges from trusted satellite time beyond [AppConfig.TIME_DIVERGENCE_THRESHOLD_MS].
  *
  * Broadcast receivers for TIME_CHANGED / TIMEZONE_CHANGED / DATE_CHANGED force a
  * re-evaluation so a manual clock change is caught immediately.
@@ -145,7 +146,7 @@ class TrustedTimeManager(private val appContext: Context) {
         val device = System.currentTimeMillis()
         val divergence = Math.abs(device - trusted)
         val autoTime = isAutoTimeEnabled()
-        val tamper = (divergence > DIVERGENCE_THRESHOLD_MS) || !autoTime
+        val tamper = (divergence > AppConfig.TIME_DIVERGENCE_THRESHOLD_MS) || !autoTime
         _state.value = TimeIntegrityState(
             gnssTimeAvailable = satellite != null,
             satelliteUtcMillis = satellite ?: trusted,
@@ -184,7 +185,7 @@ class TrustedTimeManager(private val appContext: Context) {
         try {
             locationManager.requestLocationUpdates(
                 LocationManager.GPS_PROVIDER,
-                MIN_FIX_INTERVAL_MS,
+                AppConfig.TIME_MIN_FIX_INTERVAL_MS,
                 0f,
                 object : LocationListener {
                     override fun onLocationChanged(location: Location) {
@@ -250,8 +251,6 @@ class TrustedTimeManager(private val appContext: Context) {
     }
 
     companion object {
-        const val DIVERGENCE_THRESHOLD_MS = 60_000L
-        const val MIN_FIX_INTERVAL_MS = 30_000L
     }
 }
 

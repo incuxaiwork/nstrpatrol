@@ -14,6 +14,7 @@ import android.util.Log
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionResult
+import com.nstrpatrol.app.AppConfig
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
@@ -36,7 +37,7 @@ import java.util.UUID
  * Offline-first telemetry logger for an active patrol.
  *
  * While [PatrolTimer.running] is true it:
- *  - snapshots a patrol point every [SAMPLE_INTERVAL_MS] when a GPS fix exists,
+ *  - snapshots a patrol point every [AppConfig.SAMPLE_INTERVAL_MS] when a GPS fix exists,
  *  - caches raw sensor samples (accel/gyro/magnet/barometer/steps),
  *  - classifies the ranger's movement mode, preferring Google Activity
  *    Recognition and falling back to speed/cadence heuristics,
@@ -134,7 +135,7 @@ class TelemetryRecorder(
                 } catch (e: Exception) {
                     Log.w(TAG, "Sample failed", e)
                 }
-                delay(SAMPLE_INTERVAL_MS)
+                delay(AppConfig.SAMPLE_INTERVAL_MS)
             }
         }
     }
@@ -255,11 +256,11 @@ class TelemetryRecorder(
 
         val result = lastArResult
         val fresh = result != null &&
-            SystemClock.elapsedRealtime() - result.elapsedRealtimeMillis < AR_FRESH_MS
+            SystemClock.elapsedRealtime() - result.elapsedRealtimeMillis < AppConfig.AR_FRESH_MS
         if (fresh) {
             val best = result.mostProbableActivity
             val mode = MovementMode.fromGoogleDetectedActivity(best, result.probableActivities)
-            if (mode != MovementMode.UNKNOWN && best.confidence >= AR_MIN_CONFIDENCE) {
+            if (mode != MovementMode.UNKNOWN && best.confidence >= AppConfig.AR_MIN_CONFIDENCE) {
                 return MovementInfo(
                     mode = mode,
                     confidence = best.confidence.toFloat(),
@@ -275,7 +276,7 @@ class TelemetryRecorder(
             speedKmh >= 25f -> MovementMode.VEHICLE
             speedKmh >= 7f -> MovementMode.CYCLING
             speedKmh >= 0.5f ->
-                if (cadence != null && cadence >= RUN_CADENCE_THRESHOLD) {
+                if (cadence != null && cadence >= AppConfig.RUN_CADENCE_THRESHOLD) {
                     MovementMode.RUNNING
                 } else {
                     MovementMode.WALKING
@@ -353,7 +354,7 @@ class TelemetryRecorder(
             )
             arPendingIntent = pending
             ActivityRecognition.getClient(appContext)
-                .requestActivityUpdates(AR_UPDATE_INTERVAL_MS, pending)
+                .requestActivityUpdates(AppConfig.ACTIVITY_UPDATE_INTERVAL_MS, pending)
             Log.i(TAG, "Activity Recognition updates requested")
         } catch (e: Exception) {
             Log.w(TAG, "Activity Recognition unavailable", e)
@@ -373,11 +374,6 @@ class TelemetryRecorder(
 
     companion object {
         private const val TAG = "TelemetryRecorder"
-        const val SAMPLE_INTERVAL_MS = 5000L
-        const val AR_UPDATE_INTERVAL_MS = 10_000L
-        private const val AR_FRESH_MS = 15_000L
-        private const val AR_MIN_CONFIDENCE = 51
-        private const val RUN_CADENCE_THRESHOLD = 130f
         private const val AR_ACTION = "com.nstrpatrol.app.ACTION_ACTIVITY_RESULT"
         const val TYPE_MOVEMENT_MODE = "MOVEMENT_MODE"
     }

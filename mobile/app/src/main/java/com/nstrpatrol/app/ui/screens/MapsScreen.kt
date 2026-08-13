@@ -132,8 +132,7 @@ fun MapsScreen(
     onTabSelected: (BottomTab) -> Unit,
     patrolTimer: PatrolTimer,
     telemetryManager: GpsTelemetryManager,
-    dao: TelemetryDao,
-    onStopPatrol: () -> Unit
+    dao: TelemetryDao
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -215,6 +214,13 @@ fun MapsScreen(
         }
     }
 
+    // REACTIVE PATROL TRACK UPDATE (redraws line + dots whenever points change)
+    LaunchedEffect(patrolPoints) {
+        val geo = buildPatrolTrackGeoJson(patrolPoints)
+        miniMapRef?.style?.getSourceAs<GeoJsonSource>("patrol-track-source")?.setGeoJson(geo)
+        fullScreenMapRef?.style?.getSourceAs<GeoJsonSource>("patrol-track-source")?.setGeoJson(geo)
+    }
+
     // Helper Composable to render Map Content (Shared between Normal & Fullscreen Mode)
     @Composable
     fun MapContent(modifier: Modifier = Modifier, isFull: Boolean = false) {
@@ -269,6 +275,14 @@ fun MapsScreen(
                                 tileSet.maxZoom = 14f
                                 val rasterSource = RasterSource("mbtiles-raster-source", tileSet, 256)
 
+                                val satelliteTileSet = TileSet(
+                                    "2.1.0",
+                                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                )
+                                satelliteTileSet.minZoom = 1f
+                                satelliteTileSet.maxZoom = 19f
+                                val satelliteSource = RasterSource("satellite-raster-source", satelliteTileSet, 256)
+
                                 val styleJson = """
                                     {
                                       "version": 8,
@@ -288,6 +302,7 @@ fun MapsScreen(
 
                                 map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
                                     style.addSource(rasterSource)
+                                    style.addSource(satelliteSource)
                                     if (gisRepo.beatGeoJsonString.isNotEmpty()) {
                                         style.addSource(GeoJsonSource("beats-geojson-source", gisRepo.beatGeoJsonString))
                                     }
@@ -298,8 +313,17 @@ fun MapsScreen(
                                         style.addSource(GeoJsonSource("incidents-geojson-source", gisRepo.incidentGeoJsonString))
                                     }
 
-                                    // 1. MBTiles Basemap Layer
+                                    // 1. MBTiles Basemap Layer (offline fallback base)
                                     style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
+
+                                    // 1b. Satellite Imagery Layer (online, overlays offline base)
+                                    style.addLayer(
+                                        RasterLayer("satellite-raster-layer", "satellite-raster-source").apply {
+                                            setProperties(
+                                                PropertyFactory.visibility(if (layerState.showSatellite) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
                                     // 2. Beats Fill Layer (Light green tint)
                                     if (gisRepo.beatGeoJsonString.isNotEmpty()) {
@@ -396,6 +420,30 @@ fun MapsScreen(
                                             }
                                         )
                                     }
+
+                                    // 9. Live Patrol Track (path line + point dots) from local points
+                                    style.addSource(GeoJsonSource("patrol-track-source", EMPTY_FEATURE_COLLECTION))
+                                    style.addLayer(
+                                        LineLayer("patrol-track-line-layer", "patrol-track-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#FFEB3B")),
+                                                PropertyFactory.lineWidth(4f),
+                                                PropertyFactory.lineOpacity(0.95f),
+                                                PropertyFactory.visibility(if (layerState.showTrack) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+                                    style.addLayer(
+                                        CircleLayer("patrol-track-point-layer", "patrol-track-source").apply {
+                                            setProperties(
+                                                PropertyFactory.circleColor(AndroidColor.parseColor("#FFEB3B")),
+                                                PropertyFactory.circleRadius(4.5f),
+                                                PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#333333")),
+                                                PropertyFactory.circleStrokeWidth(1.5f),
+                                                PropertyFactory.visibility(if (layerState.showTrack) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
                                     map.cameraPosition = CameraPosition.Builder()
                                         .target(LatLng(15.92, 79.15))
@@ -598,6 +646,8 @@ fun MapsScreen(
                             Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFD32F2F), isDashed = false, isPoint = true, label = "Sightings & Incidents (12)")
                             Spacer(Modifier.height(4.dp))
+                            LegendItem(color = Color(0xFFFFEB3B), isDashed = false, isPoint = true, label = "My Patrol Track")
+                            Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFC3B091), isDashed = false, isRaster = true, label = "MBTiles Offline Basemap")
                         }
                     }
@@ -688,85 +738,10 @@ fun MapsScreen(
                 avgSpeedKmh = avgSpeed,
                 moveMinutes = moveMinutes,
                 durationFormatted = patrolTimer.elapsedFormatted(),
-                currentMode = MovementMode.UNKNOWN,
-                onStopPatrol = onStopPatrol
+                currentMode = MovementMode.UNKNOWN
             )
         }
 
-        Spacer(Modifier.height(16.dp))
-
-        // Recent Sightings & Incidents Quick List
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = Surface),
-            border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text("🚨 Logged Sightings & Incidents (${gisRepo.incidentsList.size})", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
-                    }
-                    Text("Tap marker to view", fontSize = 11.sp, color = TextSecondary)
-                }
-
-                Spacer(Modifier.height(10.dp))
-
-                gisRepo.incidentsList.take(5).forEach { inc ->
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .clickable {
-                                selectedIncident = inc
-                                (miniMapRef ?: fullScreenMapRef)?.animateCamera(
-                                    CameraUpdateFactory.newLatLngZoom(LatLng(inc.lat, inc.lon), 13.5)
-                                )
-                            }
-                            .padding(vertical = 6.dp, horizontal = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(inc.icon, fontSize = 16.sp)
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(inc.title, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, color = TextPrimary)
-                                Text("Beat: ${inc.beatName} • ${inc.time}", fontSize = 11.sp, color = TextSecondary)
-                            }
-                        }
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(
-                                    when (inc.severity) {
-                                        "Critical" -> Color(0xFFFFEBEE)
-                                        "High" -> Color(0xFFFFF3E0)
-                                        else -> Color(0xFFE8F5E9)
-                                    }
-                                )
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = inc.severity.uppercase(),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = when (inc.severity) {
-                                    "Critical" -> Color(0xFFC62828)
-                                    "High" -> Color(0xFFE65100)
-                                    else -> Color(0xFF2E7D32)
-                                }
-                            )
-                        }
-                    }
-                    Spacer(Modifier.height(4.dp))
-                }
-            }
-        }
     }
 
     // FULL SCREEN MAP MODE DIALOG
@@ -1046,6 +1021,30 @@ fun MapsScreen(
                         fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Satellite Imagery",
+                    subtitle = "Online Esri World Imagery (offline MBTiles fallback)",
+                    checked = layerState.showSatellite,
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showSatellite = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "My Patrol Track",
+                    subtitle = "Live path & points recorded this patrol",
+                    checked = layerState.showTrack,
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showTrack = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
 
                 Spacer(Modifier.height(20.dp))
 
@@ -1162,14 +1161,19 @@ private fun LayerToggleRow(
     }
 }
 
+private const val EMPTY_FEATURE_COLLECTION = "{\"type\":\"FeatureCollection\",\"features\":[]}"
+
 private fun applyLayerVisibility(style: Style?, state: GisLayerState) {
     if (style == null) return
     val mbtilesVis = if (state.showMBTiles) Property.VISIBLE else Property.NONE
     val beatsVis = if (state.showBeats) Property.VISIBLE else Property.NONE
     val compVis = if (state.showCompartments) Property.VISIBLE else Property.NONE
     val incidentsVis = if (state.showIncidents) Property.VISIBLE else Property.NONE
+    val satelliteVis = if (state.showSatellite) Property.VISIBLE else Property.NONE
+    val trackVis = if (state.showTrack) Property.VISIBLE else Property.NONE
 
     style.getLayer("mbtiles-raster-layer")?.setProperties(PropertyFactory.visibility(mbtilesVis))
+    style.getLayer("satellite-raster-layer")?.setProperties(PropertyFactory.visibility(satelliteVis))
     style.getLayer("beats-fill-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-line-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-label-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
@@ -1177,6 +1181,20 @@ private fun applyLayerVisibility(style: Style?, state: GisLayerState) {
     style.getLayer("comp-line-layer")?.setProperties(PropertyFactory.visibility(compVis))
     style.getLayer("incidents-circle-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
     style.getLayer("incidents-label-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
+    style.getLayer("patrol-track-line-layer")?.setProperties(PropertyFactory.visibility(trackVis))
+    style.getLayer("patrol-track-point-layer")?.setProperties(PropertyFactory.visibility(trackVis))
+}
+
+private fun buildPatrolTrackGeoJson(points: List<PatrolPointEntity>): String {
+    val lineFeature = if (points.size >= 2) {
+        val coords = points.joinToString(",") { "[${it.longitude},${it.latitude}]" }
+        "\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[$coords]},\"properties\":{}"
+    } else ""
+    val pointFeatures = points.joinToString(",") { p ->
+        "\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${p.longitude},${p.latitude}]},\"properties\":{}"
+    }
+    val features = listOf(lineFeature, pointFeatures).filter { it.isNotEmpty() }.joinToString(",")
+    return "{\"type\":\"FeatureCollection\",\"features\":[$features]}"
 }
 
 private fun computeDistance(points: List<PatrolPointEntity>): Double {

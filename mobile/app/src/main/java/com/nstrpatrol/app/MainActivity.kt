@@ -31,9 +31,13 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.AuthSession
+import com.nstrpatrol.app.data.ConnectivityObserver
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.SyncManager
 import com.nstrpatrol.app.data.db.NstrDatabase
+import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.GpsTelemetryManager
 import com.nstrpatrol.app.time.TelemetryRecorder
 import com.nstrpatrol.app.time.TrustedTimeManager
@@ -60,6 +64,11 @@ import com.nstrpatrol.app.ui.screens.WaterSourceScreen
 import com.nstrpatrol.app.ui.theme.Background
 import com.nstrpatrol.app.ui.theme.NstrpatrolTheme
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private const val DEBUG_START_PATROL = "com.nstrpatrol.app.DEBUG_START_PATROL"
 private const val DEBUG_STOP_PATROL = "com.nstrpatrol.app.DEBUG_STOP_PATROL"
@@ -134,6 +143,37 @@ fun NstrApp() {
             dao = database.telemetryDao()
         )
     }
+    val api: BackendApiClient = auth.apiClient()
+    val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
+    val connectivity = remember { ConnectivityObserver(context) }
+
+    /** Stops the active patrol, persists final stats locally, and syncs to the backend. */
+    fun stopActivePatrol(navigateToAllPatrols: Boolean = true) {
+        val pid = patrolTimer.patrolId ?: return
+        patrolTimer.stop()
+        syncScope.launch {
+            val dao = database.telemetryDao()
+            if (dao.patrolSession(pid) != null) {
+                val metrics = ActivitySummary.computeForPatrol(pid, dao)
+                dao.completePatrol(
+                    patrolId = pid,
+                    endTime = metrics.endTimeMs ?: System.currentTimeMillis(),
+                    distance = metrics.distanceMeters,
+                    steps = metrics.steps,
+                    moveMin = metrics.moveMinutes,
+                    calories = metrics.caloriesEstimate,
+                    heartPoints = metrics.heartPointsEstimate,
+                    avgSpeed = metrics.avgSpeedKmh,
+                    points = dao.patrolPointsOrdered(pid).size
+                )
+            }
+            SyncManager.syncNow(dao, api)
+            runCatching { api.completePatrol(pid) }
+            if (navigateToAllPatrols) {
+                withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }
+            }
+        }
+    }
     val timeState by timeManager.state.collectAsStateWithLifecycle()
 
     val activityRecognitionLauncher = rememberLauncherForActivityResult(
@@ -154,7 +194,7 @@ fun NstrApp() {
                     when (intent?.action) {
                         DEBUG_START_PATROL ->
                             patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
-                        DEBUG_STOP_PATROL -> patrolTimer.stop()
+                        DEBUG_STOP_PATROL -> stopActivePatrol(navigateToAllPatrols = false)
                     }
                 }
             }
@@ -171,6 +211,14 @@ fun NstrApp() {
                 ContextCompat.RECEIVER_EXPORTED
             )
             onDispose { context.unregisterReceiver(patrolBroadcast) }
+        }
+    }
+
+    // Sync is mobile -> server only, and event-driven: flush local buffers
+    // whenever connectivity is (re)gained. No polling of the network or server.
+    LaunchedEffect(Unit) {
+        connectivity.isOnline.collect { online ->
+            if (online) syncScope.launch { SyncManager.syncNow(database.telemetryDao(), api) }
         }
     }
 
@@ -215,14 +263,14 @@ fun NstrApp() {
             onTabSelected = nav::selectTab,
             patrolTimer = patrolTimer,
             telemetryManager = telemetryManager,
-            dao = database.telemetryDao(),
-            onStopPatrol = { patrolTimer.stop() }
+            dao = database.telemetryDao()
         )
 
         Route.AllPatrols -> AllPatrolsScreen(
             onTabSelected = nav::selectTab,
             onOpenPatrol = { patrolId -> nav.navigateTo(Route.PatrolReport(patrolId)) },
-            dao = database.telemetryDao()
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.Reports -> ReportsScreen(
@@ -261,42 +309,59 @@ fun NstrApp() {
         Route.Logs -> LogsScreen(nav::selectTab, timeState = timeState)
 
         Route.PatrolStart -> PatrolStartScreen(
-            onSave = { patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis()); nav.popBack() },
+            onSave = { nav.popBack() },
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
+            onStartPatrol = { patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis()) },
             onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
             patrolTimer = patrolTimer,
-            dao = database.telemetryDao()
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.HumanImpact -> HumanImpactScreen(
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.AnimalMortality -> AnimalMortalityScreen(
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.Sighting -> SightingScreen(
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.WaterSource -> WaterSourceScreen(
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.QuickCapture -> QuickCaptureScreen(
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            patrolTimer = patrolTimer,
+            dao = database.telemetryDao(),
+            api = api
         )
 
         Route.Sos -> SosScreen(nav::selectTab)
@@ -313,12 +378,19 @@ fun NstrApp() {
             onCaptured = { nav.popBack() }
         )
 
-        is Route.PatrolReport -> PatrolReportScreen(
-            patrolId = (nav.current as Route.PatrolReport).patrolId,
-            onBack = { nav.popBack() },
-            onTabSelected = nav::selectTab,
-            dao = database.telemetryDao()
-        )
+        is Route.PatrolReport -> {
+            val pr = nav.current as Route.PatrolReport
+            PatrolReportScreen(
+                patrolId = pr.patrolId,
+                onBack = { nav.popBack() },
+                onTabSelected = nav::selectTab,
+                dao = database.telemetryDao(),
+                api = api,
+                onEndPatrol = if (patrolTimer.running.value &&
+                    patrolTimer.patrolId == pr.patrolId
+                ) { { stopActivePatrol() } } else null
+            )
+        }
         }
     }
 }

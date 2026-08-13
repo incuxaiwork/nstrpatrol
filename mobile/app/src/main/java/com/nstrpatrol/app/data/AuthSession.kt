@@ -136,4 +136,7 @@ class AuthSession(context: Context) {
         prefs.edit().clear().apply()
         client.setAccessToken(null)
     }
+
+    /** The authenticated API client used for backend calls (patrol/telemetry sync). */
+    fun apiClient(): BackendApiClient = client
 }

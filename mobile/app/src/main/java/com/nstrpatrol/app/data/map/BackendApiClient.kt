@@ -2,6 +2,7 @@ package com.nstrpatrol.app.data.map
 
 import android.util.Log
 import com.nstrpatrol.app.BuildConfig
+import com.nstrpatrol.app.data.db.PatrolPointEntity
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -100,6 +101,58 @@ class BackendApiClient {
     /** POSTs a JSON body. Throws [ApiException] on non-2xx. */
     fun postJson(path: String, body: JSONObject): JSONObject =
         requestJson(path, "POST", body)
+
+    /** Creates a patrol on the backend, supplying a client-generated id. */
+    fun createPatrol(body: JSONObject): JSONObject = postJson("/api/patrols", body)
+
+    /** Marks a patrol COMPLETED on the backend. */
+    fun completePatrol(patrolId: String, body: JSONObject = JSONObject()): JSONObject =
+        postJson("/api/patrols/$patrolId/complete", body)
+
+    /** Reports an incident on the backend. */
+    fun createIncident(body: JSONObject): JSONObject = postJson("/api/incidents", body)
+
+    /** Fetches a patrol's recorded points for route rendering (server-only patrols). */
+    fun getPatrolPoints(patrolId: String): List<PatrolPointEntity> {
+        val arr = getJsonArray("/api/patrols/$patrolId/points") ?: return emptyList()
+        val out = ArrayList<PatrolPointEntity>()
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            out.add(
+                PatrolPointEntity(
+                    id = "",
+                    patrolId = patrolId,
+                    latitude = o.optDouble("lat", 0.0),
+                    longitude = o.optDouble("lng", 0.0),
+                    altitude = if (!o.isNull("altitude")) o.optDouble("altitude") else null,
+                    speed = if (!o.isNull("speed")) o.optDouble("speed").toFloat() else null,
+                    accuracy = null,
+                    bearing = null,
+                    timestamp = parseIsoMillis(o.optString("t")),
+                    syncStatus = "SYNCED"
+                )
+            )
+        }
+        return out
+    }
+
+    private fun parseIsoMillis(iso: String): Long {
+        if (iso.isEmpty()) return 0L
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX"
+        )
+        for (pattern in patterns) {
+            runCatching {
+                val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                return sdf.parse(iso)!!.time
+            }
+        }
+        return 0L
+    }
 
     /** PATCHes a JSON body. Throws [ApiException] on non-2xx. */
     fun patchJson(path: String, body: JSONObject): JSONObject =
