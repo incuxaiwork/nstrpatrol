@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
+/*
+ * NSTR Patrol — Admin Portal design tokens
+ * Source of truth: docs/ui_screen_plan.md (design system) + docs/web-admin-prd.md
+ * Palette: Dark Forest Green #1E4620, Khaki #C3B091, Surface #F8F9FA,
+ *          Ink #212121, Cool Gray #757575, Danger #B3261E, Success #2E7D32, Alert #FF8F00
+ */
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #f8f9fa;
+  --foreground: #212121;
 }
 
 @theme inline {
@@ -12,15 +19,89 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+@theme {
+  /* Surface / text */
+  --color-surface: #f8f9fa;
+  --color-ink: #212121;
+  --color-ink-soft: #757575;
+  --color-ink-faint: #a3aab4;
+  --color-line: #e3e7ec;
+  --color-line-strong: #cdd4dd;
+
+  /* Forest green primary scale */
+  --color-forest-50: #f0f6f0;
+  --color-forest-100: #dceadc;
+  --color-forest-200: #bcd6bd;
+  --color-forest-300: #92ba94;
+  --color-forest-400: #63976a;
+  --color-forest-500: #417a4a;
+  --color-forest-600: #2f6138;
+  --color-forest-700: #27502f;
+  --color-forest-800: #1f4626;
+  --color-forest-900: #1d4324;
+  --color-forest-950: #0d2412;
+  --color-forest: #1f4626;
+
+  /* Secondary khaki / sand */
+  --color-khaki-100: #f1ebdd;
+  --color-khaki-200: #e3d7bd;
+  --color-khaki-300: #d2c09c;
+  --color-khaki-400: #c3b091;
+  --color-khaki-500: #a8966f;
+  --color-khaki-600: #8a7755;
+  --color-khaki: #c3b091;
+
+  /* Navy (secondary accent) */
+  --color-navy-400: #4a6572;
+  --color-navy-600: #2c4859;
+  --color-navy-700: #22394a;
+  --color-navy-800: #1b365d;
+  --color-navy-900: #14294a;
+
+  /* Status */
+  --color-danger: #b3261e;
+  --color-danger-soft: #fbeae9;
+  --color-success: #2e7d32;
+  --color-success-soft: #eaf4ea;
+  --color-warning: #ff8f00;
+  --color-warning-soft: #fff4e3;
+  --color-info: #1b365d;
+  --color-info-soft: #e8eef5;
+
+  --shadow-card: 0 1px 3px rgb(0 0 0 / 0.12);
+  --shadow-card-hover: 0 2px 8px rgb(0 0 0 / 0.14);
+  --shadow-pop: 0 8px 24px rgb(33 33 33 / 0.16);
+
+  --radius-card: 8px;
+  --radius-field: 6px;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 14px;
+}
+
+/* Focus visibility for keyboard users */
+:focus-visible {
+  outline: 2px solid var(--color-forest-600);
+  outline-offset: 2px;
+}
+
+/* Subtle scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: #cdd4dd transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: #cdd4dd;
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
