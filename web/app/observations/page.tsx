@@ -11,7 +11,7 @@ import { useMemo, useState } from "react";
 import { observations } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
-import { KpiCard, DataTable, FilterBar, FilterSelect, PrimaryLink } from "@/components/data";
+import { KpiCard, FilterBar, FilterSelect, PrimaryLink } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { Donut, DonutLegend } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";

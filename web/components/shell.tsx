@@ -22,7 +22,6 @@ import {
   ToastStack,
 } from "@/components/overlays";
 import { mockDivisions, mockRanges, mockBeats, unitName } from "@/lib/mock/hierarchy";
-import type { Scope } from "@/lib/types";
 
 /* ------------------------------------------------------------------ */
 /* Scope picker                                                       */
@@ -359,19 +358,6 @@ function ExportButton() {
       </button>
       <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </>
-  );
-}
-
-function OpenSearchOnMobile() {
-  const { setSearchOpen } = useApp();
-  return (
-    <button
-      onClick={() => setSearchOpen(true)}
-      aria-label="Search"
-      className="flex size-9 items-center justify-center rounded-md text-ink-soft hover:bg-forest-50 hover:text-forest-900 md:hidden"
-    >
-      <Icon name="search" size={18} />
-    </button>
   );
 }
 

@@ -9,7 +9,7 @@ import { useMemo, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { observations } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
-import { Card, CardHeader, Badge, PageHeader, SearchInput, Avatar } from "@/components/ui";
+import { Card, Badge, PageHeader, SearchInput, Avatar } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination, ViewSwitcher, type ViewMode } from "@/components/data";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
@@ -17,8 +17,10 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
 import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo, initialsOf } from "@/lib/utils";
+import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
+
+const PERIOD_ANCHOR_MS = Date.now();
 
 export default function ObservationsListPage() {
   return (
@@ -48,7 +50,7 @@ function ObservationsList() {
   const periodCutoff = useMemo(() => {
     if (!period) return 0;
     const hours: Record<string, number> = { "24h": 24, "7d": 7 * 24, "30d": 30 * 24 };
-    return Date.now() - (hours[period] ?? 0) * 3_600_000;
+    return PERIOD_ANCHOR_MS - (hours[period] ?? 0) * 3_600_000;
   }, [period]);
 
   const subcategoryOptions = useMemo(() => {
@@ -94,7 +96,7 @@ function ObservationsList() {
 
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     exportRows(kind, `observations-${stamp()}`, filtered.map((o) => ({
       code: o.code,
       title: o.title,

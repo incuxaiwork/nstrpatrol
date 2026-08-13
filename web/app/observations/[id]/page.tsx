@@ -5,7 +5,7 @@
  * related items and resolution workflow (mock).
  */
 
-import { useParams, useRouter } from "next/navigation";
+import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
 import { observations, patrols } from "@/lib/services";
@@ -14,17 +14,16 @@ import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
-import { ConfirmDialog, Dialog } from "@/components/overlays";
+import { Dialog } from "@/components/overlays";
 import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
 import { unitName } from "@/lib/mock/hierarchy";
-import { formatDateTime, timeAgo } from "@/lib/utils";
+import { timeAgo } from "@/lib/utils";
 
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
-  const router = useRouter();
   const { pushToast } = useApp();
   const { data: obs, error, loading, reload } = useAsyncData(() => observations.get(params.id));
   const patrol = useAsyncData(() => (obs?.patrolId ? patrols.get(obs.patrolId) : Promise.resolve(undefined)));

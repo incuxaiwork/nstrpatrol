@@ -38,7 +38,7 @@ export default function MasterDataPage() {
     weapons: d.weaponTypes.length,
   };
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     let rows: Record<string, unknown>[] = [];
     if (tab === "species") rows = d.species.map((s) => ({ name: s.name, category: s.category, status: s.status }));
     if (tab === "categories") rows = d.categories.map((c) => ({ name: c.name, mappedTo: c.mappedTo, active: c.active }));

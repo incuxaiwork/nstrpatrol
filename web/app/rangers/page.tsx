@@ -17,14 +17,13 @@ import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { DutyStatus } from "@/lib/types";
 
 export default function RangersPage() {
   const router = useRouter();
   const { data, error, loading, reload } = useAsyncData(() => rangers.list());
-  const teams = useAsyncData(() => rangers.teams());
 
   const [status, setStatus] = useState("");
   const [division, setDivision] = useState("");
@@ -54,7 +53,7 @@ export default function RangersPage() {
     return acc;
   }, {});
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     exportRows(kind, `rangers-${stamp()}`, filtered.map((r) => ({
       code: r.code,
       name: r.name,
@@ -238,15 +237,6 @@ function dutyBar(s: string): string {
 function isStale(lastSync?: string): boolean {
   if (!lastSync) return false;
   return Date.now() - new Date(lastSync).getTime() > 21 * 3_600_000;
-}
-
-function MiniFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-start justify-between gap-2 rounded-md bg-white px-2.5 py-2">
-      <dt className="text-[11px] text-ink-soft">{label}</dt>
-      <dd className="text-xs font-semibold text-ink">{value}</dd>
-    </div>
-  );
 }
 
 interface RangerLike {

@@ -29,7 +29,7 @@ export default function RangerAnalyticsPage() {
   const byDistance = [...data].sort((a, b) => b.stats.distanceKm - a.stats.distanceKm);
   const byHours = [...data].sort((a, b) => b.stats.fieldHours - a.stats.fieldHours);
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     exportRows(kind, `ranger-ranking-${stamp()}`, data.map((r) => ({
       code: r.code,
       name: r.name,
@@ -77,7 +77,6 @@ export default function RangerAnalyticsPage() {
                 labels: ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"],
                 series: [{ name: "Avg duration (min)", values: [210, 224, 218, 245, 252, 238, 246] }],
               }}
-              height={220}
             />
           </div>
         </Card>
@@ -93,7 +92,6 @@ export default function RangerAnalyticsPage() {
                   { name: "Coverage %", values: patrolStats.data?.coverage ?? [] },
                 ],
               }}
-              height={220}
             />
           </div>
         </Card>

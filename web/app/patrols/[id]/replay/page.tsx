@@ -9,12 +9,12 @@
  */
 
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
-import { StatRow, Timeline } from "@/components/data";
+import { StatRow } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -32,7 +32,7 @@ export default function PatrolReplayPage() {
 
   const [playback, setPlayback] = useState(0);
   const [seek, setSeek] = useState<{ key: number; value: number } | null>(null);
-  const seekKey = useRefCounter();
+  const seekKey = useRef(1);
 
   const events = useMemo(() => {
     if (!patrol) return [];
@@ -205,11 +205,6 @@ export default function PatrolReplayPage() {
       </div>
     </div>
   );
-}
-
-function useRefCounter() {
-  const [ref] = useState({ current: 1 });
-  return ref;
 }
 
 function ReplayRow({ label, value }: { label: string; value: string }) {

@@ -74,6 +74,14 @@ export function MapWorkspace({
   const [legendOpen, setLegendOpen] = useState(false);
   const beats = liveBeats ?? mapBeatsRaw;
 
+  const [prevSeek, setPrevSeek] = useState(seekSignal);
+  if (prevSeek !== seekSignal && seekSignal) {
+    setPrevSeek(seekSignal);
+    setProgress(seekSignal.value);
+    setReplayOn(false);
+    onProgress?.(seekSignal.value);
+  }
+
   const visible = useMemo(() => {
     const map = new Map((layers ?? []).map((l) => [l.id, l.visible]));
     return (id: string) => (layers ? (map.get(id) ?? true) : true);
@@ -131,13 +139,6 @@ export function MapWorkspace({
     }, 60);
     return () => clearInterval(id);
   }, [replayOn, replaySegments.length, replaySpeed, emitProgress]);
-
-  useEffect(() => {
-    if (!seekSignal) return;
-    setProgress(seekSignal.value);
-    emitProgress(seekSignal.value);
-    setReplayOn(false);
-  }, [seekSignal, emitProgress]);
 
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">

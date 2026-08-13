@@ -54,7 +54,7 @@ export default function AdminUsersPage() {
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id;
   const validInvite = name.trim().length >= 3 && email.includes("@");
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     exportRows(kind, `admin-users-${stamp()}`, filtered.map((u) => ({
       name: u.name,
       email: u.email,

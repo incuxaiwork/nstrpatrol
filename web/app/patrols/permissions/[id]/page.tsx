@@ -17,7 +17,7 @@ import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { DataTable, Timeline } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { AuthAreaMap } from "@/components/jurisdiction";
-import { ConfirmDialog, ExportDialog } from "@/components/overlays";
+import { ConfirmDialog } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";

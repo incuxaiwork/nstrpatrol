@@ -14,7 +14,6 @@ import {
 } from "react";
 import { cn } from "@/lib/utils";
 import { Icon, type IconName } from "@/components/icons";
-import { Button } from "@/components/ui";
 import { useApp, type ToastItem } from "@/lib/store";
 
 /* ------------------------------------------------------------------ */

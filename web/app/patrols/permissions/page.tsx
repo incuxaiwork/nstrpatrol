@@ -21,11 +21,10 @@ import { useApp } from "@/lib/store";
 import { Card, Badge, PageHeader } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination } from "@/components/data";
 import { Icon } from "@/components/icons";
-import { ConfirmDialog, ExportDialog, ExportButton } from "@/components/overlays";
+import { ConfirmDialog, ExportButton } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { authStatusLabel, authStatusTone, areaLabel } from "@/lib/jurisdiction";
 import { timeAgo } from "@/lib/utils";
-import type { PatrolAuthorization } from "@/lib/types";
 
 /** Mock current role — in the live system this comes from the session. */
 const CURRENT_ROLE = "super-admin";
@@ -41,7 +40,6 @@ export default function PatrolPermissionsPage() {
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
   const [confirming, setConfirming] = useState<{ id: string; kind: "approve" | "revoke" | "reject" | "complete" } | null>(null);
-  const [exportOpen, setExportOpen] = useState(false);
 
   const canManage = CURRENT_ROLE === "super-admin";
 
@@ -293,7 +291,6 @@ export default function PatrolPermissionsPage() {
           onConfirm={runConfirm}
         />
       )}
-      <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
     </div>
   );
 }

@@ -41,7 +41,7 @@ export default function AnalyticsPage() {
   const kpis = analytics.kpisBy(level);
   const j = jurisdiction.data;
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     const rows = [
       ...kpis.map((k) => ({ metric: k.label, value: k.value, unit: k.unit ?? "", changePct: k.changePct ?? null })),
       {
@@ -177,7 +177,6 @@ export default function AnalyticsPage() {
                 labels: durations.data?.labels ?? [],
                 series: [{ name: "Coverage %", values: durations.data?.coverage ?? [] }],
               }}
-              height={230}
             />
           </div>
         </Card>
@@ -194,7 +193,7 @@ export default function AnalyticsPage() {
         <Card>
           <CardHeader title="Water body status" icon="droplet" subtitle="Surveyed water sites by type, YTD (mock)" />
           <div className="p-4">
-            <BarChart dataset={waterBodies.data ?? emptyDataset("water bodies")} height={230} />
+            <BarChart dataset={waterBodies.data ?? emptyDataset("water bodies")} />
           </div>
         </Card>
       </div>
@@ -210,7 +209,7 @@ export default function AnalyticsPage() {
         <Card>
           <CardHeader title="Wildlife sightings" icon="binoculars" subtitle="Sightings by species, YTD (mock)" />
           <div className="p-4">
-            <BarChart dataset={wildlife.data ?? emptyDataset("wildlife")} height={230} />
+            <BarChart dataset={wildlife.data ?? emptyDataset("wildlife")} />
           </div>
         </Card>
       </div>

@@ -2,9 +2,8 @@
 
 /** Beat analytics (PRD §10.5) — per-beat coverage and activity */
 
-import { analytics, gis } from "@/lib/services";
+import { analytics } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
-import { useMemo } from "react";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
 import { CoverageBars, BarChart } from "@/components/charts";
@@ -69,7 +68,7 @@ export default function BeatAnalyticsPage() {
         <Card>
           <CardHeader title="Wildlife sighting mix" icon="paw" subtitle="Sightings by species (mock)" />
           <div className="p-4">
-            <BarChart dataset={wildlife.data ?? { labels: [], series: [] }} height={240} />
+            <BarChart dataset={wildlife.data ?? { labels: [], series: [] }} />
           </div>
         </Card>
       </div>

@@ -14,7 +14,7 @@
  */
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { Suspense, useState } from "react";
 import { authorizations, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
@@ -32,6 +32,14 @@ const APPROVER = "V. Kulkarni · Super Admin";
 const STEP_LABELS = ["Select ranger", "Select area", "Details", "Review", "Approval"];
 
 export default function CreateAuthorizationPage() {
+  return (
+    <Suspense fallback={<SkeletonRows rows={6} />}>
+      <CreateAuthorizationWizard />
+    </Suspense>
+  );
+}
+
+function CreateAuthorizationWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
@@ -39,40 +47,23 @@ export default function CreateAuthorizationPage() {
   const roster = useAsyncData(() => rangers.list());
   const editing = useAsyncData(() => (editId ? authorizations.get(editId) : Promise.resolve(undefined)));
 
-  const [step, setStep] = useState(1);
-  const [rangerId, setRangerId] = useState("");
-  const [authDivision, setAuthDivision] = useState("");
-  const [authRange, setAuthRange] = useState("");
-  const [authBeat, setAuthBeat] = useState("");
-  const [reason, setReason] = useState("");
-  const [instruction, setInstruction] = useState("");
-  const [patrolType, setPatrolType] = useState<PatrolType>("general-duties");
-  const [objective, setObjective] = useState("");
-  const [validFrom, setValidFrom] = useState(() => dateInput(new Date(Date.now() + 86_400_000)));
-  const [validUntil, setValidUntil] = useState(() => dateInput(new Date(Date.now() + 14 * 86_400_000)));
-  const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">("medium");
-  const [restrictions, setRestrictions] = useState("");
-  const [notes, setNotes] = useState("");
+  const draft = editId ? editing.data : undefined;
+  const draftStep = draft?.status === "draft" ? 1 : 3;
 
-  const draft = editing.data;
-
-  useEffect(() => {
-    if (!draft) return;
-    setRangerId(draft.rangerId);
-    setAuthDivision(draft.authDivision);
-    setAuthRange(draft.authRange);
-    setAuthBeat(draft.authBeat);
-    setReason(draft.reason);
-    setInstruction(draft.instruction);
-    setPatrolType(draft.patrolType);
-    setObjective(draft.objective ?? "");
-    setValidFrom(dateInput(new Date(draft.validFrom)));
-    setValidUntil(dateInput(new Date(draft.validUntil)));
-    setPriority(draft.priority);
-    setRestrictions(draft.restrictions ?? "");
-    setNotes(draft.notes ?? "");
-    setStep(draft.status === "draft" ? 1 : 3);
-  }, [draft]);
+  const [step, setStep] = useState(draftStep);
+  const [rangerId, setRangerId] = useState(draft?.rangerId ?? "");
+  const [authDivision, setAuthDivision] = useState(draft?.authDivision ?? "");
+  const [authRange, setAuthRange] = useState(draft?.authRange ?? "");
+  const [authBeat, setAuthBeat] = useState(draft?.authBeat ?? "");
+  const [reason, setReason] = useState(draft?.reason ?? "");
+  const [instruction, setInstruction] = useState(draft?.instruction ?? "");
+  const [patrolType, setPatrolType] = useState<PatrolType>(draft?.patrolType ?? "general-duties");
+  const [objective, setObjective] = useState(draft?.objective ?? "");
+  const [validFrom, setValidFrom] = useState(() => dateInput(new Date(draft?.validFrom ?? Date.now() + 86_400_000)));
+  const [validUntil, setValidUntil] = useState(() => dateInput(new Date(draft?.validUntil ?? Date.now() + 14 * 86_400_000)));
+  const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">(draft?.priority ?? "medium");
+  const [restrictions, setRestrictions] = useState(draft?.restrictions ?? "");
+  const [notes, setNotes] = useState(draft?.notes ?? "");
 
   const ranger = roster.data?.find((r) => r.id === rangerId);
 

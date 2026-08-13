@@ -54,12 +54,10 @@ export default function PatrolHistoryPage() {
       map.get(key)!.push({ patrol: p, state: patrolState });
     });
     return [...map.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1));
-  }, [data, auths.data, state, status, dateRange, query, cutoff]);
+  }, [data, auths.data, state, status, cutoff, query]);
 
   if (loading || !data || auths.loading || !auths.data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
-
-  const total = days.reduce((a, d) => a + d[1].length, 0);
 
   return (
     <div>

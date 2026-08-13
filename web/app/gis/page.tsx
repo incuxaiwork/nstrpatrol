@@ -10,17 +10,16 @@ import Link from "next/link";
 import { gis } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
-import { KpiCard, DataTable } from "@/components/data";
+import { DataTable } from "@/components/data";
 import { MapWorkspace, LayerManager, MapSidebarFacts } from "@/components/map";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
-import { zeroPatrolZones, gisMarkers, type GisMarker } from "@/lib/mock/gis";
+import { zeroPatrolZones, gisMarkers } from "@/lib/mock/gis";
 import { mockRangers } from "@/lib/mock/people";
 import { mockObservations, categoryMeta } from "@/lib/mock/observations";
 import { stamp, exportRows } from "@/lib/export";
-import type { Observation, Ranger } from "@/lib/types";
 
 function heatTone(v: number): number {
   return 0.12 + v * 0.55;
@@ -126,7 +125,7 @@ export default function GisPage() {
 const zeroPatrolBeats = beats.filter((b) => zeroPatrolZones.includes(b.id));
   const detail = selectedDetail(selected, beats);
 
-  const handleExport = (kind: ExportKind, _scope: string) => {
+  const handleExport = (kind: ExportKind) => {
     exportRows(kind, `gis-catalog-${stamp()}`, [
       ...gisMarkers.map((m) => ({
         id: m.id,

@@ -10,7 +10,6 @@ import { Card, CardHeader, Badge, PageHeader, Field, Input, type BadgeTone } fro
 import { Dialog } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { permissionMatrix } from "@/lib/mock/admin";
-import type { Role } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type PermissionLevel = "full" | "view" | "manage" | "none";

@@ -48,11 +48,9 @@ export function Sparkline({
 
 export function BarChart({
   dataset,
-  height = 180,
   valueFormatter = (v: number) => String(v),
 }: {
   dataset: AnalyticsDataset;
-  height?: number;
   valueFormatter?: (v: number) => string;
 }) {
   const { labels, series } = dataset;
@@ -310,12 +308,10 @@ export function GridHeatmap({
   rowLabels,
   colLabels,
   values,
-  color = "29,70,38",
 }: {
   rowLabels: string[];
   colLabels: string[];
   values: number[][];
-  color?: string;
 }) {
   return (
     <div className="overflow-x-auto">
