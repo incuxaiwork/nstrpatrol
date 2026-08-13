@@ -5,31 +5,77 @@
  * paginated table with media affordances.
  */
 
-import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { observations } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, SearchInput, Avatar } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination, ViewSwitcher, type ViewMode } from "@/components/data";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, initialsOf } from "@/lib/utils";
+import { exportRows, stamp } from "@/lib/export";
 
 export default function ObservationsListPage() {
+  return (
+    <Suspense fallback={<SkeletonRows rows={8} />}>
+      <ObservationsList />
+    </Suspense>
+  );
+}
+
+function ObservationsList() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { data, error, loading, reload } = useAsyncData(() => observations.list());
 
-  const [category, setCategory] = useState("");
+  const [category, setCategory] = useState(searchParams.get("category") ?? "");
+  const [subcategory, setSubcategory] = useState("");
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
+  const [ranger, setRanger] = useState("");
+  const [period, setPeriod] = useState("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ViewMode>("table");
   const [page, setPage] = useState(1);
 
   const pageSize = 8;
+
+  const periodCutoff = useMemo(() => {
+    if (!period) return 0;
+    const hours: Record<string, number> = { "24h": 24, "7d": 7 * 24, "30d": 30 * 24 };
+    return Date.now() - (hours[period] ?? 0) * 3_600_000;
+  }, [period]);
+
+  const subcategoryOptions = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    data.forEach((o) => {
+      if (o.subcategory && !seen.has(o.subcategory)) {
+        seen.add(o.subcategory);
+        out.push({ value: o.subcategory, label: o.subcategory });
+      }
+    });
+    return out;
+  }, [data]);
+
+  const rangerOptions = useMemo(() => {
+    if (!data) return [];
+    const seen = new Set<string>();
+    const out: { value: string; label: string }[] = [];
+    data.forEach((o) => {
+      if (!seen.has(o.recordedBy)) {
+        seen.add(o.recordedBy);
+        out.push({ value: o.recordedBy, label: o.recordedBy });
+      }
+    });
+    return out;
+  }, [data]);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -37,13 +83,31 @@ export default function ObservationsListPage() {
     return data.filter(
       (o) =>
         (!category || o.category === category) &&
+        (!subcategory || o.subcategory === subcategory) &&
         (!status || o.status === status) &&
         (!severity || o.severity === severity) &&
+        (!ranger || o.recordedBy === ranger) &&
+        (!periodCutoff || new Date(o.recordedAt).getTime() >= periodCutoff) &&
         (!q || o.title.toLowerCase().includes(q) || o.code.toLowerCase().includes(q) || o.description.toLowerCase().includes(q))
     );
-  }, [data, category, status, severity, query]);
+  }, [data, category, subcategory, status, severity, ranger, periodCutoff, query]);
 
   const pageRows = filtered.slice((page - 1) * pageSize, page * pageSize);
+
+  const handleExport = (kind: ExportKind, _scope: string) => {
+    exportRows(kind, `observations-${stamp()}`, filtered.map((o) => ({
+      code: o.code,
+      title: o.title,
+      category: categoryMeta[o.category].label,
+      subcategory: o.subcategory ?? "",
+      severity: severityLabel[o.severity],
+      status: observationStatusLabel[o.status],
+      recordedBy: o.recordedBy,
+      recordedAt: new Date(o.recordedAt).toISOString(),
+      division: unitName(o.division),
+      patrolId: o.patrolId ?? "",
+    })));
+  };
 
   if (loading || !data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
@@ -52,23 +116,34 @@ export default function ObservationsListPage() {
     <div>
       <PageHeader
         title="All Observations"
-        subtitle={`${data.length} reports on record · filters apply downstream (export, GIS)`}
+        subtitle={`${data.length} reports on record · ${filtered.length} after filters`}
         actions={
           <div className="flex items-center gap-2">
             <SearchInput value={query} onChange={setQuery} placeholder="Search reports…" className="w-56" />
             <ViewSwitcher value={view} onChange={setView} />
+            <ExportButton onExport={handleExport} />
           </div>
         }
       />
 
       <Card>
-        <FilterBar onClear={() => { setCategory(""); setStatus(""); setSeverity(""); setPage(1); }}>
-          <FilterSelect label="Category" value={category} onChange={(v) => { setCategory(v); setPage(1); }}
+        <FilterBar onClear={() => { setCategory(""); setSubcategory(""); setStatus(""); setSeverity(""); setRanger(""); setPeriod(""); setPage(1); }}>
+          <FilterSelect label="Category" value={category} onChange={(v) => { setCategory(v); setSubcategory(""); setPage(1); }}
             options={Object.entries(categoryMeta).map(([v, m]) => ({ value: v, label: m.label }))} />
+          <FilterSelect label="Subcategory" value={subcategory} onChange={(v) => { setSubcategory(v); setPage(1); }}
+            options={subcategoryOptions} />
           <FilterSelect label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }}
             options={Object.entries(observationStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
           <FilterSelect label="Severity" value={severity} onChange={(v) => { setSeverity(v); setPage(1); }}
             options={Object.entries(severityLabel).map(([v, l]) => ({ value: v, label: l }))} />
+          <FilterSelect label="Ranger" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
+            options={rangerOptions} />
+          <FilterSelect label="Recorded" value={period} onChange={(v) => { setPeriod(v); setPage(1); }}
+            options={[
+              { value: "24h", label: "Last 24 hours" },
+              { value: "7d", label: "Last 7 days" },
+              { value: "30d", label: "Last 30 days" },
+            ]} />
           <span className="ml-auto self-end text-xs text-ink-soft">{filtered.length} result{filtered.length === 1 ? "" : "s"}</span>
         </FilterBar>
 

@@ -15,6 +15,7 @@ import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
 import { ConfirmDialog, Dialog } from "@/components/overlays";
+import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
@@ -31,6 +32,7 @@ export default function ObservationDetailPage() {
   const [resolveOpen, setResolveOpen] = useState(false);
   const [actionNote, setActionNote] = useState("");
   const [escalateOpen, setEscalateOpen] = useState(false);
+  const [mediaIndex, setMediaIndex] = useState<number | null>(null);
 
   if (loading || !obs) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
@@ -74,7 +76,7 @@ export default function ObservationDetailPage() {
               {(obs.media ?? []).map((m, i) => (
                 <button
                   key={i}
-                  onClick={() => pushToast("info", "Media", `“${m.label}” — full viewer is a backend/delivery concern (mock)`)}
+                  onClick={() => setMediaIndex(i)}
                   className="flex aspect-video flex-col items-center justify-center gap-1.5 rounded-card border border-line bg-surface text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
                 >
                   <Icon name={m.type === "photo" ? "camera" : "radio"} size={20} />
@@ -220,6 +222,16 @@ export default function ObservationDetailPage() {
           </button>
         </div>
       </Dialog>
+
+      {/* Media viewer */}
+      {mediaIndex !== null && obs.media?.length ? (
+        <MediaViewer
+          items={obs.media}
+          index={mediaIndex}
+          onClose={() => setMediaIndex(null)}
+          onIndexChange={setMediaIndex}
+        />
+      ) : null}
     </div>
   );
 }

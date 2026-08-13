@@ -81,7 +81,7 @@ export default function ObservationsDashboardPage() {
         {Object.entries(categoryMeta).map(([key, meta]) => (
           <button
             key={key}
-            onClick={() => { setCategory(key); router.push("/observations/list"); }}
+            onClick={() => router.push(`/observations/list?category=${key}`)}
             className="flex items-center gap-2.5 rounded-card border border-line bg-white p-3.5 shadow-card transition-colors hover:border-forest-600"
           >
             <span className="flex size-9 items-center justify-center rounded-lg text-white" style={{ background: meta.color }}>
