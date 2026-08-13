@@ -325,14 +325,28 @@ export const rangers = {
 /* Observations                                                       */
 /* ------------------------------------------------------------------ */
 
+const observationStatusOverrides = new Map<string, Observation["status"]>();
+const observationRecord = (o: Observation): Observation => ({
+  ...o,
+  status: observationStatusOverrides.get(o.id) ?? o.status,
+});
+
 export const observations = {
   list: async (): Promise<Observation[]> => {
     await delay();
-    return mockObservations;
+    return mockObservations.map(observationRecord);
   },
   get: async (id: string): Promise<Observation | undefined> => {
     await delay();
-    return mockObservations.find((o) => o.id === id);
+    const o = mockObservations.find((x) => x.id === id);
+    return o ? observationRecord(o) : undefined;
+  },
+  setStatus: async (id: string, status: Observation["status"]): Promise<Observation | undefined> => {
+    await delay();
+    const o = mockObservations.find((x) => x.id === id);
+    if (!o) return undefined;
+    observationStatusOverrides.set(id, status);
+    return observationRecord(o);
   },
   categoryMeta,
 };

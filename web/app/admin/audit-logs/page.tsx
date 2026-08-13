@@ -7,9 +7,10 @@ import { admin } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination, KpiCard } from "@/components/data";
-import { ExportButton } from "@/components/overlays";
+import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { timeAgo, formatDateTime } from "@/lib/utils";
+import { exportRows, stamp } from "@/lib/export";
 
 export default function AuditLogsPage() {
   const audit = useAsyncData(() => admin.audit());
@@ -24,7 +25,24 @@ export default function AuditLogsPage() {
 
   return (
     <div>
-      <PageHeader title="Audit Logs" subtitle="Immutable trail of governance actions (mock)" actions={<ExportButton />} />
+      <PageHeader
+        title="Audit Logs"
+        subtitle="Immutable trail of governance actions (mock)"
+        actions={
+          <ExportButton
+            onExport={(kind: ExportKind) =>
+              exportRows(kind, `audit-log-${stamp()}`, filtered.map((a) => ({
+                user: a.user,
+                action: a.action,
+                target: a.target,
+                module: a.module,
+                ip: a.ip,
+                time: a.time,
+              })))
+            }
+          />
+        }
+      />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Entries" value={audit.data.length} icon="history" tone="forest" />

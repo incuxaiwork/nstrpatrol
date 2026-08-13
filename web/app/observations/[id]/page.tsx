@@ -189,10 +189,11 @@ export default function ObservationDetailPage() {
             Cancel
           </button>
           <button
-            onClick={() => {
+            onClick={async () => {
               setResolveOpen(false);
-              pushToast("success", "Report resolved", `${obs.code} marked as resolved (mock)`);
-              router.refresh();
+              await observations.setStatus(obs.id, "resolved");
+              reload();
+              pushToast("success", "Report resolved", `${obs.code} marked as resolved (mock store)`);
             }}
             className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700"
           >
@@ -211,10 +212,11 @@ export default function ObservationDetailPage() {
             Cancel
           </button>
           <button
-            onClick={() => {
+            onClick={async () => {
               setEscalateOpen(false);
-              pushToast("warning", "Report escalated", `${obs.code} escalated — SOC notified (mock)`);
-              router.refresh();
+              await observations.setStatus(obs.id, "escalated");
+              reload();
+              pushToast("warning", "Report escalated", `${obs.code} escalated — SOC notified (mock store)`);
             }}
             className="h-9 rounded-field bg-danger px-4 text-sm font-medium text-white hover:bg-danger/90"
           >
