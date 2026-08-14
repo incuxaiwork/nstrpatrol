@@ -123,12 +123,8 @@ fun NstrApp() {
             }
         )
     }
-    var currentPatrol by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(nav.current) {
         sessionStore.saveRoute(nav.current.key)
-    }
-    LaunchedEffect(auth.currentUser?.id) {
-        currentPatrol = auth.currentPatrolName()
     }
     val timeManager = remember { TrustedTimeManager(context.applicationContext) }
     val telemetryManager = remember { GpsTelemetryManager(context.applicationContext) }
@@ -258,7 +254,7 @@ fun NstrApp() {
             patrolTimer = patrolTimer,
             dao = database.telemetryDao(),
             user = auth.currentUser,
-            currentPatrol = currentPatrol
+            onOpenPatrol = { nav.navigateTo(Route.PatrolReport(it)) }
         )
 
         Route.Maps -> MapsScreen(

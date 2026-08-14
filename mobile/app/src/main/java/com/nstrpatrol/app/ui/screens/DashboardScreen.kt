@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -49,6 +50,7 @@ import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.ForestGreen
 import com.nstrpatrol.app.ui.theme.LightForest
 import com.nstrpatrol.app.ui.theme.OutlineCard
+import com.nstrpatrol.app.ui.theme.OutlineSoft
 import com.nstrpatrol.app.ui.theme.PaleForest
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
@@ -68,7 +70,7 @@ fun DashboardScreen(
     patrolTimer: PatrolTimer,
     dao: TelemetryDao,
     user: AuthUser?,
-    currentPatrol: String?
+    onOpenPatrol: (String) -> Unit
 ) {
     var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(patrolTimer.running.value) {
@@ -146,27 +148,73 @@ fun DashboardScreen(
             Spacer(Modifier.height(12.dp))
         }
 
-        // Assigned patrol banner
+        // Current (ongoing) patrol banner — repurposed from the old "Assigned patrol"
+        // slot. There is no hierarchy/assignment, so this shows the patrol the ranger
+        // is actively running (from the local DB, so it survives app restarts) and
+        // opens its full report on tap.
+        val activePatrols by dao.patrolSessionsByStatus("ACTIVE")
+            .collectAsState(initial = emptyList())
+        val activePatrol = activePatrols.firstOrNull()
+
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(8.dp))
-                .background(ForestGreen)
+                .background(if (activePatrol != null) ForestGreen else OutlineSoft)
+                .clickable(enabled = activePatrol != null) {
+                    activePatrol?.let { onOpenPatrol(it.patrolId) }
+                }
                 .padding(horizontal = 16.dp, vertical = 14.dp)
         ) {
-            Text(
-                text = "ASSIGNED PATROL",
-                color = PaleForest,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Medium
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = currentPatrol ?: "No assigned patrol",
-                color = Color.White,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "CURRENT PATROL",
+                        color = if (activePatrol != null) PaleForest else TextSecondary,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    if (activePatrol != null) {
+                        Text(
+                            text = activePatrol.patrolType ?: activePatrol.beat ?: "Patrol",
+                            color = Color.White,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "${activePatrol.beat ?: "Location not set"}  ·  In progress",
+                            color = PaleForest,
+                            fontSize = 12.sp
+                        )
+                    } else {
+                        Text(
+                            text = "No active patrol",
+                            color = TextPrimary,
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(Modifier.height(2.dp))
+                        Text(
+                            text = "Start a patrol to track it here",
+                            color = TextSecondary,
+                            fontSize = 12.sp
+                        )
+                    }
+                }
+                if (activePatrol != null) {
+                    Text(
+                        text = "Open ›",
+                        color = PaleForest,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
 
         Spacer(Modifier.height(12.dp))
