@@ -147,10 +147,12 @@ fun NstrApp() {
     val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     val connectivity = remember { ConnectivityObserver(context) }
 
-    /** Stops the active patrol, persists final stats locally, and syncs to the backend. */
-    fun stopActivePatrol(navigateToAllPatrols: Boolean = true) {
-        val pid = patrolTimer.patrolId ?: return
-        patrolTimer.stop()
+    /** Stops a patrol, persists final stats locally, and syncs to the backend.
+     *  [patrolId] defaults to the in-memory running patrol, but can be passed
+     *  explicitly (e.g. for a patrol whose timer was lost across an app restart). */
+    fun stopActivePatrol(patrolId: String? = null, navigateToAllPatrols: Boolean = true) {
+        val pid = patrolId ?: patrolTimer.patrolId ?: return
+        if (patrolTimer.patrolId == pid) patrolTimer.stop()
         syncScope.launch {
             val dao = database.telemetryDao()
             if (dao.patrolSession(pid) != null) {
@@ -386,9 +388,7 @@ fun NstrApp() {
                 onTabSelected = nav::selectTab,
                 dao = database.telemetryDao(),
                 api = api,
-                onEndPatrol = if (patrolTimer.running.value &&
-                    patrolTimer.patrolId == pr.patrolId
-                ) { { stopActivePatrol() } } else null
+                onEndPatrol = { stopActivePatrol(pr.patrolId) }
             )
         }
         }

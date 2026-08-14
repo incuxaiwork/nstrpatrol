@@ -102,6 +102,7 @@ fun PatrolReportScreen(
     }
 
     val s = session
+    val isActive = s?.status == "ACTIVE" || s?.status == "IN PROGRESS"
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US) }
 
     NstrScaffold(
@@ -116,7 +117,7 @@ fun PatrolReportScreen(
         Column(
             modifier = Modifier
         ) {
-            if (onEndPatrol != null) {
+            if (onEndPatrol != null && isActive) {
                 Button(
                     onClick = { showEndConfirm = true },
                     colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
