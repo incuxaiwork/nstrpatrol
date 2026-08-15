@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.components
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -38,6 +40,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.ForestGreen
@@ -74,7 +77,7 @@ fun ActivePatrolOverlay(
         ) {
             Column {
                 Text(
-                    text = "PATROL IN PROGRESS",
+                    text = stringResource(R.string.overlay_patrol_in_progress),
                     color = ForestGreen,
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Medium
@@ -95,16 +98,16 @@ fun ActivePatrolOverlay(
             horizontalArrangement = Arrangement.SpaceEvenly
         ) {
             MetricItem(
-                label = "Distance",
+                label = stringResource(R.string.overlay_distance),
                 value = if (distanceMeters >= 1000) String.format("%.1f km", distanceMeters / 1000)
                 else String.format("%.0f m", distanceMeters)
             )
             MetricItem(
-                label = "Speed",
+                label = stringResource(R.string.overlay_speed),
                 value = String.format("%.1f km/h", avgSpeedKmh)
             )
             MetricItem(
-                label = "Move min",
+                label = stringResource(R.string.overlay_move_min),
                 value = "$moveMinutes"
             )
         }
@@ -122,7 +125,7 @@ fun ActivePatrolOverlay(
             )
             Spacer(Modifier.weight(1f))
             Text(
-                text = String.format("%.0f%% of 10 km goal", animProgress * 100),
+                text = stringResource(R.string.overlay_goal, animProgress * 100),
                 color = TextSecondary,
                 fontSize = 12.sp
             )

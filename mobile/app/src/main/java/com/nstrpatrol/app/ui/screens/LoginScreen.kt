@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -22,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -72,41 +75,41 @@ fun LoginScreen(
             }
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Login",
+                text = stringResource(R.string.login_title),
                 color = ForestGreen,
                 fontSize = 34.sp,
                 fontWeight = FontWeight.Bold
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = "Secure entry for field officers & staff",
+                text = stringResource(R.string.login_subtitle),
                 color = TextSecondary,
                 fontSize = 15.sp
             )
             Spacer(Modifier.height(44.dp))
 
             Column(modifier = Modifier.fillMaxWidth()) {
-                FieldLabel(text = "User name")
+                FieldLabel(text = stringResource(R.string.login_username))
                 Spacer(Modifier.height(8.dp))
                 RemarksField(
                     value = username,
                     onValueChange = { username = it },
-                    placeholder = "Enter your email or username",
+                    placeholder = stringResource(R.string.login_username_hint),
                     height = 48
                 )
                 Spacer(Modifier.height(16.dp))
-                FieldLabel(text = "Password")
+                FieldLabel(text = stringResource(R.string.login_password))
                 Spacer(Modifier.height(8.dp))
                 RemarksField(
                     value = password,
                     onValueChange = { password = it },
-                    placeholder = "Enter your password",
+                    placeholder = stringResource(R.string.login_password_hint),
                     height = 48,
                     isPassword = true
                 )
                 Spacer(Modifier.height(28.dp))
                 PrimaryButton(
-                    text = if (loading) "Signing in…" else "Login",
+                    text = if (loading) stringResource(R.string.login_signing_in) else stringResource(R.string.login_button),
                     onClick = {
                         if (!loading) {
                             loading = true
@@ -138,7 +141,7 @@ fun LoginScreen(
             }
             Spacer(Modifier.weight(1f))
             Text(
-                text = "For official use only",
+                text = stringResource(R.string.login_official),
                 color = TextSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier.padding(bottom = 28.dp)

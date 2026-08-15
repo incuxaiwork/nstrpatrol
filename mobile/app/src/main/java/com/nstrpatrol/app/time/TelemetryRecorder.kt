@@ -172,7 +172,16 @@ class TelemetryRecorder(
         val telemetry = telemetryManager.telemetry.value
         val now = timeManager.trustedUtcNow()
 
-        if (telemetry.hasGpsFix && telemetry.latitude != null && telemetry.longitude != null) {
+        // Accept any usable fix (gps / network / fused). The strict `hasGpsFix`
+        // gate required provider == "gps", which most devices never report for
+        // the active location, so points were never recorded and the patrol
+        // page + dashboard showed zero distance/speed/steps.
+        val usableFix = telemetry.latitude != null &&
+            telemetry.longitude != null &&
+            telemetry.horizontalAccuracyMeters != null &&
+            telemetry.ageMs in 0..30_000
+
+        if (usableFix) {
             dao.insertPoint(
                 PatrolPointEntity(
                     id = "pt-${UUID.randomUUID()}",

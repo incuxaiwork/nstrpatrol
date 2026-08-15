@@ -1,4 +1,178 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">nstrpatrol</string>
+
+    <!-- Navigation tabs -->
+    <string name="nav_home">Home</string>
+    <string name="nav_maps">Maps</string>
+    <string name="nav_patrol">Patrol</string>
+    <string name="nav_reports">Reports</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Common actions -->
+    <string name="action_save_details">SAVE DETAILS</string>
+    <string name="action_back">Back</string>
+    <string name="action_submit">Submit</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_close">Close</string>
+    <string name="common_required">Required</string>
+
+    <!-- Login -->
+    <string name="login_title">Login</string>
+    <string name="login_subtitle">Secure entry for field officers &amp; staff</string>
+    <string name="login_username">User name</string>
+    <string name="login_username_hint">Enter your email or username</string>
+    <string name="login_password">Password</string>
+    <string name="login_password_hint">Enter your password</string>
+    <string name="login_button">Login</string>
+    <string name="login_signing_in">Signing in…</string>
+    <string name="login_official">For official use only</string>
+
+    <!-- Dashboard -->
+    <string name="dashboard_title">Dashboard</string>
+    <string name="dashboard_current_patrol">CURRENT PATROL</string>
+    <string name="dashboard_no_active">No active patrol</string>
+    <string name="dashboard_start_patrol_hint">Start a patrol to track it here</string>
+    <string name="dashboard_open">Open ›</string>
+    <string name="dashboard_quick_actions">Quick actions</string>
+    <string name="dashboard_start_patrol">Start Patrol</string>
+    <string name="dashboard_sync_queue">Sync Queue</string>
+    <string name="dashboard_sos">SOS</string>
+    <string name="dashboard_quick_capture">Quick Capture</string>
+    <string name="dashboard_logs_alerts">Logs &amp; alerts</string>
+    <string name="dashboard_distance">Distance</string>
+    <string name="dashboard_duration">Patrol duration</string>
+    <string name="dashboard_heart_points">Heart points</string>
+    <string name="dashboard_patrols_today">Patrols today</string>
+    <string name="dashboard_greeting">Good day, %s.</string>
+    <string name="dashboard_tamper_detected">Time tampering detected</string>
+    <string name="dashboard_tamper_divergence">Device clock differs from satellite time by %s s.</string>
+    <string name="dashboard_tamper_autotime">Device auto-time is off. Real time comes from GNSS satellites.</string>
+    <string name="dashboard_satellite_time">Satellite time: %s</string>
+    <string name="dashboard_in_progress">In progress</string>
+    <string name="dashboard_location_not_set">Location not set</string>
+    <string name="dashboard_logs_alerts_desc">All field logs &amp; alerts</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_subtitle">Preferences</string>
+    <string name="settings_profile">Profile</string>
+    <string name="settings_name">Name</string>
+    <string name="settings_designation">Designation</string>
+    <string name="settings_email">Email</string>
+    <string name="settings_phone">Phone</string>
+    <string name="settings_general">General</string>
+    <string name="settings_language">Language</string>
+    <string name="settings_sync_interval">Sync Interval</string>
+    <string name="settings_map_layer">Map Layer</string>
+    <string name="settings_diagnostics">Diagnostics &amp; System</string>
+    <string name="settings_gps_diagnostics">GPS Diagnostics</string>
+    <string name="settings_gps_diagnostics_desc">GNSS Status, Constellations &amp; Accuracy</string>
+    <string name="settings_logout">LOG OUT</string>
+
+    <!-- Patrol Start -->
+    <string name="patrol_start_title">Start Patrol</string>
+    <string name="patrol_start_subtitle">Patrolling team details</string>
+    <string name="patrol_start_team">Patrol team</string>
+    <string name="patrol_photo_action">Take photo</string>
+    <string name="patrol_photo_hint">Add a photo of your patrolling team</string>
+    <string name="patrol_start_details">Patrol details</string>
+    <string name="patrol_start_patrol_type_ph">Select Patrol Type</string>
+    <string name="patrol_start_patrol_method_ph">Select Patrol Method</string>
+    <string name="patrol_start_member_name_ph">Select Member Name</string>
+    <string name="patrol_start_arm_type_ph">Select Arm Type</string>
+    <string name="patrol_start_total_members">Total Members Added</string>
+    <string name="patrol_start_patrol_type">Patrol Type</string>
+    <string name="patrol_start_patrol_method">Patrol Method</string>
+    <string name="patrol_start_select_beat">Select Beat</string>
+    <string name="patrol_start_member_name">Member Name</string>
+    <string name="patrol_start_designation">Designation</string>
+    <string name="patrol_start_team_leader">Select Team Leader</string>
+    <string name="patrol_start_armed_status">Armed Status</string>
+    <string name="patrol_start_arm_used">Arm Used</string>
+
+    <!-- Reports -->
+    <string name="reports_title">Reports</string>
+    <string name="reports_subtitle">Select a report category</string>
+    <string name="reports_category">Category</string>
+    <string name="reports_reported_incidents">Reported incidents</string>
+    <string name="reports_no_incidents">No incidents reported yet</string>
+    <string name="reports_human_impact">Human Impact</string>
+    <string name="reports_animal_mortality">Animal Mortality</string>
+    <string name="reports_sightings">Sightings</string>
+    <string name="reports_water_source">Water Source</string>
+
+    <!-- Incident detail -->
+    <string name="incident_details">Incident details</string>
+    <string name="incident_remarks">Remarks</string>
+    <string name="incident_captured">Captured</string>
+    <string name="incident_report_id">Report ID</string>
+    <string name="incident_type">Type</string>
+    <string name="incident_date_time">Date &amp; time</string>
+    <string name="incident_beat">Beat</string>
+    <string name="incident_severity">Severity</string>
+    <string name="incident_not_found">Incident not found</string>
+    <string name="incident_detail_subtitle">Report details</string>
+    <string name="incident_report">Report</string>
+    <string name="common_offline">Offline</string>
+
+    <!-- Logs -->
+    <string name="logs_title">Logs</string>
+    <string name="logs_subtitle">All field logs &amp; alerts</string>
+    <string name="logs_total">Total logs</string>
+    <string name="logs_open_alerts">Open alerts</string>
+    <string name="logs_synced">Synced</string>
+    <string name="logs_recent_activity">Recent activity</string>
+    <string name="logs_no_logs">No field logs recorded yet</string>
+    <string name="logs_tamper_divergence">Time tampering detected (clock vs satellite differs %s s)</string>
+    <string name="logs_tamper_autotime">Time tampering detected (device auto-time off)</string>
+
+    <!-- All Patrols -->
+    <string name="all_patrols_title">All Patrols</string>
+    <string name="all_patrols_subtitle">Ranger station log records</string>
+    <string name="all_patrols_filter_all">All</string>
+    <string name="all_patrols_filter_active">Active</string>
+    <string name="all_patrols_filter_completed">Completed</string>
+    <string name="all_patrols_no_patrols">No patrols yet</string>
+    <string name="common_syncing">Syncing…</string>
+    <string name="patrol_default">Patrol</string>
+    <string name="patrol_km_covered">%.1f km covered</string>
+    <string name="patrol_m_covered">%.0f m covered</string>
+    <string name="patrol_steps">%d steps</string>
+
+    <!-- SOS -->
+    <string name="sos_title">SOS</string>
+    <string name="sos_subtitle">Emergency assistance</string>
+    <string name="sos_tap">Tap to send an SOS alert to your patrol team</string>
+    <string name="sos_emergency_contacts">Emergency contacts</string>
+
+    <!-- GPS Diagnostics -->
+    <string name="gps_title">GPS Diagnostics</string>
+    <string name="gps_subtitle">GNSS Status &amp; Sensor Verification</string>
+    <string name="gps_health_score">GPS Health Score</string>
+    <string name="gps_accuracy">Horizontal Accuracy</string>
+    <string name="gps_current_location">Live Coordinates</string>
+    <string name="gps_satellite_summary">GNSS Satellite Summary</string>
+    <string name="gps_constellations">Supported Constellations</string>
+    <string name="gps_signal_strength">Satellite Signal Strength (C/N0)</string>
+    <string name="gps_compass">Live Compass</string>
+    <string name="gps_movement">Movement Mode Detection</string>
+    <string name="gps_accuracy_map">Accuracy Radius Map</string>
+    <string name="gps_checklist">System Verification Checklist</string>
+    <string name="gps_device_info">Device &amp; Hardware Information</string>
+    <string name="gps_generate_report">GENERATE DIAGNOSTIC REPORT</string>
+    <string name="gps_hide_report">HIDE DIAGNOSTIC REPORT</string>
+    <string name="gps_banner_ready">GPS Ready</string>
+    <string name="gps_banner_searching">Searching for Satellites</string>
+    <string name="gps_banner_weak">Weak GPS Signal</string>
+    <string name="gps_banner_disabled">Location Disabled</string>
+    <string name="gps_banner_permission">Permission Required</string>
+    <string name="gps_banner_timetamper">Time Integrity Alert</string>
+
+    <!-- Active patrol overlay -->
+    <string name="overlay_distance">Distance</string>
+    <string name="overlay_speed">Speed</string>
+    <string name="overlay_move_min">Move min</string>
+    <string name="overlay_patrol_in_progress">PATROL IN PROGRESS</string>
+    <string name="overlay_goal">%.0f%% of 10 km goal</string>
 </resources>

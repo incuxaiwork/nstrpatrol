@@ -28,10 +28,14 @@ import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.capturedLocationText
 import com.nstrpatrol.app.data.submitIncident
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.AutoCapturedPanel
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -71,6 +75,8 @@ fun AnimalMortalityScreen(
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "animal_mortality"
     val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    val capturedGps = remember { capturedLocationText(context) }
+    val capturedTime = remember { SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US).format(Date()) }
 
     val titles = mapOf(
         "species_type" to "Species Type",
@@ -190,7 +196,7 @@ fun AnimalMortalityScreen(
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = "Captured")
             Spacer(Modifier.height(8.dp))
-            AutoCapturedPanel()
+            AutoCapturedPanel(gps = capturedGps, timestamp = capturedTime)
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = "SAVE DETAILS", onClick = {

@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -16,14 +18,16 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
@@ -39,6 +43,7 @@ import com.nstrpatrol.app.ui.components.SelectField
 import com.nstrpatrol.app.ui.components.SegmentedControl
 import com.nstrpatrol.app.ui.components.Stepper
 import com.nstrpatrol.app.ui.navigation.BottomTab
+import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.OutlineCard
 import com.nstrpatrol.app.ui.theme.SurfaceMuted
 import com.nstrpatrol.app.ui.theme.TextPrimary
@@ -65,69 +70,80 @@ fun PatrolStartScreen(
     var armUsed by remember { mutableStateOf<String?>(null) }
     var memberCount by remember { mutableIntStateOf(0) }
     var openSheet by remember { mutableStateOf<String?>(null) }
+    var showErrors by remember { mutableStateOf(false) }
     val photoSlot = "patrol_start"
     val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
-    val scope = rememberCoroutineScope()
-
     Box {
         NstrScaffold(
-            title = "Start Patrol",
-            subtitle = "Patrolling team details",
+            title = stringResource(R.string.patrol_start_title),
+            subtitle = stringResource(R.string.patrol_start_subtitle),
             onBack = onBack,
             activeTab = BottomTab.Patrol,
             onTabSelected = onTabSelected
         ) {
             Spacer(Modifier.height(12.dp))
-            SectionHeader(text = "Patrol team")
+            SectionHeader(text = stringResource(R.string.patrol_start_team))
             Spacer(Modifier.height(8.dp))
             PhotoPlaceholder(
-                actionText = "Take photo",
-                hint = "Add a photo of your patrolling team",
+                actionText = stringResource(R.string.patrol_photo_action),
+                hint = stringResource(R.string.patrol_photo_hint),
                 photoPaths = photoPaths,
                 onClick = { onOpenCamera(photoSlot) }
             )
 
             Spacer(Modifier.height(16.dp))
-            SectionHeader(text = "Patrol details")
+            SectionHeader(text = stringResource(R.string.patrol_start_details))
             Spacer(Modifier.height(8.dp))
 
-            FieldLabel(text = "Patrol Type")
+            FieldLabel(text = stringResource(R.string.patrol_start_patrol_type), required = true)
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Select Patrol Type",
+                placeholder = stringResource(R.string.patrol_start_patrol_type_ph),
                 value = patrolType,
+                isError = showErrors && patrolType == null,
                 onClick = { openSheet = "patrol_type" }
             )
+            if (showErrors && patrolType == null) {
+                Text(stringResource(R.string.common_required), color = ErrorRed, fontSize = 11.sp)
+            }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Patrol Method")
+            FieldLabel(text = stringResource(R.string.patrol_start_patrol_method), required = true)
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Select Patrol Method",
+                placeholder = stringResource(R.string.patrol_start_patrol_method_ph),
                 value = patrolMethod,
+                isError = showErrors && patrolMethod == null,
                 onClick = { openSheet = "patrol_method" }
             )
+            if (showErrors && patrolMethod == null) {
+                Text(stringResource(R.string.common_required), color = ErrorRed, fontSize = 11.sp)
+            }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Select Beat")
+            FieldLabel(text = stringResource(R.string.patrol_start_select_beat), required = true)
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Select Beat",
+                placeholder = stringResource(R.string.patrol_start_select_beat),
                 value = beat,
+                isError = showErrors && beat == null,
                 onClick = { openSheet = "beat" }
             )
+            if (showErrors && beat == null) {
+                Text(stringResource(R.string.common_required), color = ErrorRed, fontSize = 11.sp)
+            }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Member Name")
+            FieldLabel(text = stringResource(R.string.patrol_start_member_name))
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Select Member Name",
+                placeholder = stringResource(R.string.patrol_start_member_name_ph),
                 value = memberName,
                 onClick = { openSheet = "member" }
             )
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Designation")
+            FieldLabel(text = stringResource(R.string.patrol_start_designation))
             Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier
@@ -147,16 +163,20 @@ fun PatrolStartScreen(
             }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Select Team Leader")
+            FieldLabel(text = stringResource(R.string.patrol_start_team_leader), required = true)
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Choose team member",
+                placeholder = stringResource(R.string.patrol_start_team_leader),
                 value = teamLeader,
+                isError = showErrors && teamLeader == null,
                 onClick = { openSheet = "team_leader" }
             )
+            if (showErrors && teamLeader == null) {
+                Text(stringResource(R.string.common_required), color = ErrorRed, fontSize = 11.sp)
+            }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Armed Status")
+            FieldLabel(text = stringResource(R.string.patrol_start_armed_status))
             Spacer(Modifier.height(4.dp))
             SegmentedControl(
                 options = listOf("Armed", "Unarmed"),
@@ -168,10 +188,10 @@ fun PatrolStartScreen(
             )
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = "Arm Used")
+            FieldLabel(text = stringResource(R.string.patrol_start_arm_used))
             Spacer(Modifier.height(4.dp))
             SelectField(
-                placeholder = "Select Arm Type",
+                placeholder = stringResource(R.string.patrol_start_arm_type_ph),
                 value = armUsed,
                 onClick = { openSheet = "arm" }
             )
@@ -187,7 +207,7 @@ fun PatrolStartScreen(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "Total Members Added",
+                    text = stringResource(R.string.patrol_start_total_members),
                     color = TextPrimary,
                     fontSize = 14.sp,
                     fontWeight = FontWeight.Medium,
@@ -201,10 +221,17 @@ fun PatrolStartScreen(
             }
 
             Spacer(Modifier.height(20.dp))
-            PrimaryButton(text = "SAVE DETAILS", onClick = {
+            PrimaryButton(text = stringResource(R.string.action_save_details), onClick = {
+                showErrors = true
+                if (patrolType == null || patrolMethod == null || beat == null || teamLeader == null) {
+                    return@PrimaryButton
+                }
                 onStartPatrol()
                 val pid = patrolTimer.patrolId ?: return@PrimaryButton
-                scope.launch {
+                // Write on a scope NOT tied to this composable: onSave() pops the
+                // screen and would otherwise cancel the write before it persists,
+                // leaving the session (and its team details) missing.
+                CoroutineScope(Dispatchers.IO).launch {
                     dao.upsertPatrolSession(
                         PatrolSessionEntity(
                             patrolId = pid,
@@ -237,12 +264,12 @@ fun PatrolStartScreen(
         val sheet = openSheet
         if (sheet != null) {
             val title = when (sheet) {
-                "patrol_type" -> "Patrol Type"
-                "patrol_method" -> "Patrol Method"
-                "beat" -> "Select Beat"
-                "member" -> "Member Name"
-                "team_leader" -> "Team Leader"
-                else -> "Arm Used"
+                "patrol_type" -> stringResource(R.string.patrol_start_patrol_type)
+                "patrol_method" -> stringResource(R.string.patrol_start_patrol_method)
+                "beat" -> stringResource(R.string.patrol_start_select_beat)
+                "member" -> stringResource(R.string.patrol_start_member_name)
+                "team_leader" -> stringResource(R.string.patrol_start_team_leader)
+                else -> stringResource(R.string.patrol_start_arm_used)
             }
             val options = when (sheet) {
                 "patrol_type" -> Options.patrolTypes

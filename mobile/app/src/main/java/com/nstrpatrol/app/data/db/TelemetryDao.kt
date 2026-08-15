@@ -23,6 +23,9 @@ interface TelemetryDao {
     @Query("SELECT * FROM incidents ORDER BY occurredAt DESC")
     suspend fun allIncidents(): List<IncidentEntity>
 
+    @Query("SELECT * FROM incidents WHERE id = :id")
+    suspend fun incidentById(id: String): IncidentEntity?
+
     @Insert
     suspend fun insertPoints(points: List<PatrolPointEntity>)
 

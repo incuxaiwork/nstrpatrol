@@ -26,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -140,13 +141,13 @@ fun NstrBottomBar(
                     }
                     Icon(
                         imageVector = TabIcons.getValue(tab),
-                        contentDescription = tab.label,
+                        contentDescription = stringResource(tab.labelRes),
                         tint = if (selected) ForestGreen else TextSecondary,
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(Modifier.height(2.dp))
                     Text(
-                        text = tab.label,
+                        text = stringResource(tab.labelRes),
                         color = if (selected) ForestGreen else TextSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium

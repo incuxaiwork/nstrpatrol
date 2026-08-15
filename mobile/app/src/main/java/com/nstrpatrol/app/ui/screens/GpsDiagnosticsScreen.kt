@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
@@ -74,6 +76,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.BuildConfig
@@ -104,14 +107,26 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
-enum class GpsBannerState(val title: String, val color: Color, val icon: ImageVector) {
-    Ready("GPS Ready", Color(0xFF2E7D32), Icons.Filled.CheckCircle),
-    Searching("Searching for Satellites", Color(0xFFFF8F00), Icons.Filled.Refresh),
-    Weak("Weak GPS Signal", Color(0xFFE65100), Icons.Filled.Warning),
-    Disabled("Location Disabled", Color(0xFFB3261E), Icons.Filled.Warning),
-    Permission("Permission Required", Color(0xFFB3261E), Icons.Filled.Info),
-    TimeTamper("Time Integrity Alert", Color(0xFFB3261E), Icons.Filled.Warning)
+enum class GpsBannerState(val color: Color, val icon: ImageVector) {
+    Ready(Color(0xFF2E7D32), Icons.Filled.CheckCircle),
+    Searching(Color(0xFFFF8F00), Icons.Filled.Refresh),
+    Weak(Color(0xFFE65100), Icons.Filled.Warning),
+    Disabled(Color(0xFFB3261E), Icons.Filled.Warning),
+    Permission(Color(0xFFB3261E), Icons.Filled.Info),
+    TimeTamper(Color(0xFFB3261E), Icons.Filled.Warning)
 }
+
+@Composable
+private fun bannerTitle(state: GpsBannerState): String = stringResource(
+    when (state) {
+        GpsBannerState.Ready -> R.string.gps_banner_ready
+        GpsBannerState.Searching -> R.string.gps_banner_searching
+        GpsBannerState.Weak -> R.string.gps_banner_weak
+        GpsBannerState.Disabled -> R.string.gps_banner_disabled
+        GpsBannerState.Permission -> R.string.gps_banner_permission
+        GpsBannerState.TimeTamper -> R.string.gps_banner_timetamper
+    }
+)
 
 @Composable
 fun GpsDiagnosticsScreen(
@@ -162,8 +177,8 @@ fun GpsDiagnosticsScreen(
     }
 
     NstrScaffold(
-        title = "GPS Diagnostics",
-        subtitle = "GNSS Status & Sensor Verification",
+        title = stringResource(R.string.gps_title),
+        subtitle = stringResource(R.string.gps_subtitle),
         onBack = onBack,
         activeTab = BottomTab.Settings,
         onTabSelected = onTabSelected
@@ -229,7 +244,7 @@ fun GpsDiagnosticsScreen(
             Icon(Icons.Filled.Info, contentDescription = null, tint = Color.White)
             Spacer(Modifier.width(8.dp))
             Text(
-                text = if (reportVisible) "HIDE DIAGNOSTIC REPORT" else "GENERATE DIAGNOSTIC REPORT",
+                text = if (reportVisible) stringResource(R.string.gps_hide_report) else stringResource(R.string.gps_generate_report),
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
@@ -368,7 +383,7 @@ private fun LiveStatusBanner(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = state.title,
+                    text = bannerTitle(state),
                     fontWeight = FontWeight.Bold,
                     color = state.color,
                     fontSize = 16.sp
@@ -406,7 +421,7 @@ private fun GpsHealthScoreCard(telemetry: GpsTelemetry, timeState: TimeIntegrity
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text("GPS Health Score", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                Text(stringResource(R.string.gps_health_score), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(16.dp))
@@ -509,7 +524,7 @@ private fun GpsAccuracyCard(telemetry: GpsTelemetry) {
                 .padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Horizontal Accuracy", fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_accuracy), fontWeight = FontWeight.Bold, fontSize = 15.sp, color = TextPrimary)
             Spacer(Modifier.height(14.dp))
 
             Box(
@@ -588,7 +603,7 @@ private fun CurrentLocationCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Filled.LocationOn, contentDescription = null, tint = ForestGreen)
                     Spacer(Modifier.width(6.dp))
-                    Text("Live Coordinates", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                    Text(stringResource(R.string.gps_current_location), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 }
                 Text(headerTime, fontSize = 11.sp, color = TextSecondary)
             }
@@ -718,7 +733,7 @@ private fun SatelliteInformationCard(telemetry: GpsTelemetry) {
         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("GNSS Satellite Summary", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_satellite_summary), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
             Spacer(Modifier.height(14.dp))
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -777,7 +792,7 @@ private fun GnssConstellationsCard(telemetry: GpsTelemetry) {
         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Supported Constellations", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_constellations), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
             Spacer(Modifier.height(12.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -837,7 +852,7 @@ private fun SignalStrengthCard(telemetry: GpsTelemetry) {
         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Satellite Signal Strength (C/N0)", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_signal_strength), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
             Spacer(Modifier.height(14.dp))
 
             if (satellites.isEmpty()) {
@@ -922,7 +937,7 @@ private fun LiveCompassCard(telemetry: GpsTelemetry) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Live Compass", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                Text(stringResource(R.string.gps_compass), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 Text(headingText, fontWeight = FontWeight.Bold, color = ForestGreen, fontSize = 14.sp)
             }
 
@@ -1000,7 +1015,7 @@ private fun MovementModeCard(recorder: TelemetryRecorder) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Movement Mode Detection", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                Text(stringResource(R.string.gps_movement), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 Text(movement.mode.label, fontWeight = FontWeight.Bold, color = ForestGreen, fontSize = 14.sp)
             }
 
@@ -1110,7 +1125,7 @@ private fun AccuracyCircleMapVisualizer(telemetry: GpsTelemetry) {
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text("Accuracy Radius Map", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+                Text(stringResource(R.string.gps_accuracy_map), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
                 Text(telemetry.provider?.let { providerLabel(it) } ?: "No provider", fontSize = 11.sp, color = TextSecondary)
             }
 
@@ -1189,7 +1204,7 @@ private fun GpsStatusChecklistCard(telemetry: GpsTelemetry, timeState: TimeInteg
         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("System Verification Checklist", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_checklist), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
             Spacer(Modifier.height(12.dp))
 
             ChecklistItem(
@@ -1284,7 +1299,7 @@ private fun DeviceInformationCard(context: Context) {
         border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            Text("Device & Hardware Information", fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
+            Text(stringResource(R.string.gps_device_info), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
             Spacer(Modifier.height(12.dp))
 
             InfoRow("Device Name", "${Build.MANUFACTURER} ${Build.MODEL}")

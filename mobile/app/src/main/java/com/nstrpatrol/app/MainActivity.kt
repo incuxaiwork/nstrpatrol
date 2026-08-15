@@ -4,11 +4,12 @@ import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.IntentFilter
 import android.os.Build
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
@@ -31,6 +32,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.AuthSession
+import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.data.ConnectivityObserver
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
@@ -74,6 +76,10 @@ private const val DEBUG_START_PATROL = "com.nstrpatrol.app.DEBUG_START_PATROL"
 private const val DEBUG_STOP_PATROL = "com.nstrpatrol.app.DEBUG_STOP_PATROL"
 
 class MainActivity : ComponentActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        super.attachBaseContext(SupportedLanguages.wrapContext(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -148,6 +154,14 @@ fun NstrApp() {
      *  explicitly (e.g. for a patrol whose timer was lost across an app restart). */
     fun stopActivePatrol(patrolId: String? = null, navigateToAllPatrols: Boolean = true) {
         val pid = patrolId ?: patrolTimer.patrolId ?: return
+        // Real stop time must come from the patrol timer (start + elapsed),
+        // NOT the last telemetry sample — otherwise a partial GPS trace makes
+        // the patrol look like it ended after only a few minutes.
+        val endTime = if (patrolTimer.patrolId == pid && patrolTimer.isRunning()) {
+            patrolTimer.trustedNow()
+        } else {
+            System.currentTimeMillis()
+        }
         if (patrolTimer.patrolId == pid) patrolTimer.stop()
         syncScope.launch {
             val dao = database.telemetryDao()
@@ -155,7 +169,7 @@ fun NstrApp() {
                 val metrics = ActivitySummary.computeForPatrol(pid, dao)
                 dao.completePatrol(
                     patrolId = pid,
-                    endTime = metrics.endTimeMs ?: System.currentTimeMillis(),
+                    endTime = endTime,
                     distance = metrics.distanceMeters,
                     steps = metrics.steps,
                     moveMin = metrics.moveMinutes,
@@ -165,11 +179,13 @@ fun NstrApp() {
                     points = dao.patrolPointsOrdered(pid).size
                 )
             }
-            SyncManager.syncNow(dao, api)
-            runCatching { api.completePatrol(pid) }
+            // Navigate first so the UI leaves the report screen immediately...
             if (navigateToAllPatrols) {
                 withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }
             }
+            // ...then best-effort sync; failures must not block navigation above.
+            runCatching { SyncManager.syncNow(dao, api) }
+            runCatching { api.completePatrol(pid) }
         }
     }
     val timeState by timeManager.state.collectAsStateWithLifecycle()
@@ -281,7 +297,8 @@ fun NstrApp() {
                 }
             },
             onOpenIncident = { incidentId -> nav.navigateTo(Route.IncidentDetail(incidentId)) },
-            onTabSelected = nav::selectTab
+            onTabSelected = nav::selectTab,
+            dao = database.telemetryDao()
         )
 
         Route.Settings -> SettingsScreen(
@@ -304,7 +321,7 @@ fun NstrApp() {
             onTabSelected = nav::selectTab
         )
 
-        Route.Logs -> LogsScreen(nav::selectTab, timeState = timeState)
+        Route.Logs -> LogsScreen(nav::selectTab, timeState = timeState, dao = database.telemetryDao())
 
         Route.PatrolStart -> PatrolStartScreen(
             onSave = { nav.popBack() },
@@ -367,7 +384,8 @@ fun NstrApp() {
         is Route.IncidentDetail -> IncidentDetailScreen(
             incidentId = (nav.current as Route.IncidentDetail).incidentId,
             onBack = { nav.popBack() },
-            onTabSelected = nav::selectTab
+            onTabSelected = nav::selectTab,
+            dao = database.telemetryDao()
         )
 
         is Route.Camera -> CameraScreen(

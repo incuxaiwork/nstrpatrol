@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,6 +30,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.nstrpatrol.app.data.Patrols
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -99,26 +102,33 @@ fun AllPatrolsScreen(
         else -> allEntries
     }
 
-    val filters = listOf(
-        "All" to "${allEntries.size}",
-        "Active" to "${allEntries.count { it.status == "ACTIVE" || it.status == "IN PROGRESS" }}",
-        "Completed" to "${allEntries.count { it.status == "COMPLETED" }}"
+    val filterDefs = listOf(
+        "All" to stringResource(R.string.all_patrols_filter_all),
+        "Active" to stringResource(R.string.all_patrols_filter_active),
+        "Completed" to stringResource(R.string.all_patrols_filter_completed)
     )
+    val allCount = "${allEntries.size}"
+    val activeCount = "${allEntries.count { it.status == "ACTIVE" || it.status == "IN PROGRESS" }}"
+    val completedCount = "${allEntries.count { it.status == "COMPLETED" }}"
 
     NstrScaffold(
-        title = "All Patrols",
-        subtitle = if (loading) "Syncing…" else "Ranger station log records",
+        title = stringResource(R.string.all_patrols_title),
+        subtitle = if (loading) stringResource(R.string.common_syncing) else stringResource(R.string.all_patrols_subtitle),
         activeTab = BottomTab.Patrol,
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            filters.forEach { (label, count) ->
+            filterDefs.forEach { (key, label) ->
                 FilterChip(
                     label = label,
-                    count = count,
-                    selected = label == selectedFilter,
-                    onClick = { selectedFilter = label }
+                    count = when (key) {
+                        "All" -> allCount
+                        "Active" -> activeCount
+                        else -> completedCount
+                    },
+                    selected = key == selectedFilter,
+                    onClick = { selectedFilter = key }
                 )
             }
         }
@@ -132,7 +142,7 @@ fun AllPatrolsScreen(
                     .padding(vertical = 32.dp),
                 contentAlignment = Alignment.Center
             ) {
-                Text("No patrols yet", color = TextSecondary, fontSize = 14.sp)
+                Text(stringResource(R.string.all_patrols_no_patrols), color = TextSecondary, fontSize = 14.sp)
             }
         }
 
@@ -203,8 +213,8 @@ private fun SessionPatrolCard(
     }
     val dateFormat = remember { SimpleDateFormat("dd MMM, HH:mm", Locale.US) }
     val distText = if (session.totalDistanceMeters >= 1000)
-        String.format("%.1f km covered", session.totalDistanceMeters / 1000) else
-        String.format("%.0f m covered", session.totalDistanceMeters)
+        stringResource(R.string.patrol_km_covered, session.totalDistanceMeters / 1000) else
+        stringResource(R.string.patrol_m_covered, session.totalDistanceMeters)
 
     Column(
         modifier = modifier
@@ -217,7 +227,7 @@ private fun SessionPatrolCard(
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text(
-                text = session.patrolType ?: session.beat ?: "Patrol",
+                text = session.patrolType ?: session.beat ?: stringResource(R.string.patrol_default),
                 color = TextPrimary,
                 fontSize = 16.sp,
                 fontWeight = FontWeight.Bold,
@@ -257,7 +267,7 @@ private fun SessionPatrolCard(
                 modifier = Modifier.weight(1f)
             )
             if (session.totalSteps > 0) {
-                Text(text = "${session.totalSteps} steps", color = TextSecondary, fontSize = 12.sp)
+                Text(text = stringResource(R.string.patrol_steps, session.totalSteps), color = TextSecondary, fontSize = 12.sp)
             }
         }
     }

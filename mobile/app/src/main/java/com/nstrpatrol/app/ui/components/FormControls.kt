@@ -128,7 +128,8 @@ fun SelectField(
     placeholder: String,
     value: String?,
     onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isError: Boolean = false
 ) {
     Row(
         modifier = modifier
@@ -136,7 +137,7 @@ fun SelectField(
             .height(44.dp)
             .clip(RoundedCornerShape(8.dp))
             .background(Surface)
-            .border(1.dp, OutlineSoft, RoundedCornerShape(8.dp))
+            .border(1.dp, if (isError) ErrorRed else OutlineSoft, RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -144,7 +145,7 @@ fun SelectField(
         Text(
             text = value ?: placeholder,
             modifier = Modifier.weight(1f),
-            color = if (value != null) TextPrimary else TextSecondary,
+            color = if (value != null) TextPrimary else if (isError) ErrorRed else TextSecondary,
             fontSize = 14.sp,
             fontWeight = FontWeight.Normal
         )
@@ -440,10 +441,20 @@ fun SeverityControl(
 /**
  * Auto-captured details panel (GPS coords, timestamp, officer, beat, accuracy...)
  * shown at the bottom of every report category page. Mirrors the "Captured" panel
- * in the Penpot designs; data comes from [AutoDetails] for now.
+ * in the Penpot designs. Pass the real captured values to make it dynamic; any
+ * null field falls back to [AutoDetails] (kept only as a last-resort default).
  */
 @Composable
-fun AutoCapturedPanel(modifier: Modifier = Modifier) {
+fun AutoCapturedPanel(
+    modifier: Modifier = Modifier,
+    gps: String? = null,
+    timestamp: String? = null,
+    officer: String? = null,
+    badge: String? = null,
+    beat: String? = null,
+    accuracy: String? = null,
+    saved: String? = null
+) {
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -451,13 +462,13 @@ fun AutoCapturedPanel(modifier: Modifier = Modifier) {
             .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
             .background(Surface)
     ) {
-        AutoDetailRow(label = "GPS coordinates", value = AutoDetails.gps)
-        AutoDetailRow(label = "Timestamp", value = AutoDetails.timestamp)
-        AutoDetailRow(label = "Officer", value = AutoDetails.officer)
-        AutoDetailRow(label = "Badge", value = AutoDetails.badge)
-        AutoDetailRow(label = "Beat", value = AutoDetails.beat)
-        AutoDetailRow(label = "GPS accuracy", value = AutoDetails.accuracy)
-        AutoDetailRow(label = "Saved", value = AutoDetails.saved)
+        AutoDetailRow(label = "GPS coordinates", value = gps ?: AutoDetails.gps)
+        AutoDetailRow(label = "Timestamp", value = timestamp ?: AutoDetails.timestamp)
+        AutoDetailRow(label = "Officer", value = officer ?: AutoDetails.officer)
+        AutoDetailRow(label = "Badge", value = badge ?: AutoDetails.badge)
+        AutoDetailRow(label = "Beat", value = beat ?: AutoDetails.beat)
+        AutoDetailRow(label = "GPS accuracy", value = accuracy ?: AutoDetails.accuracy)
+        AutoDetailRow(label = "Saved", value = saved ?: AutoDetails.saved)
     }
 }
 
