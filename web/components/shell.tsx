@@ -417,14 +417,33 @@ function Sidebar({
         )}
       >
         <div className={cn("flex items-center gap-2.5 border-b border-line px-4 py-3", collapsed && "justify-center px-2")}>
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-forest-800 text-white">
-            <Icon name="tree" size={16} />
-          </span>
-          {!collapsed && (
-            <div className="min-w-0">
-              <p className="truncate text-sm font-semibold text-ink">NSTR Patrol</p>
-              <p className="text-[10px] uppercase tracking-wider text-ink-faint">Admin Portal</p>
-            </div>
+          {collapsed ? (
+            <button
+              onClick={onExpand}
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+              className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-forest-50 hover:text-forest-900"
+            >
+              <Icon name="chevronRight" size={17} />
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onExpand}
+                aria-label="Collapse sidebar"
+                title="Collapse sidebar"
+                className="flex size-8 shrink-0 items-center justify-center rounded-md text-ink-soft hover:bg-forest-50 hover:text-forest-900"
+              >
+                <Icon name="chevronLeft" size={17} />
+              </button>
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-forest-800 text-white">
+                <Icon name="tree" size={16} />
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-ink">NSTR Patrol</p>
+                <p className="text-[10px] uppercase tracking-wider text-ink-faint">Admin Portal</p>
+              </div>
+            </>
           )}
         </div>
 
@@ -475,19 +494,6 @@ function Sidebar({
             );
           })}
         </nav>
-
-        <div className="border-t border-line p-2">
-          <button
-            onClick={onExpand}
-            className={cn(
-              "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-sm text-ink-soft hover:bg-forest-50 hover:text-forest-900",
-              collapsed && "justify-center"
-            )}
-          >
-            <Icon name={collapsed ? "chevronRight" : "chevronLeft"} size={15} />
-            {!collapsed && <span>Collapse sidebar</span>}
-          </button>
-        </div>
       </aside>
 
       {/* Mobile / tablet drawer */}
@@ -548,18 +554,20 @@ function Sidebar({
 }
 
 function Topbar({ onMenu }: { onMenu(): void }) {
-  const { toggleSidebar, sidebarCollapsed, setSearchOpen } = useApp();
+  const { setSearchOpen } = useApp();
+  const router = useRouter();
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center gap-2 border-b border-line bg-white px-3 sm:px-4">
       <button onClick={onMenu} aria-label="Open navigation" className="rounded-md p-1.5 text-ink-soft hover:bg-forest-50 lg:hidden">
         <Icon name="menu" size={19} />
       </button>
       <button
-        onClick={toggleSidebar}
-        aria-label="Toggle sidebar"
-        className="hidden rounded-md p-1.5 text-ink-soft hover:bg-forest-50 lg:inline-flex"
+        onClick={() => router.back()}
+        aria-label="Go back"
+        title="Go back"
+        className="flex size-9 items-center justify-center rounded-md border border-line bg-white text-ink-soft hover:border-forest-600 hover:text-forest-800"
       >
-        <Icon name={sidebarCollapsed ? "chevronRight" : "chevronLeft"} size={18} />
+        <Icon name="chevronLeft" size={18} />
       </button>
       <button
         onClick={() => setSearchOpen(true)}

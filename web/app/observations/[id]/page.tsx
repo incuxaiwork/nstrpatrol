@@ -8,7 +8,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useState } from "react";
-import { observations, patrols } from "@/lib/services";
+import { gis, observations, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
@@ -27,13 +27,14 @@ export default function ObservationDetailPage() {
   const { pushToast } = useApp();
   const { data: obs, error, loading, reload } = useAsyncData(() => observations.get(params.id));
   const patrol = useAsyncData(() => (obs?.patrolId ? patrols.get(obs.patrolId) : Promise.resolve(undefined)));
+  const spatial = useAsyncData(() => gis.spatial());
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [actionNote, setActionNote] = useState("");
   const [escalateOpen, setEscalateOpen] = useState(false);
   const [mediaIndex, setMediaIndex] = useState<number | null>(null);
 
-  if (loading || !obs) return <SkeletonRows rows={7} />;
+  if (loading || !obs || spatial.loading || !spatial.data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   return (
@@ -97,7 +98,7 @@ export default function ObservationDetailPage() {
           <Card>
             <CardHeader title="Location" icon="map" subtitle="Coordinates recorded from the field device" />
             <div className="p-3">
-              <MapWorkspace mode="overview" heightClass="h-[240px]" onSelect={() => undefined} />
+              <MapWorkspace mode="overview" heightClass="h-[240px]" liveBeats={spatial.data.beats} compartments={spatial.data.compartments} onSelect={() => undefined} />
             </div>
             <p className="px-4 pb-4 font-mono text-xs text-ink-soft">
               {obs.lat.toFixed(5)}, {obs.lng.toFixed(5)}

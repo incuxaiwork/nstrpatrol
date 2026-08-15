@@ -24,6 +24,7 @@ import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
+import { mockRangers } from "@/lib/mock/people";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
 
@@ -54,6 +55,13 @@ export default function PatrolsDashboardPage() {
   const avgCoverage = completed.length
     ? Math.round(completed.reduce((a, r) => a + r.patrol.coveragePct, 0) / completed.length)
     : 0;
+  const completedToday = completed.filter(
+    (r) => new Date(r.patrol.endActual ?? r.patrol.startScheduled).toDateString() === new Date().toDateString()
+  ).length;
+  const todayCross = today.filter((r) => r.jurisdiction.state === "authorized-exception").length;
+  const todayReview = today.filter(
+    (r) => r.jurisdiction.state === "requires-review" || r.jurisdiction.state === "pending-review"
+  ).length;
 
   const statusSegments = [
     { label: "Ongoing", value: ongoing.length, color: "#2E7D32" },
@@ -87,12 +95,12 @@ export default function PatrolsDashboardPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Active patrols" value={active.length} icon="route" tone="success" onClick={() => router.push("/patrols/all?status=ongoing")} />
-        <KpiCard label="Started today" value={today.length} icon="play" tone="info" onClick={() => router.push("/patrols/all")} />
-        <KpiCard label="Completed (7d)" value={completed.length} icon="check" tone="forest" onClick={() => router.push("/patrols/all?status=completed")} />
-        <KpiCard label="Rangers patrolling" value={ongoing.length ? ongoing.length : 0} icon="users" tone="khaki" onClick={() => router.push("/rangers")} />
-        <KpiCard label="Cross-jurisdiction" value={crossJurisdiction.length} icon="map" tone="warning" onClick={() => router.push("/patrols/all?jurisdiction=authorized")} />
-        <KpiCard label="Requiring review" value={review.length} icon="alert" tone="danger" onClick={() => router.push("/patrols/all?jurisdiction=review")} />
+        <KpiCard label="Active patrols" value={active.length} icon="route" tone="success" tillDate={rows.length} today={active.length} onClick={() => router.push("/patrols/all?status=ongoing")} />
+        <KpiCard label="Started today" value={today.length} icon="play" tone="info" tillDate={rows.length} today={today.length} onClick={() => router.push("/patrols/all")} />
+        <KpiCard label="Completed (7d)" value={completed.length} icon="check" tone="forest" tillDate={completed.length} today={completedToday} onClick={() => router.push("/patrols/all?status=completed")} />
+        <KpiCard label="Rangers patrolling" value={ongoing.length ? ongoing.length : 0} icon="users" tone="khaki" tillDate={mockRangers.length} today={ongoing.length} onClick={() => router.push("/rangers")} />
+        <KpiCard label="Cross-jurisdiction" value={crossJurisdiction.length} icon="map" tone="warning" tillDate={crossJurisdiction.length} today={todayCross} onClick={() => router.push("/patrols/all?jurisdiction=authorized")} />
+        <KpiCard label="Requiring review" value={review.length} icon="alert" tone="danger" tillDate={review.length} today={todayReview} onClick={() => router.push("/patrols/all?jurisdiction=review")} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">

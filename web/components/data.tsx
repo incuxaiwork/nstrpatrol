@@ -271,6 +271,8 @@ export function KpiCard({
   change,
   icon,
   tone = "forest",
+  tillDate,
+  today,
   onClick,
 }: {
   label: string;
@@ -279,6 +281,8 @@ export function KpiCard({
   change?: number;
   icon: IconName;
   tone?: BadgeTone;
+  tillDate?: string | number;
+  today?: string | number;
   onClick?(): void;
 }) {
   const tones: Record<BadgeTone, string> = {
@@ -304,21 +308,35 @@ export function KpiCard({
           <Icon name={icon} size={16} />
         </span>
       </div>
-      <div className="mt-2 flex items-baseline gap-1">
-        <span className="text-2xl font-semibold tracking-tight text-ink">{value}</span>
-        {unit && <span className="text-sm text-ink-soft">{unit}</span>}
-        {typeof change === "number" && (
-          <span
-            className={cn(
-              "ml-auto inline-flex items-center gap-0.5 text-xs font-medium",
-              change >= 0 ? "text-success" : "text-danger"
-            )}
-          >
-            <Icon name={change >= 0 ? "chevronUp" : "chevronDown"} size={12} />
-            {Math.abs(change)}%
-          </span>
-        )}
-      </div>
+      {tillDate !== undefined || today !== undefined ? (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {[
+            { key: "total", label: "Total", value: tillDate },
+            { key: "today", label: "Today", value: today },
+          ].map((c) => (
+            <div key={c.key} className="rounded-md bg-surface px-2.5 py-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{c.label}</p>
+              <p className="mt-0.5 truncate text-xl font-semibold tracking-tight text-ink">{c.value ?? "—"}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="mt-2 flex items-baseline gap-1">
+          <span className="text-2xl font-semibold tracking-tight text-ink">{value}</span>
+          {unit && <span className="text-sm text-ink-soft">{unit}</span>}
+          {typeof change === "number" && (
+            <span
+              className={cn(
+                "ml-auto inline-flex items-center gap-0.5 text-xs font-medium",
+                change >= 0 ? "text-success" : "text-danger"
+              )}
+            >
+              <Icon name={change >= 0 ? "chevronUp" : "chevronDown"} size={12} />
+              {Math.abs(change)}%
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

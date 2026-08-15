@@ -3,11 +3,13 @@
  */
 
 import { Patrol, PatrolMethod, PatrolReport, PatrolTemplate } from "@/lib/types";
+import { mapBeatsRaw } from "@/lib/mock/gis";
+import { svgToLngLat } from "@/lib/map-space";
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const hoursAhead = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
 
-export const mockPatrols: Patrol[] = [
+const rawMockPatrols: Patrol[] = [
   {
     id: "p-2026-0118",
     code: "P-2026-0118",
@@ -841,3 +843,65 @@ export const mockPatrolReports: PatrolReport[] = [
     summary: "Exercise called off due to approach road closure near S1-B. Rescheduled for the next patrol cycle.",
   },
 ];
+
+/* ------------------------------------------------------------------ */
+/* Replay traces — every patrol gets a playable route                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Deterministic pseudo-GPS trace for a patrol: an 8-point zig-zag sweep
+ * inside the patrol's beat (SVG viewBox → lon/lat), so the map replay
+ * controls work for every patrol, not just the ones with authored routes.
+ */
+function syntheticRoute(id: string, beatId: string): { lat: number; lng: number }[] {
+  const beat = mapBeatsRaw.find((b) => b.id === beatId || b.name === beatId);
+  const ring = beat
+    ? beat.points
+        .trim()
+        .split(/\s+/)
+        .map((p) => p.split(",").map(Number) as [number, number])
+    : [
+        [180, 220],
+        [180, 500],
+        [720, 500],
+        [720, 220],
+      ];
+  const xs = ring.map((p) => p[0]);
+  const ys = ring.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  let s = 0;
+  for (let i = 0; i < id.length; i++) s = (s * 31 + id.charCodeAt(i)) >>> 0;
+  const rnd = () => {
+    s = (s * 1103515245 + 12345) >>> 0;
+    return s / 4294967296;
+  };
+  const n = 8;
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const x = minX + t * (maxX - minX) + (rnd() - 0.5) * (maxX - minX) * 0.16;
+    const sweep = (i % 2 === 0 ? 0.32 : -0.22) * (maxY - minY);
+    const y = (minY + maxY) / 2 + sweep + (rnd() - 0.5) * (maxY - minY) * 0.12;
+    out.push([
+      Math.min(maxX, Math.max(minX, x)),
+      Math.min(maxY, Math.max(minY, y)),
+    ]);
+  }
+  return out.map(([x, y]) => {
+    const [lng, lat] = svgToLngLat(x, y);
+    return { lat, lng };
+  });
+}
+
+/**
+ * Patch authored records: patrols with <2 fixes get a synthetic trace so the
+ * play/pause replay is available on every patrol's pages.
+ */
+export const mockPatrols: Patrol[] = rawMockPatrols.map((p) =>
+  p.route && p.route.length >= 2
+    ? p
+    : { ...p, route: syntheticRoute(p.id, p.beat) }
+);

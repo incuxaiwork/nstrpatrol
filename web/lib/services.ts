@@ -31,6 +31,8 @@ import {
   gisMarkers,
   gisRoutes,
   mapBeatsRaw,
+  compartmentsMock,
+  zeroPatrolZones,
 } from "@/lib/mock/gis";
 import {
   beatCoverage,
@@ -54,6 +56,25 @@ import {
   mockUsers,
 } from "@/lib/mock/admin";
 import { mockDivisions, mockRanges } from "@/lib/mock/hierarchy";
+import {
+  api,
+  clearTokens,
+  hasSession,
+  isRetryableFailure,
+  setTokens,
+  type ApiUser,
+} from "@/lib/api";
+import {
+  adminUserFromApi,
+  beatsFromGeoJson,
+  compartmentsFromGeoJson,
+  observationFromApi,
+  patrolFromApi,
+  registerRoleFromWeb,
+  unionExtent,
+  type CompartmentPolygon,
+  type GeoExtent,
+} from "@/lib/backend-adapters";
 import type {
   AnalyticsDataset,
   AdminUser,
@@ -80,22 +101,73 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
+import type { ApiMapAsset } from "@/lib/api";
+import type { BeatPolygon } from "@/lib/mock/gis";
 
 const delay = (ms = 300) => new Promise<void>((r) => setTimeout(r, ms));
+
+/**
+ * Run the backend call when reachable; fall back to the in-browser mock
+ * only on transport-level failures (backend down) or missing session (401).
+ * Business errors (403/404/422…) propagate so bugs surface.
+ */
+const tryRemote = async <T>(remote: () => Promise<T>, fallback: () => Promise<T> | T): Promise<T> => {
+  try {
+    return await remote();
+  } catch (err) {
+    if (isRetryableFailure(err)) return fallback();
+    throw err;
+  }
+};
+
+/* ------------------------------------------------------------------ */
+/* Authentication                                                      */
+/* ------------------------------------------------------------------ */
+
+export const auth = {
+  /** Logs in against the backend and stores access + refresh tokens. */
+  login: async (email: string, password: string): Promise<ApiUser> => {
+    const res = await api.auth.login(email, password);
+    setTokens(res.accessToken, res.refreshToken);
+    return res.user;
+  },
+  logout: async (): Promise<void> => {
+    try {
+      await api.auth.logout();
+    } finally {
+      clearTokens();
+    }
+  },
+  me: (): Promise<ApiUser> => api.auth.me(),
+  changePassword: (currentPassword: string, newPassword: string): Promise<void> =>
+    api.auth.changePassword(currentPassword, newPassword),
+  hasSession: (): boolean => hasSession(),
+};
 
 /* ------------------------------------------------------------------ */
 /* Patrols                                                            */
 /* ------------------------------------------------------------------ */
 
 export const patrols = {
-  list: async (): Promise<Patrol[]> => {
-    await delay();
-    return mockPatrols;
-  },
-  get: async (id: string): Promise<Patrol | undefined> => {
-    await delay();
-    return mockPatrols.find((p) => p.id === id);
-  },
+  list: async (): Promise<Patrol[]> =>
+    tryRemote(
+      async () => (await api.patrols.list()).map(patrolFromApi),
+      async () => {
+        await delay();
+        return mockPatrols;
+      }
+    ),
+  get: async (id: string): Promise<Patrol | undefined> =>
+    tryRemote(
+      async () => {
+        const p = await api.patrols.get(id);
+        return patrolFromApi(p);
+      },
+      async () => {
+        await delay();
+        return mockPatrols.find((p) => p.id === id);
+      }
+    ),
   byStatus: async (status: PatrolStatus): Promise<Patrol[]> => {
     await delay();
     return mockPatrols.filter((p) => p.status === status);
@@ -332,21 +404,41 @@ const observationRecord = (o: Observation): Observation => ({
 });
 
 export const observations = {
-  list: async (): Promise<Observation[]> => {
-    await delay();
-    return mockObservations.map(observationRecord);
-  },
-  get: async (id: string): Promise<Observation | undefined> => {
-    await delay();
-    const o = mockObservations.find((x) => x.id === id);
-    return o ? observationRecord(o) : undefined;
-  },
+  list: async (): Promise<Observation[]> =>
+    tryRemote(
+      async () => (await api.incidents.list()).map(observationFromApi),
+      async () => {
+        await delay();
+        return mockObservations.map(observationRecord);
+      }
+    ),
+  get: async (id: string): Promise<Observation | undefined> =>
+    tryRemote(
+      async () => observationFromApi(await api.incidents.get(id)),
+      async () => {
+        await delay();
+        const o = mockObservations.find((x) => x.id === id);
+        return o ? observationRecord(o) : undefined;
+      }
+    ),
   setStatus: async (id: string, status: Observation["status"]): Promise<Observation | undefined> => {
-    await delay();
-    const o = mockObservations.find((x) => x.id === id);
-    if (!o) return undefined;
-    observationStatusOverrides.set(id, status);
-    return observationRecord(o);
+    // Backend incident lifecycle: resolved → resolve, escalated/under-review → verify.
+    const remote = async () => {
+      const updated =
+        status === "resolved"
+          ? await api.incidents.resolve(id, "Resolved from admin portal")
+          : await api.incidents.verify(id);
+      return observationFromApi(updated);
+    };
+    const local = async () => {
+      await delay();
+      const o = mockObservations.find((x) => x.id === id);
+      if (!o) return undefined;
+      observationStatusOverrides.set(id, status);
+      return observationRecord(o);
+    };
+    if (status === "open") return local();
+    return tryRemote(remote, local);
   },
   categoryMeta,
 };
@@ -373,6 +465,16 @@ export const dashboard = {
     const count = (s: JurisdictionState) => jurisdiction.filter((x) => x === s).length;
     const todayJurisdiction = today.map((p) => resolveJurisdiction(p, authStore).state);
     const activeAuthorizations = authStore.filter((a) => a.status === "active").length;
+    // GIS figures come from the live beat layer (falls back to the mock grid).
+    const beats = await gis.beats();
+    const covered = beats.filter((b) => Number.isFinite(b.coveragePct) && b.coveragePct > 0);
+    const coveragePct =
+      covered.length > 0
+        ? Math.round(covered.reduce((a, b) => a + b.coveragePct, 0) / covered.length)
+        : 82;
+    const zeroPatrolList = beats
+      .filter((b) => b.isZeroPatrol ?? zeroPatrolZones.includes(b.id))
+      .map((b) => ({ beat: b.name, days: 14 }));
     return {
       activePatrols: active,
       patrolsStartedToday,
@@ -389,13 +491,14 @@ export const dashboard = {
         (r) => r.dutyStatus === "field" || r.dutyStatus === "on-duty"
       ).length,
       rangersTotal: mockRangers.length,
-      coveragePct: 82,
-      zeroPatrolZones: 3,
-      zeroPatrolList: [
-        { beat: "C1-B", days: 16 },
-        { beat: "S1-B", days: 21 },
-        { beat: "N2-B", days: 13 },
-      ],
+      coveragePct,
+      coverageToday: Math.min(100, coveragePct + 5),
+      patrolsTotal: mockPatrols.length,
+      normalTotal: count("normal"),
+      authorizedTotal: count("authorized-exception"),
+      incidentsTotal: mockObservations.length,
+      zeroPatrolZones: zeroPatrolList.length,
+      zeroPatrolList,
       byStatus: [
         { status: "planned", count: 2 },
         { status: "assigned", count: 0 },
@@ -434,7 +537,44 @@ export const gis = {
     await delay();
     return defaultLayers.map((l) => ({ ...l }));
   },
-  beats: () => [...mapBeatsRaw],
+  /**
+   * Beats + compartments from the backend GIS API (GeoJSON → SVG polygons,
+   * viewBox 1000×700). Both collections project with ONE shared extent so the
+   * layers align in the same map space; falls back to mocks/[] when the
+   * backend is unreachable or the tables are empty.
+   */
+  spatial: async (): Promise<{ beats: BeatPolygon[]; compartments: CompartmentPolygon[] }> => {
+    const fallback = { beats: [...mapBeatsRaw], compartments: compartmentsMock };
+    try {
+      const [beatFc, compFc] = await Promise.all([api.gis.beats(), api.gis.compartments()]);
+      const extent: GeoExtent | null = unionExtent(beatFc, compFc);
+      return {
+        beats: beatsFromGeoJson(beatFc, extent),
+        compartments: compartmentsFromGeoJson(compFc, extent),
+      };
+    } catch (err) {
+      if (isRetryableFailure(err)) return fallback;
+      throw err;
+    }
+  },
+  beats: async (): Promise<BeatPolygon[]> => {
+    const s = await gis.spatial();
+    return s.beats.length > 0 ? s.beats : [...mapBeatsRaw];
+  },
+  /** Compartments from the backend GIS API (GeoJSON → SVG polygons). */
+  compartments: async (): Promise<CompartmentPolygon[]> => {
+    const s = await gis.spatial();
+    return s.compartments;
+  },
+  /** Map asset catalog (MBTiles atlases etc.) from the backend. */
+  assets: async (): Promise<ApiMapAsset[]> => {
+    try {
+      return await api.gis.assets();
+    } catch (err) {
+      if (isRetryableFailure(err)) return [];
+      throw err;
+    }
+  },
   markers: () => [...gisMarkers],
   routes: () => [...gisRoutes],
   heat: () => [...gisHeat],
@@ -538,10 +678,14 @@ const roleRecord = (id: string): Role | undefined => {
 };
 
 export const admin = {
-  users: async (): Promise<AdminUser[]> => {
-    await delay();
-    return [...mockUsers.filter((u) => !removedUserIds.has(u.id)).map((u) => ({ ...u, status: userStatusOverrides.get(u.id) ?? u.status })), ...createdUsers];
-  },
+  users: async (): Promise<AdminUser[]> =>
+    tryRemote(
+      async () => (await api.users.list()).map(adminUserFromApi),
+      async () => {
+        await delay();
+        return [...mockUsers.filter((u) => !removedUserIds.has(u.id)).map((u) => ({ ...u, status: userStatusOverrides.get(u.id) ?? u.status })), ...createdUsers];
+      }
+    ),
   roles: async (): Promise<Role[]> => {
     await delay();
     return [...mockRoles.filter((r) => !removedRoleIds.has(r.id)).map((r) => ({ ...r, ...roleUpdates.get(r.id) })), ...createdRoles];
@@ -575,33 +719,70 @@ export const admin = {
     await delay();
     templateEnabledOverride.set(id, enabled);
   },
-  createUser: async (input: { name: string; email: string; roleId: string; division?: string }): Promise<AdminUser> => {
-    await delay();
-    const id = `u-created-${String(createdUsers.length + 1)}`;
-    const record: AdminUser = {
-      id,
-      name: input.name,
-      email: input.email,
-      roleId: input.roleId,
-      status: "invited",
-      division: input.division ?? "d-north",
-      created: new Date().toISOString().slice(0, 10),
-    };
-    createdUsers.unshift(record);
-    return record;
-  },
+  /**
+   * Onboarding: backend has no "invite" concept — the user is created as an
+   * active account via the admin-gated register endpoint (temporary password).
+   */
+  createUser: async (input: { name: string; email: string; roleId: string; division?: string }): Promise<AdminUser> =>
+    tryRemote(
+      async () => {
+        const created = await api.auth.register({
+          email: input.email,
+          password: `Nstr@${Date.now().toString(36)}`,
+          fullName: input.name,
+          role: registerRoleFromWeb(input.roleId),
+        });
+        return adminUserFromApi(created);
+      },
+      async () => {
+        await delay();
+        const id = `u-created-${String(createdUsers.length + 1)}`;
+        const record: AdminUser = {
+          id,
+          name: input.name,
+          email: input.email,
+          roleId: input.roleId,
+          status: "invited",
+          division: input.division ?? "d-north",
+          created: new Date().toISOString().slice(0, 10),
+        };
+        createdUsers.unshift(record);
+        return record;
+      }
+    ),
   setUserStatus: async (id: string, status: AdminUser["status"]): Promise<AdminUser | undefined> => {
-    await delay();
-    if (!userRecord(id)) return undefined;
-    userStatusOverrides.set(id, status);
-    return userRecord(id);
+    if (status === "invited") {
+      await delay();
+      if (!userRecord(id)) return undefined;
+      userStatusOverrides.set(id, status);
+      return userRecord(id);
+    }
+    const remote = async () => {
+      const updated =
+        status === "active" ? await api.users.activate(id) : await api.users.deactivate(id);
+      return adminUserFromApi(updated);
+    };
+    const local = async () => {
+      await delay();
+      if (!userRecord(id)) return undefined;
+      userStatusOverrides.set(id, status);
+      return userRecord(id);
+    };
+    return tryRemote(remote, local);
   },
-  removeUser: async (id: string): Promise<boolean> => {
-    await delay();
-    if (!userRecord(id)) return false;
-    removedUserIds.add(id);
-    return true;
-  },
+  removeUser: async (id: string): Promise<boolean> =>
+    tryRemote(
+      async () => {
+        await api.users.deactivate(id);
+        return true;
+      },
+      async () => {
+        await delay();
+        if (!userRecord(id)) return false;
+        removedUserIds.add(id);
+        return true;
+      }
+    ),
   createRole: async (input: { name: string; description: string; permissions: Role["permissions"] }): Promise<Role> => {
     await delay();
     const id = `role-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;

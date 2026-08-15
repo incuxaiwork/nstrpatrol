@@ -106,9 +106,51 @@ export const gisHeat: HeatBlock[] = [
 
 export const zeroPatrolZones = ["b-c1b", "b-s1b", "b-n2b"];
 
+export interface CompartmentPolygonMock {
+  id: string;
+  compNo: string;
+  beat: string;
+  points: string; // SVG polygon points
+  areaHa: number;
+}
+
+/**
+ * Mock compartment (PSZ) boundaries — each beat is subdivided into a small
+ * grid so the compartment layer renders even when the backend GIS API is
+ * unreachable. Mirrors CompartmentPolygon from backend-adapters.
+ */
+export const compartmentsMock: CompartmentPolygonMock[] = mapBeatsRaw.flatMap((b, bi) => {
+  const pts = b.points.split(" ").map((p) => p.split(",").map(Number));
+  const [x1, y1] = pts[0];
+  const [x2, y2] = pts[2];
+  const cols = 3;
+  const rows = 2;
+  const cellW = (x2 - x1) / cols;
+  const cellH = (y2 - y1) / rows;
+  const cells: CompartmentPolygonMock[] = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cx1 = x1 + c * cellW;
+      const cy1 = y1 + r * cellH;
+      const cx2 = cx1 + cellW;
+      const cy2 = cy1 + cellH;
+      cells.push({
+        id: `mc-b${bi}-${r}-${c}`,
+        compNo: `${b.name}/${r + 1}-${c + 1}`,
+        beat: b.id,
+        points: `${cx1},${cy1} ${cx2},${cy1} ${cx2},${cy2} ${cx1},${cy2}`,
+        areaHa: Math.round(24 + ((bi * 7 + r * 5 + c * 3) % 40)),
+      });
+    }
+  }
+  return cells;
+});
+
 export const defaultLayers: MapLayerDef[] = [
   { id: "basemap", name: "Basemap / boundaries", group: "basemap", visible: true, color: "#1F4626" },
   { id: "beats", name: "Beat boundaries", group: "basemap", visible: true, color: "#37554a" },
+  { id: "ranges", name: "Range boundaries", group: "basemap", visible: true, color: "#0E4C92" },
+  { id: "compartments", name: "Compartment boundaries", group: "basemap", visible: true, color: "#E65100" },
   { id: "water", name: "Water bodies", group: "basemap", visible: true, color: "#1B365D" },
   { id: "roads", name: "Patrol trails", group: "basemap", visible: true, color: "#8A7755" },
   { id: "patrols", name: "Active patrols", group: "activity", visible: true, color: "#2E7D32" },

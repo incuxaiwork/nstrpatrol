@@ -11,7 +11,7 @@
 import Link from "next/link";
 import { useCallback, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { patrols } from "@/lib/services";
+import { gis, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { StatRow } from "@/components/data";
@@ -29,6 +29,7 @@ export default function PatrolReplayPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
+  const spatial = useAsyncData(() => gis.spatial());
 
   const [playback, setPlayback] = useState(0);
   const [seek, setSeek] = useState<{ key: number; value: number } | null>(null);
@@ -68,7 +69,7 @@ export default function PatrolReplayPage() {
     setPlayback(f);
   };
 
-  if (loading || !patrol) return <SkeletonRows rows={8} />;
+  if (loading || !patrol || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   return (
@@ -112,6 +113,8 @@ export default function PatrolReplayPage() {
                 heightClass="h-[420px]"
                 replayPatrolId={patrol.id}
                 replayPoints={patrol.route}
+                liveBeats={spatial.data.beats}
+                compartments={spatial.data.compartments}
                 onProgress={(p) => setPlayback(p)}
                 seekSignal={seek}
                 onSelect={() => undefined}

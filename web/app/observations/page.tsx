@@ -19,7 +19,7 @@ import { severityLabel, severityTone, observationStatusLabel, observationStatusT
 import { categoryMeta } from "@/lib/mock/observations";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
-import type { ObservationCategory } from "@/lib/types";
+
 
 const categoryIcon: Record<string, IconName> = {
   wildlife: "paw",
@@ -58,6 +58,11 @@ export default function ObservationsDashboardPage() {
 
   const critical = data.filter((o) => o.severity === "critical");
   const open = data.filter((o) => o.status === "open" || o.status === "under-review");
+  const escalated = data.filter((o) => o.status === "escalated");
+  const resolved = data.filter((o) => o.status === "resolved");
+  const withMedia = data.filter((o) => o.media?.length);
+  const isToday = (t: string) => new Date(t).toDateString() === new Date().toDateString();
+  const countToday = (items: { recordedAt: string }[]) => items.filter((o) => isToday(o.recordedAt)).length;
 
   return (
     <div>
@@ -68,31 +73,34 @@ export default function ObservationsDashboardPage() {
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-6">
-        <KpiCard label="Total reports" value={data.length} icon="file" tone="forest" onClick={() => router.push("/observations/list")} />
-        <KpiCard label="Open / review" value={open.length} icon="clock" tone="info" onClick={() => setStatus("open")} />
-        <KpiCard label="Critical" value={critical.length} icon="alert" tone="danger" onClick={() => setSeverity("critical")} />
-        <KpiCard label="Escalated" value={data.filter((o) => o.status === "escalated").length} icon="sos" tone="danger" />
-        <KpiCard label="Resolved" value={data.filter((o) => o.status === "resolved").length} icon="check" tone="success" />
-        <KpiCard label="With media" value={data.filter((o) => o.media?.length).length} icon="camera" tone="khaki" />
+        <KpiCard label="Total reports" value={data.length} icon="file" tone="forest" tillDate={data.length} today={countToday(data)} onClick={() => router.push("/observations/list")} />
+        <KpiCard label="Open / review" value={open.length} icon="clock" tone="info" tillDate={open.length} today={countToday(open)} onClick={() => setStatus("open")} />
+        <KpiCard label="Critical" value={critical.length} icon="alert" tone="danger" tillDate={critical.length} today={countToday(critical)} onClick={() => setSeverity("critical")} />
+        <KpiCard label="Escalated" value={escalated.length} icon="sos" tone="danger" tillDate={escalated.length} today={countToday(escalated)} />
+        <KpiCard label="Resolved" value={resolved.length} icon="check" tone="success" tillDate={resolved.length} today={countToday(resolved)} />
+        <KpiCard label="With media" value={withMedia.length} icon="camera" tone="khaki" tillDate={withMedia.length} today={countToday(withMedia)} />
       </div>
 
       {/* Category cards */}
-      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        {Object.entries(categoryMeta).map(([key, meta]) => (
-          <button
-            key={key}
-            onClick={() => router.push(`/observations/list?category=${key}`)}
-            className="flex items-center gap-2.5 rounded-card border border-line bg-white p-3.5 shadow-card transition-colors hover:border-forest-600"
-          >
-            <span className="flex size-9 items-center justify-center rounded-lg text-white" style={{ background: meta.color }}>
-              <Icon name={categoryIcon[key] ?? "binoculars"} size={16} />
-            </span>
-            <span className="min-w-0 text-left">
-              <span className="block truncate text-xs font-medium text-ink">{meta.plural}</span>
-              <span className="block text-lg font-semibold leading-tight text-ink">{byCategory[key] ?? 0}</span>
-            </span>
-          </button>
-        ))}
+      <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {(["human-impact", "mortality", "wildlife", "water-body"] as const).map((key) => {
+          const meta = categoryMeta[key];
+          return (
+            <button
+              key={key}
+              onClick={() => router.push(`/observations/list?category=${key}`)}
+              className="flex items-center gap-2.5 rounded-card border border-line bg-white p-3.5 shadow-card transition-colors hover:border-forest-600"
+            >
+              <span className="flex size-9 items-center justify-center rounded-lg text-white" style={{ background: meta.color }}>
+                <Icon name={categoryIcon[key] ?? "binoculars"} size={16} />
+              </span>
+              <span className="min-w-0 text-left">
+                <span className="block truncate text-xs font-medium text-ink">{meta.plural}</span>
+                <span className="block text-lg font-semibold leading-tight text-ink">{byCategory[key] ?? 0}</span>
+              </span>
+            </button>
+          );
+        })}
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
@@ -151,7 +159,7 @@ export default function ObservationsDashboardPage() {
           <Card>
             <CardHeader title="Category distribution" icon="layers" subtitle="Share of each report category" />
             <div className="space-y-2.5 p-4">
-              {(Object.keys(categoryMeta) as ObservationCategory[]).map((key) => {
+              {(["human-impact", "mortality", "wildlife", "water-body"] as const).map((key) => {
                 const n = byCategory[key] ?? 0;
                 return (
                   <div key={key} className="flex items-center gap-2">

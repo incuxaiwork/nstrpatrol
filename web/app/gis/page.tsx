@@ -9,27 +9,61 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { gis } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
+import { api } from "@/lib/api";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
-import { MapWorkspace, LayerManager, MapSidebarFacts } from "@/components/map";
+import { GLMapWorkspace } from "@/components/gl-map";
+import { LayerManager, MapSidebarFacts } from "@/components/map";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { unitName } from "@/lib/mock/hierarchy";
-import { zeroPatrolZones, gisMarkers } from "@/lib/mock/gis";
+import { zeroPatrolZones, gisMarkers, gisRoutes } from "@/lib/mock/gis";
 import { mockRangers } from "@/lib/mock/people";
 import { mockObservations, categoryMeta } from "@/lib/mock/observations";
 import { stamp, exportRows } from "@/lib/export";
+
+function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
+  return b.isZeroPatrol ?? zeroPatrolZones.includes(b.id);
+}
 
 function heatTone(v: number): number {
   return 0.12 + v * 0.55;
 }
 
-function selectedDetail(selected: string | null, beats: { id: string; name: string; coveragePct: number }[]) {
+function selectedDetail(
+  selected: string | null,
+  beats: { id: string; name: string; coveragePct: number }[],
+  comps: { id: string; compNo: string; beat: string; areaHa: number }[]
+) {
   if (!selected) return null;
+  const route = gisRoutes.find((r) => r.id === selected);
+  if (route) {
+    return {
+      kind: "route" as const,
+      title: route.label,
+      body: `${route.patrolId} · ${route.status}`,
+      href: `/patrols/${route.patrolId}`,
+      cta: "Open patrol",
+      tone: "neutral" as const,
+      tag: "Patrol route",
+    };
+  }
+  const comp = comps.find((c) => c.id === selected);
+  if (comp) {
+    return {
+      kind: "compartment" as const,
+      title: `Compartment ${comp.compNo}`,
+      body: `${comp.areaHa > 0 ? comp.areaHa + " ha · " : ""}${comp.beat || "beat not mapped"}`,
+      href: "/gis",
+      cta: "Dismiss",
+      tone: "neutral" as const,
+      tag: "Compartment",
+    };
+  }
   const beat = beats.find((b) => b.id === selected);
   if (beat) {
-    const zero = zeroPatrolZones.includes(beat.id);
+    const zero = beatIsZero(beat);
     return {
       kind: "beat" as const,
       title: `${unitName(beat.id)} beat`,
@@ -104,16 +138,26 @@ function selectedDetail(selected: string | null, beats: { id: string; name: stri
 
 export default function GisPage() {
   const layersData = useAsyncData(() => gis.layers());
+  // Beats come from the backend GIS API (GeoJSON → SVG) with a mock fallback.
+  const beatsData = useAsyncData(() => gis.beats());
+  const assetsData = useAsyncData(() => gis.assets());
   const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
-  const [replayPatrol, setReplayPatrol] = useState<string | null>("p-2026-0118");
+  // No patrol preselected — play/pause appears only after the admin picks one.
+  const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
 
   const routes = useMemo(() => gis.routes(), []);
-  const beats = useMemo(() => gis.beats(), []);
   const heat = useMemo(() => gis.heat(), []);
+  const compartmentsData = useAsyncData(() => gis.compartments());
 
-  if (layersData.loading || !layersData.data) return <SkeletonRows rows={8} />;
+  if (layersData.loading || !layersData.data || beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data)
+    return <SkeletonRows rows={8} />;
   if (layersData.error) return <ErrorState message={layersData.error.message} onRetry={layersData.reload} />;
+  if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
+  if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
+
+  const beats = beatsData.data;
+  const compartments = compartmentsData.data;
 
   const layers = layersData.data.map((l) => ({
     ...l,
@@ -122,8 +166,19 @@ export default function GisPage() {
   const onToggle = (id: string) =>
     setVisibility((v) => ({ ...v, [id]: !(v[id] ?? layers.find((l) => l.id === id)!.visible) }));
 
-const zeroPatrolBeats = beats.filter((b) => zeroPatrolZones.includes(b.id));
-  const detail = selectedDetail(selected, beats);
+  // Selecting a patrol route on the map arms the replay for that patrol.
+  const handleSelect = (id: string | null) => {
+    if (!id) {
+      setSelected(null);
+      return;
+    }
+    const route = routes.find((r) => r.id === id);
+    if (route) setReplayPatrol(route.patrolId);
+    setSelected(id);
+  };
+
+  const zeroPatrolBeats = beats.filter((b) => beatIsZero(b));
+  const detail = selectedDetail(selected, beats, compartments);
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `gis-catalog-${stamp()}`, [
@@ -139,6 +194,13 @@ const zeroPatrolBeats = beats.filter((b) => zeroPatrolZones.includes(b.id));
         kind: "zero-patrol-beat",
         label: unitName(b.id),
         coveragePct: b.coveragePct,
+      })),
+      ...compartments.map((c) => ({
+        id: c.id,
+        kind: "compartment",
+        label: c.compNo,
+        beat: c.beat,
+        areaHa: c.areaHa,
       })),
     ]);
   };
@@ -164,12 +226,14 @@ const zeroPatrolBeats = beats.filter((b) => zeroPatrolZones.includes(b.id));
       <div className="grid gap-4 xl:grid-cols-4">
         <div className="xl:col-span-3">
           <Card className="overflow-hidden">
-            <MapWorkspace
+            <GLMapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
               layers={layers}
+              liveBeats={beats}
+              compartments={compartments}
               selectedId={selected}
-              onSelect={setSelected}
+              onSelect={handleSelect}
               replayPatrolId={replayPatrol}
               headerActions={<LayerManager layers={layers} onToggle={onToggle} />}
               detailCard={detail ? <SelectedCard detail={detail} onClose={() => setSelected(null)} /> : undefined}
@@ -179,6 +243,35 @@ const zeroPatrolBeats = beats.filter((b) => zeroPatrolZones.includes(b.id));
 
         <div className="space-y-4">
           <MapSidebarFacts />
+
+          {assetsData.data && assetsData.data.length > 0 && (
+            <Card>
+              <CardHeader
+                title="Map assets"
+                icon="layers"
+                subtitle={`${assetsData.data.length} file(s) served by the backend GIS API`}
+              />
+              <div className="space-y-1.5 p-4">
+                {assetsData.data.map((a) => (
+                  <a
+                    key={a.id}
+                    href={api.gis.asset(a.resourceKey)}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-forest-50"
+                  >
+                    <Icon name="file" size={15} className="text-forest-700" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-sm text-ink">{a.resourceKey}</span>
+                      <span className="block text-xs text-ink-soft">
+                        {a.contentType} · {Math.round(a.sizeBytes / 1024)} KB · v{a.version}
+                      </span>
+                    </span>
+                  </a>
+                ))}
+              </div>
+            </Card>
+          )}
 
           <Card>
             <CardHeader title="Route playback" icon="play" subtitle="Replay a completed patrol trace" />

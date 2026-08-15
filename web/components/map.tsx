@@ -19,6 +19,8 @@ import {
   zeroPatrolZones,
   type BeatPolygon,
 } from "@/lib/mock/gis";
+import { rangesFromBeats } from "@/lib/map-space";
+import type { CompartmentPolygon } from "@/lib/backend-adapters";
 import { unitName } from "@/lib/mock/hierarchy";
 import type { MapLayerDef } from "@/lib/types";
 import { mockRangers } from "@/lib/mock/people";
@@ -49,6 +51,8 @@ export interface MapProps {
   /** External seek: bump this value to jump the replay to a fraction. */
   seekSignal?: { key: number; value: number } | null;
   liveBeats?: BeatPolygon[];
+  /** Compartment boundaries (GeoJSON → SVG polygons from the backend). */
+  compartments?: CompartmentPolygon[];
   headerActions?: React.ReactNode;
   /** Popup card rendered over the map (bottom-right) when a feature is selected. */
   detailCard?: React.ReactNode;
@@ -64,6 +68,7 @@ export function MapWorkspace({
   onProgress,
   seekSignal,
   liveBeats,
+  compartments,
   headerActions,
   detailCard,
 }: MapProps) {
@@ -73,6 +78,8 @@ export function MapWorkspace({
   const [progress, setProgress] = useState(0);
   const [legendOpen, setLegendOpen] = useState(false);
   const beats = liveBeats ?? mapBeatsRaw;
+  const ranges = useMemo(() => rangesFromBeats(beats), [beats]);
+  const comps = compartments ?? [];
 
   const [prevSeek, setPrevSeek] = useState(seekSignal);
   if (prevSeek !== seekSignal && seekSignal) {
@@ -87,7 +94,7 @@ export function MapWorkspace({
     return (id: string) => (layers ? (map.get(id) ?? true) : true);
   }, [layers]);
 
-  const isZero = (b: BeatPolygon) => zeroPatrolZones.includes(b.id);
+  const isZero = (b: BeatPolygon) => b.isZeroPatrol ?? zeroPatrolZones.includes(b.id);
 
   const replayRoute = useMemo(() => {
     if (!replayPatrolId) return undefined;
@@ -148,10 +155,15 @@ export function MapWorkspace({
           <Icon name="map" size={14} className="text-forest-700" />
           <span>NSTR Forest — operational view</span>
         </div>
-        {headerActions}
       </div>
 
-      <div className={cn("relative flex-1 overflow-hidden", heightClass)}>
+      <div className={cn("relative overflow-hidden", heightClass)}>
+        {/* layer panel (header actions) — absolute so it never sizes the map */}
+        {headerActions && (
+          <div className="absolute left-3 top-3 z-10 max-h-[75%] w-56 overflow-y-auto rounded-md border border-line bg-white/95 p-2 shadow-card">
+            {headerActions}
+          </div>
+        )}
         <svg
           viewBox={`0 0 ${VIEW.w} ${VIEW.h}`}
           className="h-full w-full"
@@ -222,6 +234,64 @@ export function MapWorkspace({
                 >
                   <title>{`${b.name} — ${b.coveragePct}% coverage`}</title>
                 </polygon>
+              ))}
+
+            {/* range boundaries — dashed hull enclosing each range's beats */}
+            {visible("ranges") &&
+              ranges.map((r) => (
+                <g key={r.id} className="pointer-events-none">
+                  <polygon
+                    points={r.points}
+                    fill="none"
+                    stroke={r.color}
+                    strokeWidth="2.5"
+                    strokeDasharray="9 5"
+                    opacity="0.9"
+                  />
+                  <text
+                    x={midX(r)}
+                    y={midY(r)}
+                    textAnchor="middle"
+                    fontSize="19"
+                    fontWeight="800"
+                    fill={r.color}
+                    paintOrder="stroke"
+                    stroke="#ffffff"
+                    strokeWidth="4"
+                    strokeLinejoin="round"
+                  >
+                    {r.name}
+                  </text>
+                </g>
+              ))}
+
+            {/* compartment boundaries */}
+            {visible("compartments") &&
+              comps.map((c) => (
+                <g key={c.id} className="pointer-events-none">
+                  <polygon
+                    points={c.points}
+                    fill="#E65100"
+                    opacity="0.1"
+                    stroke="#E65100"
+                    strokeWidth="1"
+                  >
+                    <title>{`Compartment ${c.compNo} · ${c.areaHa} ha · ${c.beat}`}</title>
+                  </polygon>
+                  <text
+                    x={midX(c)}
+                    y={midY(c)}
+                    textAnchor="middle"
+                    fontSize="9"
+                    fill="#8a4b00"
+                    paintOrder="stroke"
+                    stroke="#ffffff"
+                    strokeWidth="2.5"
+                    strokeLinejoin="round"
+                  >
+                    {c.compNo}
+                  </text>
+                </g>
               ))}
 
             {/* beat polygons */}
@@ -409,6 +479,8 @@ export function MapWorkspace({
               <LegendRow color="#FF8F00" label="Incident" />
               <LegendRow color="#B3261E" dashed label="Zero patrol zone" />
               <LegendRow color="#FF8F00" dashed label="Authorization area" />
+              <LegendRow color="#0E4C92" dashed label="Range boundary" />
+              <LegendRow color="#E65100" label="Compartment boundary" />
               <LegendRow color="#9db8c9" label="Water body" />
             </div>
           )}
@@ -497,11 +569,11 @@ function LegendRow({ color, label, dashed }: { color: string; label: string; das
   );
 }
 
-const midX = (b: BeatPolygon) => {
+const midX = (b: { points: string }) => {
   const xs = b.points.split(" ").map((p) => Number(p.split(",")[0]));
   return (Math.min(...xs) + Math.max(...xs)) / 2;
 };
-const midY = (b: BeatPolygon) => {
+const midY = (b: { points: string }) => {
   const ys = b.points.split(" ").map((p) => Number(p.split(",")[1]));
   return (Math.min(...ys) + Math.max(...ys)) / 2;
 };

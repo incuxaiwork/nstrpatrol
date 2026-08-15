@@ -11,7 +11,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { authorizations, patrols } from "@/lib/services";
+import { authorizations, gis, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone } from "@/components/ui";
@@ -33,6 +33,7 @@ export default function PatrolDetailPage() {
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
   const auths = useAsyncData(() => authorizations.list());
+  const spatial = useAsyncData(() => gis.spatial());
   const [exportOpen, setExportOpen] = useState(false);
 
   const jurisdiction = useMemo(
@@ -40,7 +41,7 @@ export default function PatrolDetailPage() {
     [patrol, auths.data]
   );
 
-  if (loading || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
+  if (loading || auths.loading || !auths.data || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
   if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the mock records")} />;
 
@@ -102,12 +103,15 @@ export default function PatrolDetailPage() {
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
-            <CardHeader title="Route & live position" icon="map" subtitle="Mock trace — real GPS feed replaces this in production" />
+            <CardHeader title="Route & live position" icon="map" subtitle="Press play to replay the patrol trace" />
             <div className="p-3">
               <MapWorkspace
                 mode="overview"
                 heightClass="h-[300px]"
                 replayPatrolId={patrol.id}
+                replayPoints={patrol.route}
+                liveBeats={spatial.data.beats}
+                compartments={spatial.data.compartments}
                 onSelect={() => undefined}
               />
             </div>

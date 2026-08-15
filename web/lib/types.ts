@@ -323,6 +323,11 @@ export interface DashboardSummary {
   rangersOnDuty: number;
   rangersTotal: number;
   coveragePct: number;
+  coverageToday: number;
+  patrolsTotal: number;
+  normalTotal: number;
+  authorizedTotal: number;
+  incidentsTotal: number;
   zeroPatrolZones: number;
   zeroPatrolList: { beat: string; days: number }[];
   byStatus: { status: PatrolStatus; count: number }[];

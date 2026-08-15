@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { dashboard } from "@/lib/services";
+import { dashboard, gis } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard } from "@/components/data";
@@ -40,8 +40,10 @@ export default function DashboardPage() {
   const router = useRouter();
   const { pushToast, scope } = useApp();
   const { data, error, loading, reload } = useAsyncData(() => dashboard.summary());
+  // Live boundaries for the GIS overview card (backend GeoJSON, mock fallback).
+  const spatial = useAsyncData(() => gis.spatial());
 
-  if (loading || !data) {
+  if (loading || !data || spatial.loading || !spatial.data) {
     return <DashboardSkeleton />;
   }
   if (error) {
@@ -104,12 +106,12 @@ export default function DashboardPage() {
 
       {/* KPI row */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Active patrols" value={data.activePatrols} icon="route" tone="success" onClick={() => router.push("/patrols")} />
-        <KpiCard label="Normal patrols today" value={data.normalToday} icon="check" tone="forest" onClick={() => router.push("/patrols?area=normal")} />
-        <KpiCard label="Authorized patrols today" value={data.authorizedToday} icon="lock" tone="info" onClick={() => router.push("/patrols?area=authorized")} />
-        <KpiCard label="Open incidents" value={data.openIncidents} icon="alert" tone="danger" onClick={() => router.push("/observations")} />
-        <KpiCard label="Rangers on duty" value={`${data.rangersOnDuty}/${data.rangersTotal}`} icon="users" tone="khaki" onClick={() => router.push("/rangers")} />
-        <KpiCard label="Coverage" value={data.coveragePct} unit="%" icon="target" tone="warning" onClick={() => router.push("/gis")} />
+        <KpiCard label="Active patrols" value={data.activePatrols} icon="route" tone="success" tillDate={data.patrolsTotal} today={data.activePatrols} onClick={() => router.push("/patrols")} />
+        <KpiCard label="Normal patrols" value={data.normalToday} icon="check" tone="forest" tillDate={data.normalTotal} today={data.normalToday} onClick={() => router.push("/patrols?area=normal")} />
+        <KpiCard label="Authorized patrols" value={data.authorizedToday} icon="lock" tone="info" tillDate={data.authorizedTotal} today={data.authorizedToday} onClick={() => router.push("/patrols?area=authorized")} />
+        <KpiCard label="Open incidents" value={data.openIncidents} icon="alert" tone="danger" tillDate={data.incidentsTotal} today={data.openIncidents} onClick={() => router.push("/observations")} />
+        <KpiCard label="Rangers on duty" value={data.rangersOnDuty} unit={`/${data.rangersTotal}`} icon="users" tone="khaki" tillDate={data.rangersTotal} today={data.rangersOnDuty} onClick={() => router.push("/rangers")} />
+        <KpiCard label="Coverage" value={data.coveragePct} unit="%" icon="target" tone="warning" tillDate={`${data.coveragePct}%`} today={`${data.coverageToday}%`} onClick={() => router.push("/gis")} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -129,6 +131,8 @@ export default function DashboardPage() {
             <MapWorkspace
               mode="overview"
               heightClass="h-[340px]"
+              liveBeats={spatial.data.beats}
+              compartments={spatial.data.compartments}
               onSelect={(id) => {
                 if (id && id.startsWith("m")) pushToast("info", "Map selection", `Selected map item ${id}`);
               }}
@@ -414,7 +418,7 @@ function DashboardSkeleton() {
       <div className="h-8 w-48 animate-pulse rounded bg-zinc-200" />
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         {Array.from({ length: 6 }).map((_, i) => (
-          <div key={i} className="h-24 animate-pulse rounded-card border border-line bg-white" />
+          <div key={i} className="h-32 animate-pulse rounded-card border border-line bg-white" />
         ))}
       </div>
       <div className="grid gap-4 xl:grid-cols-3">
