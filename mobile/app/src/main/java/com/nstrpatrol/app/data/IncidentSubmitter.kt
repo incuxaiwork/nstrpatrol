@@ -11,6 +11,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.Locale
 import java.util.UUID
 
 /**
@@ -69,3 +70,9 @@ fun lastKnownLocation(context: Context): Pair<Double, Double>? {
     }
     return null
 }
+
+/** Human-readable captured-coordinate string for the "Captured" panel, or null. */
+fun capturedLocationText(context: Context): String? =
+    lastKnownLocation(context)?.let { (lat, lon) ->
+        String.format(Locale.US, "%.4f° N, %.4f° E", lat, lon)
+    }

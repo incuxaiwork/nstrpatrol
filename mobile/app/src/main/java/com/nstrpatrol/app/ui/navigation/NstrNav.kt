@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.navigation
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -71,14 +73,14 @@ sealed class Route(val route: String) {
 
 /** Bottom navigation tabs. */
 enum class BottomTab(
-    val label: String,
+    val labelRes: Int,
     val route: Route
 ) {
-    Home("Home", Route.Dashboard),
-    Maps("Maps", Route.Maps),
-    Patrol("Patrol", Route.AllPatrols),
-    Reports("Reports", Route.Reports),
-    Settings("Settings", Route.Settings)
+    Home(R.string.nav_home, Route.Dashboard),
+    Maps(R.string.nav_maps, Route.Maps),
+    Patrol(R.string.nav_patrol, Route.AllPatrols),
+    Reports(R.string.nav_reports, Route.Reports),
+    Settings(R.string.nav_settings, Route.Settings)
 }
 
 /**

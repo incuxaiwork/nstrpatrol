@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +17,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,7 +29,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nstrpatrol.app.data.LogsData
+import androidx.compose.ui.res.stringResource
+import com.nstrpatrol.app.data.db.IncidentEntity
+import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.time.TimeIntegrityState
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.SectionHeader
@@ -37,33 +46,88 @@ import com.nstrpatrol.app.ui.theme.WarningAmber
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+private data class LogItem(val title: String, val time: String, val level: String)
 
 @Composable
 fun LogsScreen(
     onTabSelected: (BottomTab) -> Unit,
-    timeState: TimeIntegrityState
+    timeState: TimeIntegrityState,
+    dao: TelemetryDao
 ) {
+    var incidents by remember { mutableStateOf(emptyList<IncidentEntity>()) }
+    LaunchedEffect(Unit) {
+        incidents = withContext(Dispatchers.IO) { dao.allIncidents() }
+    }
+
+    val totalLogs = incidents.size
+    val openAlerts = incidents.count { it.status != "RESOLVED" && it.status != "REJECTED" } +
+        if (timeState.tamperDetected) 1 else 0
+    val syncedPct = if (incidents.isEmpty()) 100
+    else (incidents.count { it.syncStatus == "SYNCED" } * 100 / incidents.size)
+
     NstrScaffold(
-        title = "Logs",
-        subtitle = "All field logs & alerts",
+        title = stringResource(R.string.logs_title),
+        subtitle = stringResource(R.string.logs_subtitle),
         activeTab = BottomTab.Patrol,
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            LogStat(value = "124", label = "Total logs", valueColor = ForestGreen, modifier = Modifier.weight(1f))
+            LogStat(value = "$totalLogs", label = stringResource(R.string.logs_total), valueColor = ForestGreen, modifier = Modifier.weight(1f))
             LogStat(
-                value = if (timeState.tamperDetected) "3" else "2",
-                label = "Open alerts",
+                value = "$openAlerts",
+                label = stringResource(R.string.logs_open_alerts),
                 valueColor = ErrorRed,
                 modifier = Modifier.weight(1f)
             )
-            LogStat(value = "98%", label = "Synced", valueColor = ForestGreen, modifier = Modifier.weight(1f))
+            LogStat(value = "$syncedPct%", label = stringResource(R.string.logs_synced), valueColor = ForestGreen, modifier = Modifier.weight(1f))
         }
 
         Spacer(Modifier.height(24.dp))
-        SectionHeader(text = "Recent activity")
+        SectionHeader(text = stringResource(R.string.logs_recent_activity))
         Spacer(Modifier.height(8.dp))
+
+        val items = buildList {
+            if (timeState.tamperDetected) {
+                val stamp = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+                add(
+                    LogItem(
+                        title = if (timeState.gnssTimeAvailable)
+                            stringResource(R.string.logs_tamper_divergence, timeState.divergenceSeconds.toString())
+                        else
+                            stringResource(R.string.logs_tamper_autotime),
+                        time = "Now $stamp",
+                        level = "alert"
+                    )
+                )
+            }
+            incidents.forEach { inc ->
+                val level = when (inc.severity.uppercase()) {
+                    "HIGH" -> "alert"
+                    "MEDIUM" -> "warn"
+                    else -> "info"
+                }
+                add(
+                    LogItem(
+                        title = "${categoryLabel(incidentCategory(inc.type))}: ${inc.title}",
+                        time = SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(inc.occurredAt)),
+                        level = level
+                    )
+                )
+            }
+        }
+
+        if (items.isEmpty()) {
+            Text(
+                text = stringResource(R.string.logs_no_logs),
+                color = TextSecondary,
+                fontSize = 13.sp,
+                modifier = Modifier.padding(vertical = 16.dp)
+            )
+        }
 
         Column(
             modifier = Modifier
@@ -72,22 +136,7 @@ fun LogsScreen(
                 .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
                 .background(Surface)
         ) {
-            val entries = if (timeState.tamperDetected) {
-                val stamp = SimpleDateFormat("HH:mm", Locale.US).format(Date())
-                listOf(
-                    LogsData.LogEntry(
-                        title = if (timeState.gnssTimeAvailable)
-                            "Time tampering detected (clock vs satellite differs ${timeState.divergenceSeconds}s)"
-                        else
-                            "Time tampering detected (device auto-time off)",
-                        time = "Now $stamp",
-                        level = "alert"
-                    )
-                ) + LogsData.entries
-            } else {
-                LogsData.entries
-            }
-            entries.forEachIndexed { index, entry ->
+            items.forEachIndexed { index, entry ->
                 if (index > 0) {
                     Box(
                         Modifier

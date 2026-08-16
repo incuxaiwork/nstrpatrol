@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,6 +25,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.res.stringResource
 import com.nstrpatrol.app.data.Contacts
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.SectionHeader
@@ -36,8 +39,8 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 @Composable
 fun SosScreen(onTabSelected: (BottomTab) -> Unit) {
     NstrScaffold(
-        title = "SOS",
-        subtitle = "Emergency assistance",
+        title = stringResource(R.string.sos_title),
+        subtitle = stringResource(R.string.sos_subtitle),
         activeTab = BottomTab.Home,
         onTabSelected = onTabSelected
     ) {
@@ -62,7 +65,7 @@ fun SosScreen(onTabSelected: (BottomTab) -> Unit) {
             }
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "Tap to send an SOS alert to your patrol team",
+                text = stringResource(R.string.sos_tap),
                 color = TextSecondary,
                 fontSize = 13.sp,
                 textAlign = TextAlign.Center
@@ -70,7 +73,7 @@ fun SosScreen(onTabSelected: (BottomTab) -> Unit) {
 
             Spacer(Modifier.height(24.dp))
             Column(modifier = Modifier.fillMaxWidth()) {
-                SectionHeader(text = "Emergency contacts")
+                SectionHeader(text = stringResource(R.string.sos_emergency_contacts))
                 Spacer(Modifier.height(8.dp))
                 Contacts.list.forEach { contact ->
                     Column(

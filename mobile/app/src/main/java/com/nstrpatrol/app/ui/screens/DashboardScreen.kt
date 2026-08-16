@@ -1,5 +1,7 @@
 package com.nstrpatrol.app.ui.screens
 
+import com.nstrpatrol.app.R
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -29,6 +31,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -98,8 +101,8 @@ fun DashboardScreen(
     val greetingAvatar = user?.initial ?: "R"
 
     NstrScaffold(
-        title = "Dashboard",
-        subtitle = "Good day, $greetingName.",
+        title = stringResource(R.string.dashboard_title),
+        subtitle = stringResource(R.string.dashboard_greeting, greetingName),
         largeTitle = true,
         avatarText = greetingAvatar,
         activeTab = BottomTab.Home,
@@ -125,7 +128,7 @@ fun DashboardScreen(
                     )
                     Spacer(Modifier.size(8.dp))
                     Text(
-                        text = "Time tampering detected",
+                        text = stringResource(R.string.dashboard_tamper_detected),
                         color = ErrorRed,
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold
@@ -134,15 +137,15 @@ fun DashboardScreen(
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = if (timeState.gnssTimeAvailable)
-                        "Device clock differs from satellite time by ${timeState.divergenceSeconds}s."
+                        stringResource(R.string.dashboard_tamper_divergence, timeState.divergenceSeconds.toString())
                     else
-                        "Device auto-time is off. Real time comes from GNSS satellites.",
+                        stringResource(R.string.dashboard_tamper_autotime),
                     color = TextPrimary,
                     fontSize = 12.sp
                 )
                 if (satTimeText != null) {
                     Spacer(Modifier.height(4.dp))
-                    Text(text = "Satellite time: $satTimeText", color = TextSecondary, fontSize = 11.sp)
+                    Text(text = stringResource(R.string.dashboard_satellite_time, satTimeText), color = TextSecondary, fontSize = 11.sp)
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -172,7 +175,7 @@ fun DashboardScreen(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "CURRENT PATROL",
+                        text = stringResource(R.string.dashboard_current_patrol),
                         color = if (activePatrol != null) PaleForest else TextSecondary,
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Medium
@@ -187,20 +190,20 @@ fun DashboardScreen(
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "${activePatrol.beat ?: "Location not set"}  ·  In progress",
+                            text = "${activePatrol.beat ?: stringResource(R.string.dashboard_location_not_set)}  ·  ${stringResource(R.string.dashboard_in_progress)}",
                             color = PaleForest,
                             fontSize = 12.sp
                         )
                     } else {
                         Text(
-                            text = "No active patrol",
+                            text = stringResource(R.string.dashboard_no_active),
                             color = TextPrimary,
                             fontSize = 20.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "Start a patrol to track it here",
+                            text = stringResource(R.string.dashboard_start_patrol_hint),
                             color = TextSecondary,
                             fontSize = 12.sp
                         )
@@ -208,7 +211,7 @@ fun DashboardScreen(
                 }
                 if (activePatrol != null) {
                     Text(
-                        text = "Open ›",
+                        text = stringResource(R.string.dashboard_open),
                         color = PaleForest,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
@@ -232,14 +235,14 @@ fun DashboardScreen(
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatCard(
-                label = "Distance",
+                label = stringResource(R.string.dashboard_distance),
                 value = activity?.distanceMeters?.let {
                     if (it >= 1000) String.format("%.1f km", it / 1000) else String.format("%.0f m", it)
                 } ?: "—",
                 modifier = Modifier.weight(1f)
             )
             StatCard(
-                label = "Patrol duration",
+                label = stringResource(R.string.dashboard_duration),
                 value = durationText,
                 modifier = Modifier.weight(1f)
             )
@@ -247,12 +250,12 @@ fun DashboardScreen(
         Spacer(Modifier.height(4.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatCard(
-                label = "Heart points",
+                label = stringResource(R.string.dashboard_heart_points),
                 value = String.format("%.0f", activity?.heartPointsEstimate ?: 0.0),
                 modifier = Modifier.weight(1f)
             )
             StatCard(
-                label = "Patrols today",
+                label = stringResource(R.string.dashboard_patrols_today),
                 value = "${activity?.patrolCount ?: 0}",
                 modifier = Modifier.weight(1f)
             )
@@ -281,13 +284,13 @@ fun DashboardScreen(
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = "Logs & alerts",
+                    text = stringResource(R.string.dashboard_logs_alerts),
                     color = TextPrimary,
                     fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold
                 )
                 Text(
-                    text = "All field logs & alerts",
+                    text = stringResource(R.string.dashboard_logs_alerts_desc),
                     color = TextSecondary,
                     fontSize = 12.sp
                 )
@@ -296,7 +299,7 @@ fun DashboardScreen(
 
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "Quick actions",
+            text = stringResource(R.string.dashboard_quick_actions),
             color = TextPrimary,
             fontSize = 15.sp,
             fontWeight = FontWeight.SemiBold
@@ -305,7 +308,7 @@ fun DashboardScreen(
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuickActionCard(
-                label = "Start Patrol",
+                label = stringResource(R.string.dashboard_start_patrol),
                 icon = Icons.Filled.PlayArrow,
                 background = ForestGreen,
                 iconTint = Color.White,
@@ -314,7 +317,7 @@ fun DashboardScreen(
                 modifier = Modifier.weight(1f)
             )
             QuickActionCard(
-                label = "Sync Queue",
+                label = stringResource(R.string.dashboard_sync_queue),
                 icon = Icons.Filled.Refresh,
                 background = Surface,
                 iconTint = TextPrimary,
@@ -323,7 +326,7 @@ fun DashboardScreen(
                 modifier = Modifier.weight(1f)
             )
             QuickActionCard(
-                label = "SOS",
+                label = stringResource(R.string.dashboard_sos),
                 icon = Icons.Filled.Warning,
                 background = ErrorRed,
                 iconTint = Color.White,
@@ -335,7 +338,7 @@ fun DashboardScreen(
         Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             QuickActionCard(
-                label = "Quick Capture",
+                label = stringResource(R.string.dashboard_quick_capture),
                 icon = Icons.Filled.Home,
                 background = Surface,
                 iconTint = TextPrimary,

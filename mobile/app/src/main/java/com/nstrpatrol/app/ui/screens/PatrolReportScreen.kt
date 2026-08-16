@@ -294,6 +294,12 @@ fun PatrolReportScreen(
                     TextButton(
                         onClick = {
                             showEndConfirm = false
+                            // Reflect ended state immediately so the End Patrol
+                            // button disappears even before the callback navigates.
+                            session = session?.copy(
+                                status = "COMPLETED",
+                                endTime = System.currentTimeMillis()
+                            )
                             onEndPatrol?.invoke()
                         }
                     ) { Text("End patrol", color = ErrorRed) }
