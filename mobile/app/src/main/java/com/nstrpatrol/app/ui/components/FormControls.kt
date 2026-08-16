@@ -57,7 +57,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.nstrpatrol.app.data.AutoDetails
 import com.nstrpatrol.app.data.PhotoUtils
 import com.nstrpatrol.app.ui.theme.BeigeAccent
 import com.nstrpatrol.app.ui.theme.ErrorRed
@@ -441,8 +440,9 @@ fun SeverityControl(
 /**
  * Auto-captured details panel (GPS coords, timestamp, officer, beat, accuracy...)
  * shown at the bottom of every report category page. Mirrors the "Captured" panel
- * in the Penpot designs. Pass the real captured values to make it dynamic; any
- * null field falls back to [AutoDetails] (kept only as a last-resort default).
+ * in the Penpot designs. All values are passed in by the caller from real captured
+ * data (location, trusted time, signed-in officer, sync status); any null field
+ * shows a placeholder rather than a hardcoded default.
  */
 @Composable
 fun AutoCapturedPanel(
@@ -462,13 +462,13 @@ fun AutoCapturedPanel(
             .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
             .background(Surface)
     ) {
-        AutoDetailRow(label = "GPS coordinates", value = gps ?: AutoDetails.gps)
-        AutoDetailRow(label = "Timestamp", value = timestamp ?: AutoDetails.timestamp)
-        AutoDetailRow(label = "Officer", value = officer ?: AutoDetails.officer)
-        AutoDetailRow(label = "Badge", value = badge ?: AutoDetails.badge)
-        AutoDetailRow(label = "Beat", value = beat ?: AutoDetails.beat)
-        AutoDetailRow(label = "GPS accuracy", value = accuracy ?: AutoDetails.accuracy)
-        AutoDetailRow(label = "Saved", value = saved ?: AutoDetails.saved)
+        AutoDetailRow(label = "GPS coordinates", value = gps ?: "—")
+        AutoDetailRow(label = "Timestamp", value = timestamp ?: "—")
+        AutoDetailRow(label = "Officer", value = officer ?: "—")
+        AutoDetailRow(label = "Badge", value = badge ?: "—")
+        AutoDetailRow(label = "Beat", value = beat ?: "—")
+        AutoDetailRow(label = "GPS accuracy", value = accuracy ?: "—")
+        AutoDetailRow(label = "Saved", value = saved ?: "—")
     }
 }
 

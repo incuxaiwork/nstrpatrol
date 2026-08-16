@@ -16,6 +16,7 @@ data class PatrolSessionEntity(
     val patrolType: String? = null,
     val patrolMethod: String? = null,
     val beat: String? = null,
+    val detectedMethod: String? = null,
     val teamLeader: String? = null,
     val armedStatus: String? = null,
     val memberCount: Int = 0,

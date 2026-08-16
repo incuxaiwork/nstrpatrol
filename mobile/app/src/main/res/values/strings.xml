@@ -64,6 +64,8 @@
     <string name="settings_general">General</string>
     <string name="settings_language">Language</string>
     <string name="settings_sync_interval">Sync Interval</string>
+    <string name="settings_sync_auto">Auto (sync when online)</string>
+    <string name="settings_sync_manual">Manual</string>
     <string name="settings_map_layer">Map Layer</string>
     <string name="settings_diagnostics">Diagnostics &amp; System</string>
     <string name="settings_gps_diagnostics">GPS Diagnostics</string>
@@ -115,6 +117,11 @@
     <string name="incident_detail_subtitle">Report details</string>
     <string name="incident_report">Report</string>
     <string name="common_offline">Offline</string>
+    <string name="status_connected">Connected to internet</string>
+    <string name="status_offline">Could not connect to internet</string>
+    <string name="status_syncing">Syncing… %1$d%%</string>
+    <string name="status_synced">Synced ✓</string>
+    <string name="status_sync_failed">Sync failed</string>
 
     <!-- Logs -->
     <string name="logs_title">Logs</string>
@@ -145,6 +152,7 @@
     <string name="sos_subtitle">Emergency assistance</string>
     <string name="sos_tap">Tap to send an SOS alert to your patrol team</string>
     <string name="sos_emergency_contacts">Emergency contacts</string>
+    <string name="sos_no_contacts">No emergency contacts configured</string>
 
     <!-- GPS Diagnostics -->
     <string name="gps_title">GPS Diagnostics</string>

@@ -29,9 +29,6 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddLocation
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CompassCalibration
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
@@ -67,16 +64,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -84,12 +77,11 @@ import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.ForestBeatModel
+import com.nstrpatrol.app.data.map.ForestCompartmentModel
 import com.nstrpatrol.app.data.map.ForestGisRepository
 import com.nstrpatrol.app.data.map.GisLayerState
 import com.nstrpatrol.app.data.map.MbtilesServer
-import com.nstrpatrol.app.data.map.SightingPointModel
 import com.nstrpatrol.app.time.GpsTelemetryManager
-import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.ui.components.ActivePatrolOverlay
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.navigation.BottomTab
@@ -132,11 +124,11 @@ fun MapsScreen(
     onTabSelected: (BottomTab) -> Unit,
     patrolTimer: PatrolTimer,
     telemetryManager: GpsTelemetryManager,
+    movement: kotlinx.coroutines.flow.StateFlow<com.nstrpatrol.app.time.MovementInfo>,
     dao: TelemetryDao
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val clipboardManager = LocalClipboardManager.current
 
     // Initialize GIS repository & local MBTiles tile server
     val gisRepo = remember { ForestGisRepository(context) }
@@ -160,19 +152,23 @@ fun MapsScreen(
 
     // Map UI state
     var selectedBeat by remember { mutableStateOf<ForestBeatModel?>(null) }
-    var selectedIncident by remember { mutableStateOf<SightingPointModel?>(null) }
+    var selectedCompartment by remember { mutableStateOf<ForestCompartmentModel?>(null) }
     var layerState by remember { mutableStateOf(GisLayerState()) }
     var showLayerDialog by remember { mutableStateOf(false) }
     var showLegend by remember { mutableStateOf(true) }
-    var isFullScreen by remember { mutableStateOf(false) }
     var currentZoom by remember { mutableFloatStateOf(11.8f) }
 
     var miniMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
-    var fullScreenMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
+
+    // When true the camera auto-follows the live patrol track; a user drag/zoom
+    // gesture switches it off so they can inspect the map freely.
+    var followPatrol by remember { mutableStateOf(true) }
 
     // Patrol State
     val isRunning by patrolTimer.running.collectAsStateWithLifecycle()
+    val movementInfo by movement.collectAsStateWithLifecycle()
+    val liveTelemetry by telemetryManager.telemetry.collectAsStateWithLifecycle()
     var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(isRunning) {
         if (isRunning) {
@@ -204,13 +200,27 @@ fun MapsScreen(
         }
     }
 
-    // REACTIVE LAYER VISIBILITY EFFECT (Applies to both Mini Map & Fullscreen Map)
-    LaunchedEffect(layerState, miniMapRef, fullScreenMapRef) {
+    // REACTIVE LAYER VISIBILITY EFFECT
+    LaunchedEffect(layerState, miniMapRef) {
         miniMapRef?.style?.let { style ->
             applyLayerVisibility(style, layerState)
         }
-        fullScreenMapRef?.style?.let { style ->
-            applyLayerVisibility(style, layerState)
+    }
+
+    // Fill beat & compartment sources once GIS data is loaded. The sources are
+    // created (empty) when the style renders, so boundaries appear reliably even
+    // if the GeoJSON arrives after the map itself.
+    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef) {
+        if (!gisRepo.isDataLoaded) return@LaunchedEffect
+        val beatGeo = gisRepo.beatGeoJsonString
+        val compGeo = gisRepo.compartmentGeoJsonString
+        miniMapRef?.style?.let { style ->
+            if (beatGeo.isNotEmpty()) {
+                style.getSourceAs<GeoJsonSource>("beats-geojson-source")?.setGeoJson(beatGeo)
+            }
+            if (compGeo.isNotEmpty()) {
+                style.getSourceAs<GeoJsonSource>("comp-geojson-source")?.setGeoJson(compGeo)
+            }
         }
     }
 
@@ -218,16 +228,38 @@ fun MapsScreen(
     LaunchedEffect(patrolPoints) {
         val geo = buildPatrolTrackGeoJson(patrolPoints)
         miniMapRef?.style?.getSourceAs<GeoJsonSource>("patrol-track-source")?.setGeoJson(geo)
-        fullScreenMapRef?.style?.getSourceAs<GeoJsonSource>("patrol-track-source")?.setGeoJson(geo)
+
+        if (patrolPoints.isNotEmpty()) {
+            val last = patrolPoints.last()
+            val currentGeo = buildCurrentPositionGeoJson(last)
+            miniMapRef?.style?.getSourceAs<GeoJsonSource>("patrol-current-source")?.setGeoJson(currentGeo)
+
+            // Camera auto-follow: keep the ranger centred on their live position
+            // while the patrol is running (released on manual pan/zoom). Zooms
+            // into the travelled area like Google Maps navigation instead of
+            // leaving the whole region on screen.
+            if (followPatrol && isRunning) {
+                val followZoom = 16.0
+                try {
+                    miniMapRef?.animateCamera(
+                        CameraUpdateFactory.newLatLngZoom(LatLng(last.latitude, last.longitude), followZoom),
+                        900
+                    )
+                } catch (e: Exception) {
+                    miniMapRef?.cameraPosition = CameraPosition.Builder()
+                        .target(LatLng(last.latitude, last.longitude))
+                        .zoom(followZoom)
+                        .build()
+                }
+            }
+        }
     }
 
-    // Helper Composable to render Map Content (Shared between Normal & Fullscreen Mode)
+    // Helper Composable to render the map
     @Composable
-    fun MapContent(modifier: Modifier = Modifier, isFull: Boolean = false) {
+    fun MapContent(modifier: Modifier = Modifier) {
         Box(
             modifier = modifier
-                .clip(if (isFull) RoundedCornerShape(0.dp) else RoundedCornerShape(12.dp))
-                .border(if (isFull) 0.dp else 1.dp, OutlineCard, if (isFull) RoundedCornerShape(0.dp) else RoundedCornerShape(12.dp))
                 .background(MapCanvas)
         ) {
             // MAPLIBRE VIEW COMPOSABLE
@@ -254,11 +286,7 @@ fun MapsScreen(
                             false
                         }
                         mapView.getMapAsync { map ->
-                            if (isFull) {
-                                fullScreenMapRef = map
-                            } else {
-                                miniMapRef = map
-                            }
+                            miniMapRef = map
                             try {
                                 map.uiSettings.apply {
                                     isZoomGesturesEnabled = true
@@ -267,6 +295,14 @@ fun MapsScreen(
                                     isTiltGesturesEnabled = true
                                     isDoubleTapGesturesEnabled = true
                                     isQuickZoomGesturesEnabled = true
+                                }
+
+                                // A manual pan/zoom gesture releases camera
+                                // follow so the ranger can inspect the map.
+                                map.addOnCameraMoveStartedListener { reason ->
+                                    if (reason == MapLibreMap.OnCameraMoveStartedListener.REASON_API_GESTURE) {
+                                        followPatrol = false
+                                    }
                                 }
 
                                 val tileUrl = mbtilesServer.tileUrlFormat
@@ -283,6 +319,14 @@ fun MapsScreen(
                                 satelliteTileSet.maxZoom = 19f
                                 val satelliteSource = RasterSource("satellite-raster-source", satelliteTileSet, 256)
 
+                                val streetTileSet = TileSet(
+                                    "2.1.0",
+                                    "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                )
+                                streetTileSet.minZoom = 1f
+                                streetTileSet.maxZoom = 19f
+                                val streetSource = RasterSource("street-raster-source", streetTileSet, 256)
+
                                 val styleJson = """
                                     {
                                       "version": 8,
@@ -293,7 +337,7 @@ fun MapsScreen(
                                           "id": "background",
                                           "type": "background",
                                           "paint": {
-                                            "background-color": "#f5eedc"
+                                            "background-color": "#e8eaed"
                                           }
                                         }
                                       ]
@@ -303,15 +347,13 @@ fun MapsScreen(
                                 map.setStyle(Style.Builder().fromJson(styleJson)) { style ->
                                     style.addSource(rasterSource)
                                     style.addSource(satelliteSource)
-                                    if (gisRepo.beatGeoJsonString.isNotEmpty()) {
-                                        style.addSource(GeoJsonSource("beats-geojson-source", gisRepo.beatGeoJsonString))
-                                    }
-                                    if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                                        style.addSource(GeoJsonSource("comp-geojson-source", gisRepo.compartmentGeoJsonString))
-                                    }
-                                    if (gisRepo.incidentGeoJsonString.isNotEmpty()) {
-                                        style.addSource(GeoJsonSource("incidents-geojson-source", gisRepo.incidentGeoJsonString))
-                                    }
+                                    style.addSource(streetSource)
+                                    // Beat & compartment sources are always present
+                                    // (empty until GIS data loads); the LaunchedEffect
+                                    // below fills them in once loadGisData() finishes,
+                                    // so the boundaries always appear.
+                                    style.addSource(GeoJsonSource("beats-geojson-source", EMPTY_FEATURE_COLLECTION))
+                                    style.addSource(GeoJsonSource("comp-geojson-source", EMPTY_FEATURE_COLLECTION))
 
                                     // 1. MBTiles Basemap Layer (offline fallback base)
                                     style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
@@ -325,103 +367,76 @@ fun MapsScreen(
                                         }
                                     )
 
+                                    // 1c. Street Map Layer (online Esri World Street Map)
+                                    style.addLayer(
+                                        RasterLayer("street-raster-layer", "street-raster-source").apply {
+                                            setProperties(
+                                                PropertyFactory.visibility(if (layerState.showStreet) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+
                                     // 2. Beats Fill Layer (Light green tint)
-                                    if (gisRepo.beatGeoJsonString.isNotEmpty()) {
-                                        style.addLayer(
-                                            FillLayer("beats-fill-layer", "beats-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.fillOpacity(0.12f),
-                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
-                                    }
+                                    style.addLayer(
+                                        FillLayer("beats-fill-layer", "beats-geojson-source").apply {
+                                            setProperties(
+                                                PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
+                                                PropertyFactory.fillOpacity(0.12f),
+                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
                                     // 3. Compartments Fill Layer (Soft amber tint)
-                                    if (gisRepo.compartmentGeoJsonString.isNotEmpty()) {
-                                        style.addLayer(
-                                            FillLayer("comp-fill-layer", "comp-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
-                                                    PropertyFactory.fillOpacity(0.04f),
-                                                    PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
+                                    style.addLayer(
+                                        FillLayer("comp-fill-layer", "comp-geojson-source").apply {
+                                            setProperties(
+                                                PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
+                                                PropertyFactory.fillOpacity(0.04f),
+                                                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
-                                        // 4. Compartments Line Layer (Solid crisp amber line for clear visibility)
-                                        style.addLayer(
-                                            LineLayer("comp-line-layer", "comp-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
-                                                    PropertyFactory.lineWidth(1.2f),
-                                                    PropertyFactory.lineOpacity(0.75f),
-                                                    PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
-                                    }
+                                    // 4. Compartments Line Layer (Solid crisp amber line for clear visibility)
+                                    style.addLayer(
+                                        LineLayer("comp-line-layer", "comp-geojson-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
+                                                PropertyFactory.lineWidth(1.2f),
+                                                PropertyFactory.lineOpacity(0.75f),
+                                                PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
                                     // 5. Beats Line Layer (Bold dark green boundary)
-                                    if (gisRepo.beatGeoJsonString.isNotEmpty()) {
-                                        style.addLayer(
-                                            LineLayer("beats-line-layer", "beats-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.lineWidth(2.8f),
-                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
+                                    style.addLayer(
+                                        LineLayer("beats-line-layer", "beats-geojson-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
+                                                PropertyFactory.lineWidth(2.8f),
+                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
-                                        // 6. Beat Name Label Layer
-                                        style.addLayer(
-                                            SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
-                                                minZoom = 9.0f
-                                                setProperties(
-                                                    PropertyFactory.textField("{Beat}"),
-                                                    PropertyFactory.textSize(12f),
-                                                    PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
-                                                    PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                                                    PropertyFactory.textHaloWidth(2.0f),
-                                                    PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
-                                    }
+                                    // 6. Beat Name Label Layer
+                                    style.addLayer(
+                                        SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
+                                            minZoom = 9.0f
+                                            setProperties(
+                                                PropertyFactory.textField("{Beat}"),
+                                                PropertyFactory.textSize(12f),
+                                                PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
+                                                PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
+                                                PropertyFactory.textHaloWidth(2.0f),
+                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
-                                    // 7. Sighting & Incident Red Circle Points Layer
-                                    if (gisRepo.incidentGeoJsonString.isNotEmpty()) {
-                                        style.addLayer(
-                                            CircleLayer("incidents-circle-layer", "incidents-geojson-source").apply {
-                                                setProperties(
-                                                    PropertyFactory.circleColor(AndroidColor.parseColor("#D32F2F")),
-                                                    PropertyFactory.circleRadius(7f),
-                                                    PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#FFFFFF")),
-                                                    PropertyFactory.circleStrokeWidth(2f),
-                                                    PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
-
-                                        // 8. Incident Label Layer
-                                        style.addLayer(
-                                            SymbolLayer("incidents-label-layer", "incidents-geojson-source").apply {
-                                                minZoom = 10.0f
-                                                setProperties(
-                                                    PropertyFactory.textField("{icon} {title}"),
-                                                    PropertyFactory.textSize(11f),
-                                                    PropertyFactory.textColor(AndroidColor.parseColor("#B71C1C")),
-                                                    PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                                                    PropertyFactory.textHaloWidth(1.8f),
-                                                    PropertyFactory.visibility(if (layerState.showIncidents) Property.VISIBLE else Property.NONE)
-                                                )
-                                            }
-                                        )
-                                    }
-
-                                    // 9. Live Patrol Track (path line + point dots) from local points
+                                    // 7. Live Patrol Track (path line + point dots) from local points
                                     style.addSource(GeoJsonSource("patrol-track-source", EMPTY_FEATURE_COLLECTION))
                                     style.addLayer(
                                         LineLayer("patrol-track-line-layer", "patrol-track-source").apply {
@@ -445,33 +460,61 @@ fun MapsScreen(
                                         }
                                     )
 
+                                    // 10. Live current-position marker ("you are here")
+                                    // so the ranger can see where they are right now
+                                    // even when the GPS fix is outside the forest.
+                                    style.addSource(GeoJsonSource("patrol-current-source", EMPTY_FEATURE_COLLECTION))
+                                    style.addLayer(
+                                        CircleLayer("patrol-current-halo-layer", "patrol-current-source").apply {
+                                            setProperties(
+                                                PropertyFactory.circleColor(AndroidColor.parseColor("#552E7BF6")),
+                                                PropertyFactory.circleRadius(16f),
+                                                PropertyFactory.visibility(if (layerState.showTrack) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+                                    style.addLayer(
+                                        CircleLayer("patrol-current-dot-layer", "patrol-current-source").apply {
+                                            setProperties(
+                                                PropertyFactory.circleColor(AndroidColor.parseColor("#2E7BF6")),
+                                                PropertyFactory.circleRadius(7f),
+                                                PropertyFactory.circleStrokeColor(AndroidColor.parseColor("#FFFFFF")),
+                                                PropertyFactory.circleStrokeWidth(2.5f),
+                                                PropertyFactory.visibility(if (layerState.showTrack) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+
                                     map.cameraPosition = CameraPosition.Builder()
                                         .target(LatLng(15.92, 79.15))
                                         .zoom(11.8)
                                         .build()
 
-                                    // Tap listener for map features (Beats & Incident Markers)
+                                    // Tap listener for map features (Beats & Compartments)
                                     map.addOnMapClickListener { latLng ->
                                         val pointF = map.projection.toScreenLocation(latLng)
-                                        // 1. Check Incident tap first
-                                        val incidentFeatures = map.queryRenderedFeatures(pointF, "incidents-circle-layer")
-                                        if (incidentFeatures.isNotEmpty()) {
-                                            val incId = incidentFeatures[0].getStringProperty("id") ?: ""
-                                            val matchedIncident = gisRepo.findIncidentById(incId)
-                                            if (matchedIncident != null) {
-                                                selectedIncident = matchedIncident
-                                                return@addOnMapClickListener true
-                                            }
-                                        }
 
-                                        // 2. Check Beat tap
-                                        val features = map.queryRenderedFeatures(pointF, "beats-fill-layer")
-                                        if (features.isNotEmpty()) {
-                                            val feat = features[0]
+                                        // 1. Check Beat tap
+                                        val beatFeatures = map.queryRenderedFeatures(pointF, "beats-fill-layer")
+                                        if (beatFeatures.isNotEmpty()) {
+                                            val feat = beatFeatures[0]
                                             val beatName = feat.getStringProperty("Beat") ?: ""
                                             val matchedBeat = gisRepo.findBeatByName(beatName)
                                             if (matchedBeat != null) {
                                                 selectedBeat = matchedBeat
+                                                return@addOnMapClickListener true
+                                            }
+                                        }
+
+                                        // 2. Check Compartment tap
+                                        val compFeatures = map.queryRenderedFeatures(pointF, "comp-fill-layer")
+                                        if (compFeatures.isNotEmpty()) {
+                                            val feat = compFeatures[0]
+                                            val compId = feat.getStringProperty("OBJECTID_1") ?: ""
+                                            val matchedComp = gisRepo.findCompartmentById(compId)
+                                            if (matchedComp != null) {
+                                                selectedCompartment = matchedComp
+                                                return@addOnMapClickListener true
                                             }
                                         }
                                         true
@@ -511,7 +554,7 @@ fun MapsScreen(
             }
 
             // FLOATING MAP CONTROLS (Right Side)
-            val currentMap = if (isFull) fullScreenMapRef else miniMapRef
+            val currentMap = miniMapRef
 
             Column(
                 modifier = Modifier
@@ -520,13 +563,6 @@ fun MapsScreen(
                     .zIndex(10f),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                // Fullscreen Toggle
-                FloatingControlButton(
-                    icon = if (isFull) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
-                    contentDescription = if (isFull) "Exit Fullscreen" else "Full Screen",
-                    onClick = { isFullScreen = !isFullScreen }
-                )
-
                 // Zoom In (+)
                 FloatingControlButton(
                     icon = Icons.Filled.Add,
@@ -549,6 +585,13 @@ fun MapsScreen(
                             currentZoom = (m.cameraPosition.zoom - 1).toFloat()
                         }
                     }
+                )
+
+                // Layers
+                FloatingControlButton(
+                    icon = Icons.Filled.Layers,
+                    contentDescription = "Layers",
+                    onClick = { showLayerDialog = true }
                 )
 
                 // Compass Reset Bearing (Resets map rotation & tilt to North)
@@ -603,6 +646,7 @@ fun MapsScreen(
                                     .zoom(12.8)
                                     .build()
                             }
+                            followPatrol = true
                             Toast.makeText(context, "Recentered map view", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -644,11 +688,7 @@ fun MapsScreen(
                             Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFE65100), isDashed = false, label = "Compartment Boundary")
                             Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFFD32F2F), isDashed = false, isPoint = true, label = "Sightings & Incidents (12)")
-                            Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFFFEB3B), isDashed = false, isPoint = true, label = "My Patrol Track")
-                            Spacer(Modifier.height(4.dp))
-                            LegendItem(color = Color(0xFFC3B091), isDashed = false, isRaster = true, label = "MBTiles Offline Basemap")
                         }
                     }
                 }
@@ -658,234 +698,46 @@ fun MapsScreen(
 
     // NORMAL VIEW MODE (Inside NstrScaffold)
     NstrScaffold(
-        title = "Forest Patrol Map",
-        subtitle = if (isRunning) "Patrol in progress • Markapur Division" else "Markapur Division • 44 Beats • 12 Sightings Logged",
+        title = "",
+        subtitle = "",
         activeTab = BottomTab.Maps,
-        onTabSelected = onTabSelected
+        onTabSelected = onTabSelected,
+        scrollable = false,
+        fullWidthContent = true,
+        showHeader = false
     ) {
-        Spacer(Modifier.height(12.dp))
-
-        // Top Control Bar (Search & Layer Toggle & Status Indicator)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // Offline Status Chip
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(Color(0xFFE8F5E9))
-                    .border(1.dp, Color(0xFF2E7D32), RoundedCornerShape(16.dp))
-                    .padding(horizontal = 10.dp, vertical = 5.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(7.dp)
-                            .background(Color(0xFF2E7D32), CircleShape)
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = "Offline Map (MBTiles)",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xFF2E7D32)
-                    )
-                }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // Fullscreen Button
-                Button(
-                    onClick = { isFullScreen = true },
-                    colors = ButtonDefaults.buttonColors(containerColor = LightForest),
-                    shape = RoundedCornerShape(20.dp),
-                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 4.dp)
-                ) {
-                    Icon(Icons.Filled.Fullscreen, contentDescription = "Full Screen", tint = ForestGreen, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(4.dp))
-                    Text("FULL SCREEN", color = ForestGreen, fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                }
-
-                IconButton(
-                    onClick = { showLayerDialog = true },
-                    modifier = Modifier
-                        .size(36.dp)
-                        .background(Surface, CircleShape)
-                        .border(1.dp, OutlineCard, CircleShape)
-                ) {
-                    Icon(Icons.Filled.Layers, contentDescription = "Layers", tint = ForestGreen, modifier = Modifier.size(20.dp))
-                }
-            }
-        }
-
-        Spacer(Modifier.height(10.dp))
-
-        // Normal Map View Container
-        MapContent(
+        // Full-bleed map; overlay floats above when patrolling
+        Box(
             modifier = Modifier
+                .weight(1f)
                 .fillMaxWidth()
-                .height(420.dp),
-            isFull = false
-        )
-
-        // Active Patrol Overlay
-        if (isRunning) {
-            Spacer(Modifier.height(12.dp))
-            ActivePatrolOverlay(
-                distanceMeters = totalDistance,
-                avgSpeedKmh = avgSpeed,
-                moveMinutes = moveMinutes,
-                durationFormatted = patrolTimer.elapsedFormatted(),
-                currentMode = MovementMode.UNKNOWN
-            )
-        }
-
-    }
-
-    // FULL SCREEN MAP MODE DIALOG
-    if (isFullScreen) {
-        Dialog(
-            onDismissRequest = { isFullScreen = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
         ) {
-            Box(modifier = Modifier.fillMaxSize().background(MapCanvas)) {
-                MapContent(modifier = Modifier.fillMaxSize(), isFull = true)
-
-                // Top Bar for Full Screen
-                Row(
+            MapContent(modifier = Modifier.fillMaxSize())
+            val liveLat = patrolPoints.lastOrNull()?.latitude ?: liveTelemetry.latitude
+            val liveLon = patrolPoints.lastOrNull()?.longitude ?: liveTelemetry.longitude
+            if (isRunning && liveLat != null && liveLon != null) {
+                CoordinatesChip(
+                    latitude = liveLat,
+                    longitude = liveLon,
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp)
-                        .align(Alignment.TopStart),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(20.dp))
-                            .background(Surface.copy(alpha = 0.95f))
-                            .border(1.dp, OutlineCard, RoundedCornerShape(20.dp))
-                            .padding(horizontal = 14.dp, vertical = 8.dp)
-                    ) {
-                        Text("Forest Patrol Map • Fullscreen", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = ForestGreen)
-                    }
-
-                    IconButton(
-                        onClick = { isFullScreen = false },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(Surface.copy(alpha = 0.95f), CircleShape)
-                            .border(1.dp, OutlineCard, CircleShape)
-                    ) {
-                        Icon(Icons.Filled.FullscreenExit, contentDescription = "Exit Fullscreen", tint = ForestGreen)
-                    }
-                }
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                )
+            }
+            if (isRunning) {
+                ActivePatrolOverlay(
+                    distanceMeters = totalDistance,
+                    avgSpeedKmh = avgSpeed,
+                    moveMinutes = moveMinutes,
+                    durationFormatted = patrolTimer.elapsedFormatted(),
+                    currentMode = movementInfo.mode,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(12.dp)
+                )
             }
         }
-    }
 
-    // SIGHTING & INCIDENT DETAILS BOTTOM SHEET
-    if (selectedIncident != null) {
-        val inc = selectedIncident!!
-        ModalBottomSheet(
-            onDismissRequest = { selectedIncident = null },
-            sheetState = rememberModalBottomSheetState(),
-            containerColor = Surface
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 16.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(inc.icon, fontSize = 28.sp)
-                        Spacer(Modifier.width(10.dp))
-                        Column {
-                            Text(
-                                text = "INCIDENT / SIGHTING RECORD",
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = TextSecondary
-                            )
-                            Text(
-                                text = inc.title,
-                                fontSize = 20.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = TextPrimary
-                            )
-                        }
-                    }
-                    IconButton(onClick = { selectedIncident = null }) {
-                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                DetailItemRow("Record ID", inc.id)
-                DetailItemRow("Category", inc.category)
-                DetailItemRow("Severity Level", inc.severity)
-                DetailItemRow("Forest Beat", inc.beatName)
-                DetailItemRow("Logged Time", inc.time)
-                DetailItemRow("GPS Location", "${"%.5f".format(inc.lat)}° N, ${"%.5f".format(inc.lon)}° E")
-
-                Spacer(Modifier.height(10.dp))
-
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(8.dp),
-                    colors = CardDefaults.cardColors(containerColor = LightForest)
-                ) {
-                    Column(modifier = Modifier.padding(12.dp)) {
-                        Text("Field Remarks / Observations", fontWeight = FontWeight.Bold, fontSize = 11.sp, color = ForestGreen)
-                        Spacer(Modifier.height(4.dp))
-                        Text(inc.details, fontSize = 13.sp, color = TextPrimary)
-                    }
-                }
-
-                Spacer(Modifier.height(18.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            val locText = "${inc.lat}, ${inc.lon}"
-                            clipboardManager.setText(AnnotatedString(locText))
-                            Toast.makeText(context, "Coordinates copied: $locText", Toast.LENGTH_SHORT).show()
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Icon(Icons.Filled.ContentCopy, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("COPY COORDS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    Button(
-                        onClick = { selectedIncident = null },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(46.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
-                        shape = RoundedCornerShape(8.dp)
-                    ) {
-                        Text("CLOSE", fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                }
-                Spacer(Modifier.height(12.dp))
-            }
-        }
     }
 
     // BEAT DETAILS BOTTOM SHEET
@@ -893,7 +745,7 @@ fun MapsScreen(
         val b = selectedBeat!!
         ModalBottomSheet(
             onDismissRequest = { selectedBeat = null },
-            sheetState = rememberModalBottomSheetState(),
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = Surface
         ) {
             Column(
@@ -954,11 +806,78 @@ fun MapsScreen(
         }
     }
 
+    // COMPARTMENT DETAILS BOTTOM SHEET
+    if (selectedCompartment != null) {
+        val c = selectedCompartment!!
+        ModalBottomSheet(
+            onDismissRequest = { selectedCompartment = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "COMPARTMENT DETAILS",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextSecondary
+                        )
+                        Text(
+                            text = "Compartment ${c.compNo}",
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ForestGreen
+                        )
+                    }
+                    IconButton(onClick = { selectedCompartment = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                DetailItemRow("Compartment Number", c.compNo)
+                DetailItemRow("Block", c.block)
+                DetailItemRow("Beat", c.beat)
+                DetailItemRow("Range", c.range)
+                DetailItemRow("Division", c.division)
+                DetailItemRow("Section", c.section)
+                DetailItemRow("Circle", c.circle)
+                DetailItemRow("District", c.district)
+                DetailItemRow("Area (ha)", c.areaHa)
+                DetailItemRow("Compartment ID", c.id)
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = { selectedCompartment = null },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("CLOSE DETAILS", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+
     // LAYER CONTROL DIALOG / BOTTOM SHEET
     if (showLayerDialog) {
         ModalBottomSheet(
             onDismissRequest = { showLayerDialog = false },
-            sheetState = rememberModalBottomSheetState(),
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
             containerColor = Surface
         ) {
             Column(
@@ -982,7 +901,6 @@ fun MapsScreen(
                         val newState = layerState.copy(showMBTiles = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
                 Spacer(Modifier.height(8.dp))
@@ -994,7 +912,6 @@ fun MapsScreen(
                         val newState = layerState.copy(showBeats = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1006,19 +923,6 @@ fun MapsScreen(
                         val newState = layerState.copy(showCompartments = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-                LayerToggleRow(
-                    title = "Sighting & Incident Points",
-                    subtitle = "12 active wildlife & hazard markers",
-                    checked = layerState.showIncidents,
-                    onChecked = { checked ->
-                        val newState = layerState.copy(showIncidents = checked)
-                        layerState = newState
-                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1030,7 +934,17 @@ fun MapsScreen(
                         val newState = layerState.copy(showSatellite = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Street Map",
+                    subtitle = "Online Esri World Street Map (roads & labels)",
+                    checked = layerState.showStreet,
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showStreet = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
                 Spacer(Modifier.height(8.dp))
@@ -1042,7 +956,6 @@ fun MapsScreen(
                         val newState = layerState.copy(showTrack = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                        fullScreenMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
 
@@ -1155,7 +1068,10 @@ private fun LayerToggleRow(
             onCheckedChange = onChecked,
             colors = SwitchDefaults.colors(
                 checkedTrackColor = ForestGreen,
-                checkedThumbColor = Color.White
+                checkedThumbColor = Color.White,
+                uncheckedTrackColor = Color(0xFFD6D6D6),
+                uncheckedThumbColor = Color.White,
+                uncheckedBorderColor = Color(0xFFB0B0B0)
             )
         )
     }
@@ -1168,24 +1084,25 @@ private fun applyLayerVisibility(style: Style?, state: GisLayerState) {
     val mbtilesVis = if (state.showMBTiles) Property.VISIBLE else Property.NONE
     val beatsVis = if (state.showBeats) Property.VISIBLE else Property.NONE
     val compVis = if (state.showCompartments) Property.VISIBLE else Property.NONE
-    val incidentsVis = if (state.showIncidents) Property.VISIBLE else Property.NONE
     val satelliteVis = if (state.showSatellite) Property.VISIBLE else Property.NONE
+    val streetVis = if (state.showStreet) Property.VISIBLE else Property.NONE
     val trackVis = if (state.showTrack) Property.VISIBLE else Property.NONE
 
     style.getLayer("mbtiles-raster-layer")?.setProperties(PropertyFactory.visibility(mbtilesVis))
     style.getLayer("satellite-raster-layer")?.setProperties(PropertyFactory.visibility(satelliteVis))
+    style.getLayer("street-raster-layer")?.setProperties(PropertyFactory.visibility(streetVis))
     style.getLayer("beats-fill-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-line-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-label-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("comp-fill-layer")?.setProperties(PropertyFactory.visibility(compVis))
     style.getLayer("comp-line-layer")?.setProperties(PropertyFactory.visibility(compVis))
-    style.getLayer("incidents-circle-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
-    style.getLayer("incidents-label-layer")?.setProperties(PropertyFactory.visibility(incidentsVis))
     style.getLayer("patrol-track-line-layer")?.setProperties(PropertyFactory.visibility(trackVis))
     style.getLayer("patrol-track-point-layer")?.setProperties(PropertyFactory.visibility(trackVis))
+    style.getLayer("patrol-current-halo-layer")?.setProperties(PropertyFactory.visibility(trackVis))
+    style.getLayer("patrol-current-dot-layer")?.setProperties(PropertyFactory.visibility(trackVis))
 }
 
-private fun buildPatrolTrackGeoJson(points: List<PatrolPointEntity>): String {
+internal fun buildPatrolTrackGeoJson(points: List<PatrolPointEntity>): String {
     val lineFeature = if (points.size >= 2) {
         val coords = points.joinToString(",") { "[${it.longitude},${it.latitude}]" }
         "\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[$coords]},\"properties\":{}"
@@ -1196,6 +1113,9 @@ private fun buildPatrolTrackGeoJson(points: List<PatrolPointEntity>): String {
     val features = listOf(lineFeature, pointFeatures).filter { it.isNotEmpty() }.joinToString(",")
     return "{\"type\":\"FeatureCollection\",\"features\":[$features]}"
 }
+
+internal fun buildCurrentPositionGeoJson(p: PatrolPointEntity): String =
+    "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${p.longitude},${p.latitude}]},\"properties\":{}}]}"
 
 private fun computeDistance(points: List<PatrolPointEntity>): Double {
     if (points.size < 2) return 0.0
@@ -1213,4 +1133,39 @@ private fun computeDistance(points: List<PatrolPointEntity>): Double {
         total += 6_371_000.0 * c
     }
     return total
+}
+
+@Composable
+private fun CoordinatesChip(
+    latitude: Double,
+    longitude: Double,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(8.dp))
+            .background(Surface.copy(alpha = 0.95f))
+            .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            Icons.Filled.LocationOn,
+            contentDescription = null,
+            tint = ForestGreen,
+            modifier = Modifier.size(14.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(
+            text = String.format(
+                java.util.Locale.US,
+                "%.5f, %.5f",
+                latitude,
+                longitude
+            ),
+            color = TextPrimary,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
 }

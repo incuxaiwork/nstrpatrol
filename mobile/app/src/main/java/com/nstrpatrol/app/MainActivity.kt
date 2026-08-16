@@ -34,13 +34,17 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.data.ConnectivityObserver
+import com.nstrpatrol.app.data.NetworkStatus
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
-import com.nstrpatrol.app.data.SyncManager
+import com.nstrpatrol.app.data.SettingsStore
+import com.nstrpatrol.app.data.SyncController
+import com.nstrpatrol.app.data.SyncScheduler
 import com.nstrpatrol.app.data.db.NstrDatabase
 import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.GpsTelemetryManager
+import com.nstrpatrol.app.time.PatrolMetrics
 import com.nstrpatrol.app.time.TelemetryRecorder
 import com.nstrpatrol.app.time.TrustedTimeManager
 import com.nstrpatrol.app.ui.navigation.NstrNavState
@@ -69,6 +73,7 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -148,6 +153,14 @@ fun NstrApp() {
     val api: BackendApiClient = auth.apiClient()
     val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     val connectivity = remember { ConnectivityObserver(context) }
+    val settings = remember { SettingsStore(context.applicationContext) }
+
+    // Schedule background sync: every 30 min while online + an immediate
+    // network-gated sync so data flows as soon as connectivity returns.
+    LaunchedEffect(Unit) {
+        NetworkStatus.attach(context.applicationContext)
+        SyncScheduler.schedule(context.applicationContext)
+    }
 
     /** Stops a patrol, persists final stats locally, and syncs to the backend.
      *  [patrolId] defaults to the in-memory running patrol, but can be passed
@@ -165,26 +178,28 @@ fun NstrApp() {
         if (patrolTimer.patrolId == pid) patrolTimer.stop()
         syncScope.launch {
             val dao = database.telemetryDao()
-            if (dao.patrolSession(pid) != null) {
-                val metrics = ActivitySummary.computeForPatrol(pid, dao)
-                dao.completePatrol(
-                    patrolId = pid,
-                    endTime = endTime,
-                    distance = metrics.distanceMeters,
-                    steps = metrics.steps,
-                    moveMin = metrics.moveMinutes,
-                    calories = metrics.caloriesEstimate,
-                    heartPoints = metrics.heartPointsEstimate,
-                    avgSpeed = metrics.avgSpeedKmh,
-                    points = dao.patrolPointsOrdered(pid).size
-                )
-            }
+            // Finalize the local session FIRST and unconditionally: metric
+            // computation must never block the status flip, otherwise an ended
+            // patrol stays "ACTIVE / in progress" forever.
+            val metrics = runCatching { ActivitySummary.computeForPatrol(pid, dao) }
+                .getOrElse { PatrolMetrics() }
+            dao.completePatrol(
+                patrolId = pid,
+                endTime = endTime,
+                distance = metrics.distanceMeters,
+                steps = metrics.steps,
+                moveMin = metrics.moveMinutes,
+                calories = metrics.caloriesEstimate,
+                heartPoints = metrics.heartPointsEstimate,
+                avgSpeed = metrics.avgSpeedKmh,
+                points = dao.patrolPointsOrdered(pid).size
+            )
             // Navigate first so the UI leaves the report screen immediately...
             if (navigateToAllPatrols) {
                 withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }
             }
             // ...then best-effort sync; failures must not block navigation above.
-            runCatching { SyncManager.syncNow(dao, api) }
+            SyncController.sync(dao, api)
             runCatching { api.completePatrol(pid) }
         }
     }
@@ -229,10 +244,16 @@ fun NstrApp() {
     }
 
     // Sync is mobile -> server only, and event-driven: flush local buffers
-    // whenever connectivity is (re)gained. No polling of the network or server.
+    // whenever connectivity is (re)gained (via ConnectivityObserver's network
+    // callback — no polling). Gated by the user's sync setting: only runs in
+    // Auto mode. Flipping Manual -> Auto also triggers an immediate sync.
     LaunchedEffect(Unit) {
-        connectivity.isOnline.collect { online ->
-            if (online) syncScope.launch { SyncManager.syncNow(database.telemetryDao(), api) }
+        combine(connectivity.isOnline, settings.syncMode) { online, mode ->
+            online && mode == SettingsStore.MODE_AUTO
+        }.collect { shouldSync ->
+            if (shouldSync) {
+                SyncController.sync(database.telemetryDao(), api)
+            }
         }
     }
 
@@ -277,6 +298,7 @@ fun NstrApp() {
             onTabSelected = nav::selectTab,
             patrolTimer = patrolTimer,
             telemetryManager = telemetryManager,
+            movement = telemetryRecorder.movement,
             dao = database.telemetryDao()
         )
 
@@ -302,6 +324,7 @@ fun NstrApp() {
         )
 
         Route.Settings -> SettingsScreen(
+            settings = settings,
             onLogout = {
                 auth.logout()
                 sessionStore.clear()
@@ -321,7 +344,7 @@ fun NstrApp() {
             onTabSelected = nav::selectTab
         )
 
-        Route.Logs -> LogsScreen(nav::selectTab, timeState = timeState, dao = database.telemetryDao())
+        Route.Logs -> LogsScreen(nav::selectTab, timeState = timeState, dao = database.telemetryDao(), api = api)
 
         Route.PatrolStart -> PatrolStartScreen(
             onSave = { nav.popBack() },
@@ -379,7 +402,7 @@ fun NstrApp() {
             api = api
         )
 
-        Route.Sos -> SosScreen(nav::selectTab)
+        Route.Sos -> SosScreen(api = api, onTabSelected = nav::selectTab)
 
         is Route.IncidentDetail -> IncidentDetailScreen(
             incidentId = (nav.current as Route.IncidentDetail).incidentId,

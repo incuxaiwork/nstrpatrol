@@ -39,7 +39,7 @@ import com.nstrpatrol.app.ui.theme.NstrIcons
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
-/** Login screen: brand mark, credentials, entry into the app. */
+/** Login screen: brand mark, credentials. Users are provisioned from the admin side. */
 @Composable
 fun LoginScreen(
     onLogin: suspend (username: String, password: String) -> String?,

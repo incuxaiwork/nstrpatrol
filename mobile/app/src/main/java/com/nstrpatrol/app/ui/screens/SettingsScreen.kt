@@ -36,9 +36,10 @@ import android.content.ContextWrapper
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.AuthUser
+import com.nstrpatrol.app.data.SettingsStore
 import com.nstrpatrol.app.i18n.SupportedLanguages
-import com.nstrpatrol.app.data.SettingsData
 import com.nstrpatrol.app.ui.components.DangerButton
 import com.nstrpatrol.app.ui.components.NstrScaffold
 import com.nstrpatrol.app.ui.components.SectionHeader
@@ -51,15 +52,18 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 
 @Composable
 fun SettingsScreen(
+    settings: SettingsStore,
     onLogout: () -> Unit,
     onOpenGpsDiagnostics: () -> Unit = {},
     onTabSelected: (BottomTab) -> Unit,
     user: AuthUser? = null
 ) {
-    val profileName = user?.fullName ?: SettingsData.name
-    val designation = user?.designation ?: SettingsData.designation
+    val profileName = user?.fullName ?: "—"
+    val designation = user?.designation ?: "—"
     val context = LocalContext.current
     var showLanguagePicker by remember { mutableStateOf(false) }
+    var showSyncPicker by remember { mutableStateOf(false) }
+    val syncMode by settings.syncMode.collectAsStateWithLifecycle()
     val currentCode = remember { SupportedLanguages.currentCode(context) }
     val currentLanguageLabel = remember(currentCode) {
         SupportedLanguages.options().firstOrNull { it.code == currentCode }?.displayName
@@ -94,9 +98,15 @@ fun SettingsScreen(
             onClick = { showLanguagePicker = true }
         )
         Spacer(Modifier.height(8.dp))
-        SettingRow(label = stringResource(R.string.settings_sync_interval), value = SettingsData.syncInterval, onClick = {})
-        Spacer(Modifier.height(8.dp))
-        SettingRow(label = stringResource(R.string.settings_map_layer), value = SettingsData.mapLayer, onClick = {})
+        SettingRow(
+            label = stringResource(R.string.settings_sync_interval),
+            value = if (syncMode == SettingsStore.MODE_MANUAL) {
+                stringResource(R.string.settings_sync_manual)
+            } else {
+                stringResource(R.string.settings_sync_auto)
+            },
+            onClick = { showSyncPicker = true }
+        )
 
         Spacer(Modifier.height(20.dp))
         SectionHeader(text = stringResource(R.string.settings_diagnostics))
@@ -119,6 +129,17 @@ fun SettingsScreen(
                     showLanguagePicker = false
                 },
                 onDismiss = { showLanguagePicker = false }
+            )
+        }
+
+        if (showSyncPicker) {
+            SyncModePickerDialog(
+                current = syncMode,
+                onSelect = { mode ->
+                    settings.setSyncMode(mode)
+                    showSyncPicker = false
+                },
+                onDismiss = { showSyncPicker = false }
             )
         }
     }
@@ -150,6 +171,49 @@ private fun LanguagePickerDialog(
                         Spacer(Modifier.width(12.dp))
                         Text(
                             text = option.displayName,
+                            color = TextPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        }
+    )
+}
+
+@Composable
+private fun SyncModePickerDialog(
+    current: String,
+    onSelect: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val options = listOf(
+        SettingsStore.MODE_AUTO to stringResource(R.string.settings_sync_auto),
+        SettingsStore.MODE_MANUAL to stringResource(R.string.settings_sync_manual)
+    )
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_sync_interval)) },
+        text = {
+            Column {
+                options.forEach { (mode, label) ->
+                    val selected = mode == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(mode) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(mode) })
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = label,
                             color = TextPrimary,
                             fontSize = 14.sp
                         )

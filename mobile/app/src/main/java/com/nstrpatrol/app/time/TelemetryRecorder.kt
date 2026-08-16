@@ -83,6 +83,11 @@ class TelemetryRecorder(
     private var lastCadence = 0f
 
     private var lastArResult: ActivityRecognitionResult? = null
+
+    private var lastPointLat: Double? = null
+    private var lastPointLon: Double? = null
+    private var lastPointTime: Long = 0L
+    private var lastPersistedMode: MovementMode = MovementMode.UNKNOWN
     private var arPendingIntent: PendingIntent? = null
     private var sensorsRegistered = false
 
@@ -116,11 +121,17 @@ class TelemetryRecorder(
         patrolId = patrolTimer.patrolId
         _samplesRecorded.value = 0
         _movement.value = MovementInfo()
+        lastPointLat = null
+        lastPointLon = null
+        lastPointTime = 0L
+        lastPersistedMode = MovementMode.UNKNOWN
         registerSensors()
         registerArUpdates()
         patrolId?.let { pid ->
             scope.launch {
-                dao.upsertPatrolSession(
+                // INSERT OR IGNORE: never clobber the session the start screen
+                // already persisted (team leader, beat, method, etc.).
+                dao.insertSessionIfAbsent(
                     PatrolSessionEntity(
                         patrolId = pid,
                         startTime = patrolTimer.trustedNow()
@@ -135,7 +146,7 @@ class TelemetryRecorder(
                 } catch (e: Exception) {
                     Log.w(TAG, "Sample failed", e)
                 }
-                delay(AppConfig.SAMPLE_INTERVAL_MS)
+                delay(AppConfig.POINT_POLL_MS)
             }
         }
     }
@@ -149,6 +160,7 @@ class TelemetryRecorder(
         val pid = patrolId
         if (pid != null) {
             scope.launch {
+                tryRecordPoint(pid, timeManager.trustedUtcNow(), force = true)
                 val metrics = ActivitySummary.computeForPatrol(pid, dao)
                 val endTime = timeManager.trustedUtcNow()
                 dao.completePatrol(
@@ -169,42 +181,24 @@ class TelemetryRecorder(
 
     private suspend fun sampleOnce() {
         val pid = patrolId ?: return
-        val telemetry = telemetryManager.telemetry.value
         val now = timeManager.trustedUtcNow()
 
-        // Accept any usable fix (gps / network / fused). The strict `hasGpsFix`
-        // gate required provider == "gps", which most devices never report for
-        // the active location, so points were never recorded and the patrol
-        // page + dashboard showed zero distance/speed/steps.
-        val usableFix = telemetry.latitude != null &&
-            telemetry.longitude != null &&
-            telemetry.horizontalAccuracyMeters != null &&
-            telemetry.ageMs in 0..30_000
-
-        if (usableFix) {
-            dao.insertPoint(
-                PatrolPointEntity(
-                    id = "pt-${UUID.randomUUID()}",
-                    patrolId = pid,
-                    latitude = telemetry.latitude,
-                    longitude = telemetry.longitude,
-                    altitude = telemetry.altitudeMeters,
-                    speed = telemetry.speedMps,
-                    bearing = telemetry.bearingDegrees,
-                    accuracy = telemetry.horizontalAccuracyMeters,
-                    timestamp = now
-                )
-            )
-            _samplesRecorded.update { it + 1 }
-        }
+        tryRecordPoint(pid, now, force = false)
 
         val readings = buildSensorReadings(pid, now)
         if (readings.isNotEmpty()) {
             dao.insertReadings(readings)
         }
 
+        val telemetry = telemetryManager.telemetry.value
         val info = computeMovement(telemetry)
         _movement.value = info
+        // Persist the detected movement mode (once per change) so the patrol
+        // report can surface it and we can alert on method mismatches.
+        if (info.mode != MovementMode.UNKNOWN && info.mode != lastPersistedMode) {
+            dao.setDetectedMethod(pid, info.mode.name)
+            lastPersistedMode = info.mode
+        }
         dao.insertReading(
             SensorReadingEntity(
                 id = "mm-${UUID.randomUUID()}",
@@ -214,6 +208,63 @@ class TelemetryRecorder(
                 value = info.mode.code.toFloat()
             )
         )
+    }
+
+    /**
+     * Records a patrol point when the device has a usable fix and either the
+     * sampling interval has elapsed or it has moved enough since the last
+     * point. Recording on displacement (not just time) captures the real route
+     * instead of a handful of far-apart samples, so reported distance matches
+     * the actual track.
+     */
+    private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean): Boolean {
+        val telemetry = telemetryManager.telemetry.value
+        val lat = telemetry.latitude ?: return false
+        val lon = telemetry.longitude ?: return false
+        if (!force && telemetry.ageMs !in 0..AppConfig.POINT_MAX_AGE_MS) return false
+
+        val disp = if (lastPointLat != null) {
+            haversine(lastPointLat!!, lastPointLon!!, lat, lon)
+        } else {
+            Double.MAX_VALUE
+        }
+        val timeSince = now - lastPointTime
+        if (!force &&
+            disp < AppConfig.MIN_POINT_DISPLACEMENT_M &&
+            timeSince < AppConfig.SAMPLE_INTERVAL_MS
+        ) {
+            return false
+        }
+
+        dao.insertPoint(
+            PatrolPointEntity(
+                id = "pt-${UUID.randomUUID()}",
+                patrolId = pid,
+                latitude = lat,
+                longitude = lon,
+                altitude = telemetry.altitudeMeters,
+                speed = telemetry.speedMps,
+                bearing = telemetry.bearingDegrees,
+                accuracy = telemetry.horizontalAccuracyMeters,
+                timestamp = now
+            )
+        )
+        _samplesRecorded.update { it + 1 }
+        lastPointLat = lat
+        lastPointLon = lon
+        lastPointTime = now
+        return true
+    }
+
+    private fun haversine(aLat: Double, aLon: Double, bLat: Double, bLon: Double): Double {
+        val dLat = Math.toRadians(bLat - aLat)
+        val dLon = Math.toRadians(bLon - aLon)
+        val a = kotlin.math.sin(dLat / 2).let { it * it } +
+            kotlin.math.cos(Math.toRadians(aLat)) *
+            kotlin.math.cos(Math.toRadians(bLat)) *
+            kotlin.math.sin(dLon / 2).let { it * it }
+        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+        return 6_371_000.0 * c
     }
 
     private fun buildSensorReadings(pid: String, now: Long): List<SensorReadingEntity> {

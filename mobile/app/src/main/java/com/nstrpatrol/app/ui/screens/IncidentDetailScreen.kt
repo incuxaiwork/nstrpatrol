@@ -27,7 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
-import com.nstrpatrol.app.data.ReportedIncidents.IncidentStatus
+import com.nstrpatrol.app.data.db.IncidentStatus
 import com.nstrpatrol.app.data.db.IncidentEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.ui.components.AutoCapturedPanel

@@ -1,7 +1,10 @@
 package com.nstrpatrol.app
 
 object AppConfig {
-    const val SAMPLE_INTERVAL_MS = 30_000L
+    const val SAMPLE_INTERVAL_MS = 10_000L
+    const val POINT_POLL_MS = 3_000L
+    const val MIN_POINT_DISPLACEMENT_M = 12.0
+    const val POINT_MAX_AGE_MS = 60_000L
     const val ACTIVITY_UPDATE_INTERVAL_MS = 10_000L
     const val GPS_UPDATE_INTERVAL_MS = 1000L
     const val GPS_POLL_INTERVAL_MS = 2000L

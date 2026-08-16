@@ -18,10 +18,10 @@ android {
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
-        // Backend base URL. Default targets the host machine from the Android
-        // emulator (10.0.2.2). Override with -PapiBaseUrl=http://192.168.x.x:3000
-        // when running on a physical device.
-        val apiBaseUrl = providers.gradleProperty("apiBaseUrl").orElse("http://10.0.2.2:3000").get()
+        // Backend base URL. Defaults to the Railway production deployment.
+        // Override for local development with -PapiBaseUrl=http://10.0.2.2:3000
+        // (Android emulator) or -PapiBaseUrl=http://192.168.x.x:3000 (physical device).
+        val apiBaseUrl = providers.gradleProperty("apiBaseUrl").orElse("https://nstrpatrol-production.up.railway.app").get()
         buildConfigField("String", "API_BASE_URL", "\"$apiBaseUrl\"")
     }
 
@@ -82,6 +82,7 @@ dependencies {
 
     implementation(libs.androidx.room.runtime)
     ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.play.services.location)
     implementation(libs.maplibre.android.sdk)
 

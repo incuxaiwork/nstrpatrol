@@ -6,6 +6,7 @@ import android.location.LocationManager
 import com.nstrpatrol.app.data.db.IncidentEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.data.SyncController
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -55,7 +56,7 @@ fun submitIncident(
     )
     CoroutineScope(Dispatchers.IO).launch {
         dao.insertIncident(entity)
-        SyncManager.syncNow(dao, api)
+        SyncController.sync(dao, api)
     }
 }
 

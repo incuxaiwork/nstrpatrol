@@ -18,7 +18,8 @@ class ApiException(val statusCode: Int, val errorCode: String?, message: String?
  * Minimal HTTP client for the NSTR backend. Uses HttpURLConnection so no extra
  * dependencies are needed. Callers treat null/false as "not available" and fall
  * back to bundled assets or locally cached files. Authenticated calls use the
- * [accessToken] set by [setAccessToken].
+ * [accessToken] set by [setAccessToken]. The backend issues non-expiring access
+ * tokens, so no refresh/rotation is needed.
  */
 class BackendApiClient {
 
@@ -186,8 +187,6 @@ class BackendApiClient {
         return listOfNotNull(
             activeBaseUrl,
             configured,
-            "http://10.58.42.142:3000",
-            "http://10.141.232.13:3000",
             "http://10.0.2.2:3000",
             "http://127.0.0.1:3000"
         ).distinct()
@@ -195,8 +194,7 @@ class BackendApiClient {
 
     /** Executes a request and returns (statusCode, responseBody) or null on transport failure. */
     private fun request(path: String, method: String, body: JSONObject?): Pair<Int, String?>? {
-        val candidates = getCandidateBaseUrls()
-        for (baseUrl in candidates) {
+        for (baseUrl in getCandidateBaseUrls()) {
             try {
                 val conn = openUrl("$baseUrl$path", method)
                 try {
@@ -223,7 +221,7 @@ class BackendApiClient {
 
     private fun openUrl(fullUrl: String, method: String): HttpURLConnection {
         return (URL(fullUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 5_000
+            connectTimeout = 10_000
             readTimeout = 60_000
             instanceFollowRedirects = true
             requestMethod = method

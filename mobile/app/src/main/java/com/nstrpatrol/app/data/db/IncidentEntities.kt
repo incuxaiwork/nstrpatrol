@@ -4,6 +4,17 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 /**
+ * Lifecycle status of a reported incident. Mirrors the backend Incident.status
+ * values; used for status chip styling in the reports UI.
+ */
+enum class IncidentStatus(val label: String) {
+    SUBMITTED("Submitted"),
+    VERIFIED("Verified"),
+    RESOLVED("Resolved"),
+    REJECTED("Rejected")
+}
+
+/**
  * A reported incident / observation captured in the field. Stored locally first
  * with syncStatus PENDING, then uploaded to /api/sync/upload (entity "incidents")
  * by [com.nstrpatrol.app.data.SyncManager]. Mirrors the backend Incident model.

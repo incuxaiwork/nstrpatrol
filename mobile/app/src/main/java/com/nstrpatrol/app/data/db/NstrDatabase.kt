@@ -4,6 +4,8 @@ import android.content.Context
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
+import androidx.room.migration.Migration
+import androidx.sqlite.db.SupportSQLiteDatabase
 
 @Database(
     entities = [
@@ -13,7 +15,7 @@ import androidx.room.RoomDatabase
         PatrolSessionEntity::class,
         IncidentEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class NstrDatabase : RoomDatabase() {
@@ -22,6 +24,12 @@ abstract class NstrDatabase : RoomDatabase() {
 
     companion object {
         private const val NAME = "nstr_patrol.db"
+
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE patrol_sessions ADD COLUMN detectedMethod TEXT")
+            }
+        }
 
         @Volatile
         private var instance: NstrDatabase? = null
@@ -33,6 +41,7 @@ abstract class NstrDatabase : RoomDatabase() {
                     NstrDatabase::class.java,
                     NAME
                 )
+                    .addMigrations(MIGRATION_4_5)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }
