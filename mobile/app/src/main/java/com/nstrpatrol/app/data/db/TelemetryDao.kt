@@ -94,6 +94,13 @@ interface TelemetryDao {
     suspend fun movementModeCountsForPatrol(patrolId: String): List<MovementModeCount>
 
     @Query(
+        "SELECT timestamp, CAST(value AS INTEGER) AS value FROM sensor_readings " +
+            "WHERE patrolId = :patrolId AND type = 'MOVEMENT_MODE' " +
+            "ORDER BY timestamp ASC"
+    )
+    suspend fun movementSamplesForPatrol(patrolId: String): List<MovementSample>
+
+    @Query(
         "SELECT COUNT(*) FROM sensor_readings " +
             "WHERE type = 'MOVEMENT_MODE' " +
             "AND CAST(value AS INTEGER) IN (2, 3, 4) " +
@@ -227,3 +234,6 @@ interface TelemetryDao {
 
 /** Aggregated count of a movement mode (its persisted `value` code) in a patrol. */
 data class MovementModeCount(val value: Int, val count: Int)
+
+/** A single tracked movement-mode reading with its exact capture time. */
+data class MovementSample(val timestamp: Long, val value: Int)

@@ -2,6 +2,12 @@
 <resources>
     <string name="app_name">nstrpatrol</string>
 
+    <!-- Foreground service (active patrol) -->
+    <string name="fgs_patrol_channel_name">Patrol tracking</string>
+    <string name="fgs_patrol_title">Patrol in progress</string>
+    <string name="fgs_patrol_text">Tracking and recording patrol data</string>
+    <string name="exit_sync_message">Syncing data before closing…</string>
+
     <!-- Navigation tabs -->
     <string name="nav_home">Home</string>
     <string name="nav_maps">Maps</string>
@@ -70,6 +76,13 @@
     <string name="settings_diagnostics">Diagnostics &amp; System</string>
     <string name="settings_gps_diagnostics">GPS Diagnostics</string>
     <string name="settings_gps_diagnostics_desc">GNSS Status, Constellations &amp; Accuracy</string>
+
+    <string name="settings_gps_recording">GPS Recording</string>
+    <string name="settings_gps_poll">Fix Poll Interval</string>
+    <string name="settings_gps_sample_interval">Min Time Between Points</string>
+    <string name="settings_gps_displacement">Min Distance Between Points</string>
+    <string name="settings_gps_max_age">Max Fix Age</string>
+    <string name="settings_gps_update_interval">GPS Provider Update Rate</string>
     <string name="settings_logout">LOG OUT</string>
 
     <!-- Patrol Start -->

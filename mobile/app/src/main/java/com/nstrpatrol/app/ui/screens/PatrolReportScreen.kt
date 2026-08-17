@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -16,9 +17,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -39,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.AppConfig
+import com.nstrpatrol.app.data.db.MovementSample
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -103,7 +110,8 @@ fun PatrolReportScreen(
     var moveMinutes by remember { mutableStateOf(0) }
     var locallyEnded by remember { mutableStateOf(false) }
     var showEndConfirm by remember { mutableStateOf(false) }
-    var movementBreakdown by remember { mutableStateOf(emptyList<Pair<MovementMode, Long>>()) }
+    var movementSegments by remember { mutableStateOf(emptyList<MovementSegment>()) }
+    var fullscreenMap by remember { mutableStateOf(false) }
 
     // Reactive: the session row may not exist yet when this screen opens (the
     // start screen writes it asynchronously, and TelemetryRecorder inserts with
@@ -113,19 +121,12 @@ fun PatrolReportScreen(
     val localPoints by dao.patrolPointsFlow(patrolId)
         .collectAsStateWithLifecycle(emptyList())
 
-    // Time spent in each detected movement mode (readings are recorded roughly
-    // once per sampling tick), so the report can show exactly how the ranger
-    // travelled (walking/cycling/running/etc.) and deter duty tampering.
+    // Exact timeline of movement: consecutive same-mode samples form a segment
+    // with a precise from/to time (readings are recorded once per sampling tick).
     // Keyed on the points flow so a live (in-progress) report keeps updating.
     LaunchedEffect(patrolId, localPoints.size) {
-        val counts = dao.movementModeCountsForPatrol(patrolId)
-        movementBreakdown = counts
-            .mapNotNull { c ->
-                val mode = MovementMode.fromCode(c.value)
-                if (mode == MovementMode.UNKNOWN) null else mode to c.count.toLong() * AppConfig.METRICS_SAMPLE_INTERVAL_MS
-            }
-            .filter { it.second > 0 }
-            .sortedByDescending { it.second }
+        val samples = dao.movementSamplesForPatrol(patrolId)
+        movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
     }
 
     LaunchedEffect(patrolId) {
@@ -159,7 +160,19 @@ fun PatrolReportScreen(
     val detectedLabel = s?.detectedMethod ?: "Unknown"
     val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US) }
 
-    NstrScaffold(
+    // Single embedded tile server shared by the inline and fullscreen maps so
+    // opening fullscreen doesn't try to re-bind the same port.
+    val context = LocalContext.current
+    val mbtilesServer = remember { MbtilesServer(context) }
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) { mbtilesServer.start() }
+    }
+    DisposableEffect(Unit) {
+        onDispose { mbtilesServer.stop() }
+    }
+
+    Box {
+        NstrScaffold(
         title = "Patrol Report",
         subtitle = s?.patrolType ?: "",
         onBack = onBack,
@@ -197,7 +210,9 @@ fun PatrolReportScreen(
                 points = points,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(280.dp)
+                    .height(280.dp),
+                mbtilesServer = mbtilesServer,
+                onExpand = { fullscreenMap = true }
             )
 
             Spacer(Modifier.height(16.dp))
@@ -255,7 +270,7 @@ fun PatrolReportScreen(
                 calGoal = 500
             )
 
-            if (movementBreakdown.isNotEmpty()) {
+            if (movementSegments.isNotEmpty()) {
                 Spacer(Modifier.height(16.dp))
                 SectionHeader(text = "Movement breakdown")
                 Spacer(Modifier.height(8.dp))
@@ -267,8 +282,8 @@ fun PatrolReportScreen(
                         .background(Surface)
                         .padding(14.dp)
                 ) {
-                    movementBreakdown.forEach { (mode, millis) ->
-                        MovementBreakdownRow(mode = mode, millis = millis)
+                    movementSegments.forEach { segment ->
+                        MovementBreakdownRow(segment)
                     }
                 }
             }
@@ -344,6 +359,31 @@ fun PatrolReportScreen(
                 }
             )
         }
+        }
+
+        if (fullscreenMap) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black)
+            ) {
+                PatrolTrackMap(
+                    points = points,
+                    modifier = Modifier.fillMaxSize(),
+                    mbtilesServer = mbtilesServer,
+                    showExpandButton = false
+                )
+                IconButton(
+                    onClick = { fullscreenMap = false },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                ) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close map", tint = Color.White)
+                }
+            }
+        }
     }
 }
 
@@ -377,8 +417,8 @@ private fun DetailRow(label: String, value: String) {
 }
 
 @Composable
-private fun MovementBreakdownRow(mode: MovementMode, millis: Long) {
-    val icon = when (mode) {
+private fun MovementBreakdownRow(segment: MovementSegment) {
+    val icon = when (segment.mode) {
         MovementMode.STILL -> "•"
         MovementMode.WALKING -> "🚶"
         MovementMode.RUNNING -> "🏃"
@@ -386,35 +426,98 @@ private fun MovementBreakdownRow(mode: MovementMode, millis: Long) {
         MovementMode.VEHICLE -> "🚗"
         else -> "•"
     }
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .padding(vertical = 5.dp)
     ) {
-        Text(text = icon, color = TextPrimary, fontSize = 14.sp)
-        Spacer(Modifier.width(10.dp))
-        Text(
-            text = mode.name.lowercase().replaceFirstChar { it.uppercase() },
-            color = TextPrimary,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Medium,
-            modifier = Modifier.weight(1f)
-        )
-        Text(
-            text = formatMoveDuration(millis),
-            color = ForestGreen,
-            fontSize = 14.sp,
-            fontWeight = FontWeight.SemiBold
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(text = icon, color = TextPrimary, fontSize = 14.sp)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = segment.mode.name.lowercase().replaceFirstChar { it.uppercase() },
+                color = TextPrimary,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                text = formatMoveDuration(segment.durationMillis),
+                color = ForestGreen,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
+        Row(modifier = Modifier.padding(start = 24.dp, top = 2.dp)) {
+            Text(
+                text = "${formatTime(segment.startTime)} → ${formatTime(segment.endTime)}",
+                color = TextSecondary,
+                fontSize = 12.sp
+            )
+        }
     }
 }
 
+/** One contiguous run of the same movement mode, with exact from/to times. */
+private data class MovementSegment(
+    val mode: MovementMode,
+    val startTime: Long,
+    val endTime: Long
+) {
+    val durationMillis: Long get() = (endTime - startTime).coerceAtLeast(0)
+}
+
+/**
+ * Splits timestamped movement samples into contiguous same-mode segments.
+ * A segment runs from its first sample until the next different mode (or the
+ * last sample plus one sampling tick for the final segment), so the reported
+ * intervals tile the patrol's sensor history without gaps.
+ */
+private fun buildMovementSegments(
+    samples: List<MovementSample>,
+    sampleIntervalMs: Long
+): List<MovementSegment> {
+    if (samples.isEmpty()) return emptyList()
+    val result = mutableListOf<MovementSegment>()
+    var begin = 0
+    var i = 1
+    while (i <= samples.size) {
+        val changed = i == samples.size || samples[i].value != samples[begin].value
+        if (changed) {
+            val start = samples[begin].timestamp
+            val last = samples[i - 1].timestamp
+            val end = if (i < samples.size) {
+                (samples[i].timestamp - 1).coerceAtLeast(start)
+            } else {
+                last + sampleIntervalMs
+            }
+            val mode = MovementMode.fromCode(samples[begin].value)
+            if (mode != MovementMode.UNKNOWN && end > start) {
+                result += MovementSegment(mode, start, end)
+            }
+            begin = i
+        }
+        i++
+    }
+    return result
+}
+
+private fun formatTime(millis: Long): String =
+    SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(millis))
+
 private fun formatMoveDuration(millis: Long): String {
-    val totalMin = millis / 60_000
-    val h = totalMin / 60
-    val m = totalMin % 60
-    return if (h > 0) "${h}h ${m}m" else "${m}m"
+    val totalSec = millis / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return when {
+        h > 0 -> "${h}h ${m}m"
+        m > 0 -> "${m}m ${s}s"
+        else -> "${s}s"
+    }
 }
 
 private fun formatDuration(startMs: Long?, endMs: Long?): String {
@@ -537,33 +640,27 @@ private fun parseIsoMillis(iso: String): Long {
 @Composable
 private fun PatrolTrackMap(
     points: List<PatrolPointEntity>,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    mbtilesServer: MbtilesServer,
+    onExpand: (() -> Unit)? = null,
+    showExpandButton: Boolean = true
 ) {
-    val context = LocalContext.current
+    var baseMap by remember { mutableStateOf(1) }
+
     val density = LocalDensity.current
     val lifecycleOwner = LocalLifecycleOwner.current
-    val mbtilesServer = remember { MbtilesServer(context) }
     var mapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
     var styleReady by remember { mutableStateOf(false) }
     var mapView by remember { mutableStateOf<MapView?>(null) }
-    // 0 = offline MBTiles atlas, 1 = street (OSM), 2 = satellite (Esri).
-    var baseMap by remember { mutableStateOf(1) }
-
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) {
-            mbtilesServer.start()
-        }
-    }
-    DisposableEffect(Unit) {
-        onDispose { mbtilesServer.stop() }
-    }
 
     // Keep the line + camera in sync with collected points.
     LaunchedEffect(points, mapRef, styleReady) {
         val map = mapRef ?: return@LaunchedEffect
         map.style?.getSourceAs<GeoJsonSource>("patrol-track-source")
-            ?.setGeoJson(buildPatrolTrackGeoJson(points))
+            ?.setGeoJson(buildPatrolTrackPointGeoJson(points))
+        map.style?.getSourceAs<GeoJsonSource>("patrol-track-line-source")
+            ?.setGeoJson(buildPatrolTrackLineGeoJson(points))
         val paddingPx = with(density) { 56.dp.toPx() }.toInt()
         fitCameraToTrack(map, points, paddingPx)
     }
@@ -576,7 +673,7 @@ private fun PatrolTrackMap(
     Box(modifier = modifier) {
         if (!mapInitError) {
             AndroidView(
-                modifier = Modifier.fillMaxWidth().height(280.dp),
+                modifier = Modifier.fillMaxSize(),
                 factory = { ctx ->
                     try {
                         MapLibre.getInstance(ctx)
@@ -630,12 +727,28 @@ private fun PatrolTrackMap(
                             style.addLayer(RasterLayer("satellite-raster-layer", "satellite-raster-source"))
                             // The patrol track is always rendered on top.
                             style.addSource(GeoJsonSource("patrol-track-source", EMPTY_FC))
+                            style.addSource(GeoJsonSource("patrol-track-line-source", EMPTY_FC))
+                            // White casing makes the line visible on both light
+                            // (street/offline) and dark (satellite) basemaps.
                             style.addLayer(
-                                LineLayer("patrol-track-line-layer", "patrol-track-source").apply {
+                                LineLayer("patrol-track-case-layer", "patrol-track-line-source").apply {
+                                    setProperties(
+                                        PropertyFactory.lineColor(AndroidColor.parseColor("#FFFFFF")),
+                                        PropertyFactory.lineWidth(9f),
+                                        PropertyFactory.lineOpacity(0.9f),
+                                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
+                                    )
+                                }
+                            )
+                            style.addLayer(
+                                LineLayer("patrol-track-line-layer", "patrol-track-line-source").apply {
                                     setProperties(
                                         PropertyFactory.lineColor(AndroidColor.parseColor("#2E7BF6")),
                                         PropertyFactory.lineWidth(5f),
-                                        PropertyFactory.lineOpacity(0.95f)
+                                        PropertyFactory.lineOpacity(0.95f),
+                                        PropertyFactory.lineCap(Property.LINE_CAP_ROUND),
+                                        PropertyFactory.lineJoin(Property.LINE_JOIN_ROUND)
                                     )
                                 }
                             )
@@ -650,6 +763,12 @@ private fun PatrolTrackMap(
                                 }
                             )
                             applyBaseMapLayer(mapRef, baseMap)
+                            // Draw the track immediately (and again every time
+                            // points change via the LaunchedEffect below).
+                            map.style?.getSourceAs<GeoJsonSource>("patrol-track-source")
+                                ?.setGeoJson(buildPatrolTrackPointGeoJson(points))
+                            map.style?.getSourceAs<GeoJsonSource>("patrol-track-line-source")
+                                ?.setGeoJson(buildPatrolTrackLineGeoJson(points))
                             styleReady = true
                         }
                     }
@@ -669,8 +788,30 @@ private fun PatrolTrackMap(
                 BasemapChip("Street", selected = baseMap == 1, onClick = { baseMap = 1 })
                 BasemapChip("Satellite", selected = baseMap == 2, onClick = { baseMap = 2 })
             }
+
+            // Expand-to-fullscreen button (top-left)
+            if (showExpandButton && onExpand != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .clip(CircleShape)
+                        .background(Surface.copy(alpha = 0.92f))
+                        .border(1.dp, OutlineCard, CircleShape)
+                        .clickable(onClick = onExpand)
+                        .size(32.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.Fullscreen,
+                        contentDescription = "Expand map",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
         } else {
-            Canvas(modifier = Modifier.fillMaxWidth().height(280.dp)) {
+            Canvas(modifier = Modifier.fillMaxSize()) {
                 var x = 32.dp.toPx()
                 while (x < size.width) {
                     drawLine(MapGridLine, Offset(x, 0f), Offset(x, size.height), 1.dp.toPx())

@@ -63,12 +63,23 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showLanguagePicker by remember { mutableStateOf(false) }
     var showSyncPicker by remember { mutableStateOf(false) }
+    var showGpsPollPicker by remember { mutableStateOf(false) }
+    var showGpsSamplePicker by remember { mutableStateOf(false) }
+    var showGpsDisplacementPicker by remember { mutableStateOf(false) }
+    var showGpsMaxAgePicker by remember { mutableStateOf(false) }
+    var showGpsUpdatePicker by remember { mutableStateOf(false) }
+
     val syncMode by settings.syncMode.collectAsStateWithLifecycle()
     val currentCode = remember { SupportedLanguages.currentCode(context) }
     val currentLanguageLabel = remember(currentCode) {
         SupportedLanguages.options().firstOrNull { it.code == currentCode }?.displayName
             ?: "English"
     }
+    val gpsPollMs by settings.gpsPollMs.collectAsStateWithLifecycle()
+    val gpsSampleIntervalMs by settings.gpsSampleIntervalMs.collectAsStateWithLifecycle()
+    val gpsMinDisplacementM by settings.gpsMinDisplacementM.collectAsStateWithLifecycle()
+    val gpsMaxFixAgeMs by settings.gpsMaxFixAgeMs.collectAsStateWithLifecycle()
+    val gpsUpdateIntervalMs by settings.gpsUpdateIntervalMs.collectAsStateWithLifecycle()
 
     NstrScaffold(
         title = stringResource(R.string.settings_title),
@@ -109,6 +120,39 @@ fun SettingsScreen(
         )
 
         Spacer(Modifier.height(20.dp))
+        SectionHeader(text = stringResource(R.string.settings_gps_recording))
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = stringResource(R.string.settings_gps_poll),
+            value = formatDuration(gpsPollMs),
+            onClick = { showGpsPollPicker = true }
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = stringResource(R.string.settings_gps_sample_interval),
+            value = formatDuration(gpsSampleIntervalMs),
+            onClick = { showGpsSamplePicker = true }
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = stringResource(R.string.settings_gps_displacement),
+            value = String.format("%.0f m", gpsMinDisplacementM),
+            onClick = { showGpsDisplacementPicker = true }
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = stringResource(R.string.settings_gps_max_age),
+            value = formatDuration(gpsMaxFixAgeMs),
+            onClick = { showGpsMaxAgePicker = true }
+        )
+        Spacer(Modifier.height(8.dp))
+        SettingRow(
+            label = stringResource(R.string.settings_gps_update_interval),
+            value = formatDuration(gpsUpdateIntervalMs),
+            onClick = { showGpsUpdatePicker = true }
+        )
+
+        Spacer(Modifier.height(20.dp))
         SectionHeader(text = stringResource(R.string.settings_diagnostics))
         Spacer(Modifier.height(8.dp))
         SettingRow(
@@ -142,6 +186,64 @@ fun SettingsScreen(
                 onDismiss = { showSyncPicker = false }
             )
         }
+
+        if (showGpsPollPicker) {
+            LongPickerDialog(
+                title = stringResource(R.string.settings_gps_poll),
+                options = listOf(1000L to "1 s", 2000L to "2 s", 3000L to "3 s", 5000L to "5 s", 10_000L to "10 s"),
+                current = gpsPollMs,
+                onSelect = { settings.setGpsPollMs(it); showGpsPollPicker = false },
+                onDismiss = { showGpsPollPicker = false }
+            )
+        }
+
+        if (showGpsSamplePicker) {
+            LongPickerDialog(
+                title = stringResource(R.string.settings_gps_sample_interval),
+                options = listOf(1000L to "1 s", 2000L to "2 s", 3000L to "3 s", 5000L to "5 s", 10_000L to "10 s", 30_000L to "30 s"),
+                current = gpsSampleIntervalMs,
+                onSelect = { settings.setGpsSampleIntervalMs(it); showGpsSamplePicker = false },
+                onDismiss = { showGpsSamplePicker = false }
+            )
+        }
+
+        if (showGpsDisplacementPicker) {
+            DoublePickerDialog(
+                title = stringResource(R.string.settings_gps_displacement),
+                options = listOf(0.0 to "0 m (every fix)", 5.0 to "5 m", 10.0 to "10 m", 20.0 to "20 m", 50.0 to "50 m", 100.0 to "100 m"),
+                current = gpsMinDisplacementM,
+                onSelect = { settings.setGpsMinDisplacementM(it); showGpsDisplacementPicker = false },
+                onDismiss = { showGpsDisplacementPicker = false }
+            )
+        }
+
+        if (showGpsMaxAgePicker) {
+            LongPickerDialog(
+                title = stringResource(R.string.settings_gps_max_age),
+                options = listOf(10_000L to "10 s", 30_000L to "30 s", 60_000L to "1 min", 120_000L to "2 min", 300_000L to "5 min", 600_000L to "10 min"),
+                current = gpsMaxFixAgeMs,
+                onSelect = { settings.setGpsMaxFixAgeMs(it); showGpsMaxAgePicker = false },
+                onDismiss = { showGpsMaxAgePicker = false }
+            )
+        }
+
+        if (showGpsUpdatePicker) {
+            LongPickerDialog(
+                title = stringResource(R.string.settings_gps_update_interval),
+                options = listOf(500L to "0.5 s", 1000L to "1 s", 2000L to "2 s", 5000L to "5 s"),
+                current = gpsUpdateIntervalMs,
+                onSelect = { settings.setGpsUpdateIntervalMs(it); showGpsUpdatePicker = false },
+                onDismiss = { showGpsUpdatePicker = false }
+            )
+        }
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    return when {
+        ms < 1000 -> "${ms}ms"
+        ms < 60_000 -> "${ms / 1000} s"
+        else -> "${ms / 60_000} min"
     }
 }
 
@@ -211,6 +313,88 @@ private fun SyncModePickerDialog(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         RadioButton(selected = selected, onClick = { onSelect(mode) })
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = label,
+                            color = TextPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        }
+    )
+}
+
+@Composable
+private fun LongPickerDialog(
+    title: String,
+    options: List<Pair<Long, String>>,
+    current: Long,
+    onSelect: (Long) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    val selected = value == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(value) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(value) })
+                        Spacer(Modifier.width(12.dp))
+                        Text(
+                            text = label,
+                            color = TextPrimary,
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.action_close))
+            }
+        }
+    )
+}
+
+@Composable
+private fun DoublePickerDialog(
+    title: String,
+    options: List<Pair<Double, String>>,
+    current: Double,
+    onSelect: (Double) -> Unit,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            Column {
+                options.forEach { (value, label) ->
+                    val selected = value == current
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onSelect(value) }
+                            .padding(vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected, onClick = { onSelect(value) })
                         Spacer(Modifier.width(12.dp))
                         Text(
                             text = label,

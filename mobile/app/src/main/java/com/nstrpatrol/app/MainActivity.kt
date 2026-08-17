@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
@@ -16,7 +17,10 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -27,10 +31,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nstrpatrol.app.R
 import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.data.ConnectivityObserver
@@ -44,6 +55,7 @@ import com.nstrpatrol.app.data.db.NstrDatabase
 import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.GpsTelemetryManager
+import com.nstrpatrol.app.time.PatrolForegroundService
 import com.nstrpatrol.app.time.PatrolMetrics
 import com.nstrpatrol.app.time.TelemetryRecorder
 import com.nstrpatrol.app.time.TrustedTimeManager
@@ -74,6 +86,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -138,7 +151,8 @@ fun NstrApp() {
         sessionStore.saveRoute(nav.current.key)
     }
     val timeManager = remember { TrustedTimeManager(context.applicationContext) }
-    val telemetryManager = remember { GpsTelemetryManager(context.applicationContext) }
+    val settings = remember { SettingsStore(context.applicationContext) }
+    val telemetryManager = remember { GpsTelemetryManager(context.applicationContext, settings) }
     val patrolTimer = remember { PatrolTimer() }
     val database = remember { NstrDatabase.getInstance(context.applicationContext) }
     val telemetryRecorder = remember {
@@ -147,13 +161,13 @@ fun NstrApp() {
             patrolTimer = patrolTimer,
             telemetryManager = telemetryManager,
             timeManager = timeManager,
-            dao = database.telemetryDao()
+            dao = database.telemetryDao(),
+            settings = settings
         )
     }
     val api: BackendApiClient = auth.apiClient()
     val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     val connectivity = remember { ConnectivityObserver(context) }
-    val settings = remember { SettingsStore(context.applicationContext) }
 
     // Schedule background sync: every 30 min while online + an immediate
     // network-gated sync so data flows as soon as connectivity returns.
@@ -175,7 +189,10 @@ fun NstrApp() {
         } else {
             System.currentTimeMillis()
         }
-        if (patrolTimer.patrolId == pid) patrolTimer.stop()
+        if (patrolTimer.patrolId == pid) {
+            patrolTimer.stop()
+            PatrolForegroundService.stop(context)
+        }
         syncScope.launch {
             val dao = database.telemetryDao()
             // Finalize the local session FIRST and unconditionally: metric
@@ -208,6 +225,9 @@ fun NstrApp() {
     val activityRecognitionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted -> telemetryRecorder.onPermissionResult(granted) }
+    val notificationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
     LaunchedEffect(patrolTimer.running.value) {
         if (patrolTimer.running.value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             !telemetryRecorder.hasActivityRecognitionPermission()
@@ -216,13 +236,26 @@ fun NstrApp() {
         }
     }
 
+    /** Starts a patrol: timer + keep-alive foreground service + notifications. */
+    fun startPatrolNow() {
+        patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
+        PatrolForegroundService.start(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.POST_NOTIFICATIONS
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
+
     if (BuildConfig.DEBUG) {
         val patrolBroadcast = remember {
             object : BroadcastReceiver() {
                 override fun onReceive(context: Context?, intent: Intent?) {
                     when (intent?.action) {
-                        DEBUG_START_PATROL ->
-                            patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
+                        DEBUG_START_PATROL -> startPatrolNow()
                         DEBUG_STOP_PATROL -> stopActivePatrol(navigateToAllPatrols = false)
                     }
                 }
@@ -259,6 +292,38 @@ fun NstrApp() {
 
     BackHandler(enabled = nav.canGoBack) {
         nav.popBack()
+    }
+
+    // Whether the device currently has internet; drives sync-then-close on exit.
+    val isOnline by combine(connectivity.isOnline, settings.syncMode) { online, _ -> online }
+        .collectAsStateWithLifecycle(initialValue = false)
+
+    // Guards the app from being closed while a patrol is on the go.
+    var isExiting by remember { mutableStateOf(false) }
+
+    // Root back (no screen to pop): never close during a patrol — background the
+    // app instead so tracking/telemetry keeps running. Otherwise sync-then-close
+    // when online, close immediately when offline (sync resumes later via WorkManager).
+    val activity = context as? ComponentActivity
+    BackHandler(enabled = !nav.canGoBack) {
+        if (patrolTimer.isRunning()) {
+            @Suppress("DEPRECATION")
+            activity?.moveTaskToBack(true)
+            return@BackHandler
+        }
+        if (isExiting) return@BackHandler
+        if (isOnline) {
+            isExiting = true
+            syncScope.launch {
+                SyncController.sync(database.telemetryDao(), api)
+                SyncController.state.first {
+                    it is SyncController.SyncState.Success || it is SyncController.SyncState.Failed
+                }
+                activity?.finish()
+            }
+        } else {
+            activity?.finish()
+        }
     }
 
     Box(
@@ -350,7 +415,7 @@ fun NstrApp() {
             onSave = { nav.popBack() },
             onBack = { nav.popBack() },
             onTabSelected = nav::selectTab,
-            onStartPatrol = { patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis()) },
+            onStartPatrol = { startPatrolNow() },
             onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
             patrolTimer = patrolTimer,
             dao = database.telemetryDao(),
@@ -428,6 +493,24 @@ fun NstrApp() {
                 onEndPatrol = { stopActivePatrol(pr.patrolId) }
             )
         }
+        }
+
+        if (isExiting) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = stringResource(R.string.exit_sync_message),
+                        color = Color.White
+                    )
+                }
+            }
         }
     }
 }

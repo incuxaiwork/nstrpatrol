@@ -16,6 +16,7 @@ import com.google.android.gms.location.ActivityRecognition
 import com.google.android.gms.location.ActivityRecognitionResult
 import com.nstrpatrol.app.AppConfig
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.SettingsStore
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.SensorReadingEntity
@@ -49,7 +50,8 @@ class TelemetryRecorder(
     private val patrolTimer: PatrolTimer,
     private val telemetryManager: GpsTelemetryManager,
     private val timeManager: TrustedTimeManager,
-    private val dao: TelemetryDao
+    private val dao: TelemetryDao,
+    private val settings: SettingsStore? = null
 ) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -146,7 +148,7 @@ class TelemetryRecorder(
                 } catch (e: Exception) {
                     Log.w(TAG, "Sample failed", e)
                 }
-                delay(AppConfig.POINT_POLL_MS)
+                delay(settings?.gpsPollMs?.value ?: AppConfig.DEFAULT_POINT_POLL_MS)
             }
         }
     }
@@ -221,7 +223,8 @@ class TelemetryRecorder(
         val telemetry = telemetryManager.telemetry.value
         val lat = telemetry.latitude ?: return false
         val lon = telemetry.longitude ?: return false
-        if (!force && telemetry.ageMs !in 0..AppConfig.POINT_MAX_AGE_MS) return false
+        val maxFixAge = settings?.gpsMaxFixAgeMs?.value ?: AppConfig.DEFAULT_MAX_FIX_AGE_MS
+        if (!force && telemetry.ageMs !in 0..maxFixAge) return false
 
         val disp = if (lastPointLat != null) {
             haversine(lastPointLat!!, lastPointLon!!, lat, lon)
@@ -229,9 +232,11 @@ class TelemetryRecorder(
             Double.MAX_VALUE
         }
         val timeSince = now - lastPointTime
+        val minDisp = settings?.gpsMinDisplacementM?.value ?: AppConfig.DEFAULT_MIN_DISPLACEMENT_M
+        val sampleInterval = settings?.gpsSampleIntervalMs?.value ?: AppConfig.DEFAULT_SAMPLE_INTERVAL_MS
         if (!force &&
-            disp < AppConfig.MIN_POINT_DISPLACEMENT_M &&
-            timeSince < AppConfig.SAMPLE_INTERVAL_MS
+            disp < minDisp &&
+            timeSince < sampleInterval
         ) {
             return false
         }

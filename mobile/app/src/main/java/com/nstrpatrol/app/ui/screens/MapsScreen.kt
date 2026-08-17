@@ -1114,6 +1114,24 @@ internal fun buildPatrolTrackGeoJson(points: List<PatrolPointEntity>): String {
     return "{\"type\":\"FeatureCollection\",\"features\":[$features]}"
 }
 
+/** LineString-only GeoJSON for the patrol route line. */
+internal fun buildPatrolTrackLineGeoJson(points: List<PatrolPointEntity>): String {
+    if (points.size < 2) return EMPTY_FC
+    val coords = points.joinToString(",") { "[${it.longitude},${it.latitude}]" }
+    return "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"LineString\",\"coordinates\":[$coords]},\"properties\":{}}]}"
+}
+
+/** Point-only GeoJSON for the patrol route dots. */
+internal fun buildPatrolTrackPointGeoJson(points: List<PatrolPointEntity>): String {
+    if (points.isEmpty()) return EMPTY_FC
+    val pointFeatures = points.joinToString(",") { p ->
+        "\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${p.longitude},${p.latitude}]},\"properties\":{}"
+    }
+    return "{\"type\":\"FeatureCollection\",\"features\":[$pointFeatures]}"
+}
+
+private const val EMPTY_FC = "{\"type\":\"FeatureCollection\",\"features\":[]}"
+
 internal fun buildCurrentPositionGeoJson(p: PatrolPointEntity): String =
     "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${p.longitude},${p.latitude}]},\"properties\":{}}]}"
 
