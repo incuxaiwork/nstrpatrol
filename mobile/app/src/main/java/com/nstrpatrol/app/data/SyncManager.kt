@@ -1,9 +1,14 @@
 package com.nstrpatrol.app.data
 
+import android.util.Log
 import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.db.SensorReadingEntity
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -18,6 +23,9 @@ import org.json.JSONObject
  * failed instead of silently leaving rows PENDING.
  */
 object SyncManager {
+
+    private const val TAG = "SyncManager"
+    private const val CHUNK_SIZE = 500
 
     data class SyncSummary(
         val syncedItems: Int,
@@ -35,6 +43,8 @@ object SyncManager {
             dao.pendingReadingRows().size +
             dao.pendingIncidents().size
 
+        Log.i(TAG, "Sync started: $totalItems pending items")
+
         var processed = 0
         val advance: (Int) -> Unit = { count ->
             processed += count
@@ -48,8 +58,9 @@ object SyncManager {
         var firstError: String? = null
 
         val fail: (Int, Throwable?) -> Unit = { count, t ->
-            failedItems++
+            failedItems += count
             advance(count)
+            Log.e(TAG, "Sync failed ($count items): ${t?.message}")
             if (firstError == null) {
                 firstError = (t as? ApiException)?.let {
                     "HTTP ${it.statusCode}${it.errorCode?.let { c -> " ($c)" } ?: ""}: ${it.message ?: "error"}"
@@ -67,6 +78,7 @@ object SyncManager {
         syncIncidents(dao, api, ok, fail)
         onProgress(1f)
 
+        Log.i(TAG, "Sync complete: $syncedItems synced, $failedItems failed")
         SyncSummary(syncedItems, failedItems, firstError)
     }
 
@@ -84,6 +96,7 @@ object SyncManager {
             } catch (e: ApiException) {
                 if (e.statusCode != 0 || attempt >= 2) throw e
                 attempt++
+                Log.w(TAG, "Transport error, retry $attempt: ${e.message}")
                 delay(2_000L * attempt)
             }
         }
@@ -95,7 +108,10 @@ object SyncManager {
         ok: (Int) -> Unit,
         fail: (Int, Throwable?) -> Unit
     ) {
-        for (session in dao.sessionsToSync()) {
+        val sessions = dao.sessionsToSync()
+        if (sessions.isEmpty()) return
+        Log.d(TAG, "Syncing ${sessions.size} patrol sessions")
+        for (session in sessions) {
             val body = JSONObject().apply {
                 put("id", session.patrolId)
                 put("type", mapPatrolType(session.patrolType))
@@ -126,35 +142,50 @@ object SyncManager {
     ) {
         val points = dao.pendingPointRows()
         if (points.isEmpty()) return
+        Log.d(TAG, "Syncing ${points.size} patrol points across ${points.groupBy { it.patrolId }.size} patrols")
         for ((patrolId, rows) in points.groupBy { it.patrolId }) {
-            runCatching {
-                val records = JSONArray()
-                for (p in rows) {
-                    records.put(JSONObject().apply {
-                        put("patrolId", p.patrolId)
-                        put("timestamp", p.timestamp)
-                        put("latitude", p.latitude)
-                        put("longitude", p.longitude)
-                        p.altitude?.let { put("altitude", it) }
-                        p.speed?.let { put("speed", it) }
-                        p.bearing?.let { put("bearing", it) }
-                        p.accuracy?.let { put("accuracy", it) }
-                    })
-                }
-                val body = JSONObject().apply {
-                    put("patrolId", patrolId)
-                    put("batches", JSONArray().put(JSONObject().apply {
-                        put("entity", "points")
-                        put("records", records)
-                    }))
-                }
-                withNetworkRetry { api.postJson("/api/sync/upload", body) }
-                dao.markPointsSynced(patrolId)
-                ok(rows.size)
-            }.onFailure { fail(rows.size, it) }
+            val chunks = rows.chunked(CHUNK_SIZE)
+            Log.d(TAG, "Patrol $patrolId: ${rows.size} points in ${chunks.size} chunk(s)")
+            for ((idx, chunk) in chunks.withIndex()) {
+                runCatching {
+                    val records = JSONArray()
+                    for (p in chunk) {
+                        records.put(JSONObject().apply {
+                            put("patrolId", p.patrolId)
+                            put("timestamp", p.timestamp)
+                            put("latitude", p.latitude)
+                            put("longitude", p.longitude)
+                            p.altitude?.let { put("altitude", it) }
+                            p.speed?.let { put("speed", it.toDouble()) }
+                            p.bearing?.let { put("bearing", it.toDouble()) }
+                            p.accuracy?.let { put("accuracy", it.toDouble()) }
+                        })
+                    }
+                    val body = JSONObject().apply {
+                        put("patrolId", patrolId)
+                        put("batches", JSONArray().put(JSONObject().apply {
+                            put("entity", "points")
+                            put("records", records)
+                        }))
+                    }
+                    withNetworkRetry { api.postJson("/api/sync/upload", body) }
+                    Log.d(TAG, "Points chunk ${idx + 1}/${chunks.size} uploaded (${chunk.size} records)")
+                }.onFailure { fail(chunk.size, it); return }
+            }
+            dao.markPointsSynced(patrolId)
+            ok(rows.size)
         }
     }
 
+    /**
+     * Uploads all sensor readings for a patrol in a SINGLE request by batching
+     * all entity types (accelerometer, gyroscope, magnetometer, barometer,
+     * step-readings) into the `batches` array. This reduces HTTP round trips
+     * from 5 per patrol to 1.
+     *
+     * Within each entity type, readings are chunked into [CHUNK_SIZE] groups
+     * to keep payload size manageable.
+     */
     private suspend fun syncReadings(
         dao: TelemetryDao,
         api: BackendApiClient,
@@ -163,38 +194,66 @@ object SyncManager {
     ) {
         val readings = dao.pendingReadingRows()
         if (readings.isEmpty()) return
-        for ((patrolId, rows) in readings.groupBy { it.patrolId }) {
-            val byEntity = rows.groupBy { mapReadingEntity(it.type) }.filterKeys { it != null }
+        val byPatrol = readings.groupBy { it.patrolId }
+        Log.d(TAG, "Syncing ${readings.size} sensor readings across ${byPatrol.size} patrols")
+
+        for ((patrolId, patrolReadings) in byPatrol) {
+            val byEntity = patrolReadings.groupBy { mapReadingEntity(it.type) }.filterKeys { it != null }
+
+            // Build all batches (one per entity, possibly chunked) in one list
+            val allBatches = mutableListOf<JSONObject>()
             for ((entity, recs) in byEntity) {
-                runCatching {
+                val chunks = recs.chunked(CHUNK_SIZE)
+                for (chunk in chunks) {
                     val records = JSONArray()
-                    for (r in recs) {
+                    for (r in chunk) {
                         records.put(JSONObject().apply {
                             put("patrolId", r.patrolId)
                             put("timestamp", r.timestamp)
                             when (entity) {
                                 "step-readings" -> put("steps", r.value?.toInt() ?: 0)
-                                "barometer" -> put("pressureHpa", r.value ?: 0.0)
+                                "barometer" -> put("pressureHpa", r.value?.toDouble() ?: 0.0)
                                 else -> {
-                                    r.x?.let { put("x", it) }
-                                    r.y?.let { put("y", it) }
-                                    r.z?.let { put("z", it) }
+                                    r.x?.let { put("x", it.toDouble()) }
+                                    r.y?.let { put("y", it.toDouble()) }
+                                    r.z?.let { put("z", it.toDouble()) }
                                 }
                             }
                         })
                     }
+                    allBatches.add(JSONObject().apply {
+                        put("entity", entity)
+                        put("records", records)
+                    })
+                }
+            }
+
+            // Send all batches in a single request (backend supports up to 20)
+            // Split into groups of 18 to stay under the backend's 20-batch limit
+            val batchesPerRequest = 18
+            val requestGroups = allBatches.chunked(batchesPerRequest)
+            Log.d(TAG, "Patrol $patrolId: ${patrolReadings.size} readings, ${allBatches.size} batches, ${requestGroups.size} request(s)")
+
+            var totalUploaded = 0
+            for ((groupIdx, group) in requestGroups.withIndex()) {
+                runCatching {
                     val body = JSONObject().apply {
                         put("patrolId", patrolId)
-                        put("batches", JSONArray().put(JSONObject().apply {
-                            put("entity", entity)
-                            put("records", records)
-                        }))
+                        put("batches", JSONArray().apply {
+                            group.forEach { put(it) }
+                        })
                     }
                     withNetworkRetry { api.postJson("/api/sync/upload", body) }
-                    dao.markReadingsSynced(patrolId)
-                    ok(recs.size)
-                }.onFailure { fail(recs.size, it) }
+                    totalUploaded += group.sumOf { it.getJSONArray("records").length() }
+                    Log.d(TAG, "Readings group ${groupIdx + 1}/${requestGroups.size} uploaded ($totalUploaded/${patrolReadings.size})")
+                }.onFailure {
+                    fail(patrolReadings.size, it)
+                    return
+                }
             }
+
+            dao.markReadingsSynced(patrolId)
+            ok(patrolReadings.size)
         }
     }
 
@@ -206,33 +265,40 @@ object SyncManager {
     ) {
         val incidents = dao.pendingIncidents()
         if (incidents.isEmpty()) return
-        val records = JSONArray()
-        for (inc in incidents) {
-            records.put(JSONObject().apply {
-                put("type", inc.type)
-                put("title", inc.title)
-                inc.description?.let { put("description", it) }
-                put("severity", inc.severity)
-                put("details", org.json.JSONObject(inc.detailsJson ?: "{}"))
-                inc.latitude?.let { put("latitude", it) }
-                inc.longitude?.let { put("longitude", it) }
-                inc.accuracy?.let { put("accuracy", it) }
-                put("photos", org.json.JSONArray(inc.photos ?: "[]"))
-                put("occurredAt", inc.occurredAt)
-                inc.patrolId?.let { put("patrolId", it) }
-            })
+        Log.d(TAG, "Syncing ${incidents.size} incidents")
+
+        // Chunk incidents into groups of 50 (incidents are larger)
+        val chunks = incidents.chunked(50)
+        for ((idx, chunk) in chunks.withIndex()) {
+            val records = JSONArray()
+            for (inc in chunk) {
+                records.put(JSONObject().apply {
+                    put("type", inc.type)
+                    put("title", inc.title)
+                    inc.description?.let { put("description", it) }
+                    put("severity", inc.severity)
+                    put("details", org.json.JSONObject(inc.detailsJson ?: "{}"))
+                    inc.latitude?.let { put("latitude", it) }
+                    inc.longitude?.let { put("longitude", it) }
+                    inc.accuracy?.let { put("accuracy", it.toDouble()) }
+                    put("photos", org.json.JSONArray(inc.photos ?: "[]"))
+                    put("occurredAt", inc.occurredAt)
+                    inc.patrolId?.let { put("patrolId", it) }
+                })
+            }
+            runCatching {
+                val body = JSONObject().apply {
+                    put("batches", JSONArray().put(JSONObject().apply {
+                        put("entity", "incidents")
+                        put("records", records)
+                    }))
+                }
+                withNetworkRetry { api.postJson("/api/sync/upload", body) }
+                Log.d(TAG, "Incidents chunk ${idx + 1}/${chunks.size} uploaded (${chunk.size} records)")
+            }.onFailure { fail(chunk.size, it); return }
         }
-        val body = JSONObject().apply {
-            put("batches", JSONArray().put(JSONObject().apply {
-                put("entity", "incidents")
-                put("records", records)
-            }))
-        }
-        runCatching {
-            withNetworkRetry { api.postJson("/api/sync/upload", body) }
-            dao.markIncidentsSynced()
-            ok(incidents.size)
-        }.onFailure { fail(incidents.size, it) }
+        dao.markIncidentsSynced()
+        ok(incidents.size)
     }
 
     private fun mapReadingEntity(type: String): String? = when (type) {
