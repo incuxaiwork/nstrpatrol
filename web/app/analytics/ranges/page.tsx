@@ -14,12 +14,13 @@ import { unitName } from "@/lib/mock/hierarchy";
 import { exportRows, stamp } from "@/lib/export";
 
 const rangesData = [
-  { id: "r-n1", coverage: 88, patrols: 64, incidents: 6, observations: 132 },
-  { id: "r-n2", coverage: 76, patrols: 52, incidents: 9, observations: 98 },
-  { id: "r-c1", coverage: 91, patrols: 71, incidents: 4, observations: 156 },
-  { id: "r-c2", coverage: 68, patrols: 41, incidents: 7, observations: 74 },
-  { id: "r-s1", coverage: 83, patrols: 58, incidents: 5, observations: 112 },
-  { id: "r-s2", coverage: 71, patrols: 44, incidents: 11, observations: 89 },
+  { id: "r-vp-south", coverage: 88, patrols: 64, incidents: 6, observations: 132 },
+  { id: "r-y-palem", coverage: 76, patrols: 52, incidents: 9, observations: 98 },
+  { id: "r-nekkanti", coverage: 91, patrols: 71, incidents: 4, observations: 156 },
+  { id: "r-gv-palli", coverage: 83, patrols: 58, incidents: 5, observations: 112 },
+  { id: "r-dornala", coverage: 68, patrols: 41, incidents: 7, observations: 74 },
+  { id: "r-korraprolu", coverage: 71, patrols: 44, incidents: 11, observations: 89 },
+  { id: "r-markapur", coverage: 79, patrols: 38, incidents: 3, observations: 67 },
 ];
 
 export default function RangeAnalyticsPage() {

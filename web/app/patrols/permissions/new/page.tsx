@@ -294,12 +294,12 @@ function CreateAuthorizationWizard() {
             <div className="grid gap-4 p-5 sm:grid-cols-2">
               <div className="sm:col-span-2">
                 <Field label="Reason" required error={detailsErrors.reason} hint="Operational justification for the exception">
-                  <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Census support — beat C1-A needs extra foot teams" />
+                  <Input value={reason} onChange={(e) => setReason(e.target.value)} placeholder="e.g. Census support — beat Guttalachenu needs extra foot teams" />
                 </Field>
               </div>
               <div className="sm:col-span-2">
                 <Field label="Operational instruction" required error={detailsErrors.instruction}>
-                  <Textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} rows={3} placeholder="e.g. Report to C1-A guard post; join census transect 3; follow census supervisor direction" />
+                  <Textarea value={instruction} onChange={(e) => setInstruction(e.target.value)} rows={3} placeholder="e.g. Report to Guttalachenu guard post; join census transect 3; follow census supervisor direction" />
                 </Field>
               </div>
               <Field label="Patrol type" required>

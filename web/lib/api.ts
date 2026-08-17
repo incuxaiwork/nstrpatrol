@@ -399,6 +399,8 @@ export const incidents = {
 export const gis = {
   beats: () => request<GeoJsonFeatureCollection>("/api/gis/beats", { auth: false }),
   compartments: () => request<GeoJsonFeatureCollection>("/api/gis/compartments", { auth: false }),
+  boundary: () => request<GeoJsonFeatureCollection>("/api/gis/boundary", { auth: false }),
+  grids: () => request<GeoJsonFeatureCollection>("/api/gis/grids", { auth: false }),
   assets: () => request<ApiMapAsset[]>("/api/gis/assets", { auth: false }),
   asset: (resourceKey: string) => `${API_BASE}/api/gis/assets/${encodeURIComponent(resourceKey)}`,
 };

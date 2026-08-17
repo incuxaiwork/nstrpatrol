@@ -12,7 +12,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { authorizations, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
@@ -27,9 +27,12 @@ import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { mockRangers } from "@/lib/mock/people";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { PatrolsReportDialog } from "@/components/reports/dialogs";
 
 export default function PatrolsDashboardPage() {
   const router = useRouter();
+  const [reportOpen, setReportOpen] = useState(false);
   const { data: patrolData, error, loading, reload } = useAsyncData(() => patrols.list());
   const auths = useAsyncData(() => authorizations.list());
 
@@ -84,6 +87,7 @@ export default function PatrolsDashboardPage() {
             >
               Refresh
             </button>
+            <ReportButton onClick={() => setReportOpen(true)} />
             <Link
               href="/patrols/permissions"
               className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
@@ -257,6 +261,7 @@ export default function PatrolsDashboardPage() {
           </div>
         </Card>
       </div>
+      <PatrolsReportDialog open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 }

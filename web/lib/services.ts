@@ -67,13 +67,17 @@ import {
 import {
   adminUserFromApi,
   beatsFromGeoJson,
+  boundariesFromGeoJson,
   compartmentsFromGeoJson,
+  gridsFromGeoJson,
   observationFromApi,
   patrolFromApi,
   registerRoleFromWeb,
   unionExtent,
+  type BoundaryPolygon,
   type CompartmentPolygon,
   type GeoExtent,
+  type GridPolygon,
 } from "@/lib/backend-adapters";
 import type {
   AnalyticsDataset,
@@ -467,10 +471,10 @@ export const dashboard = {
     const activeAuthorizations = authStore.filter((a) => a.status === "active").length;
     // GIS figures come from the live beat layer (falls back to the mock grid).
     const beats = await gis.beats();
-    const covered = beats.filter((b) => Number.isFinite(b.coveragePct) && b.coveragePct > 0);
+    const covered = beats.filter((b) => b.coveragePct != null && b.coveragePct > 0);
     const coveragePct =
       covered.length > 0
-        ? Math.round(covered.reduce((a, b) => a + b.coveragePct, 0) / covered.length)
+        ? Math.round(covered.reduce((a, b) => a + (b.coveragePct ?? 0), 0) / covered.length)
         : 82;
     const zeroPatrolList = beats
       .filter((b) => b.isZeroPatrol ?? zeroPatrolZones.includes(b.id))
@@ -508,8 +512,8 @@ export const dashboard = {
         { status: "delayed", count: 1 },
       ],
       incidentsToday: [
-        { title: "Snare found at N2-A riverine belt", severity: "critical", time: "07:12" },
-        { title: "Tiger pugmarks near N1-A waterhole", severity: "high", time: "09:24" },
+        { title: "Snare found at Akkapalem riverine belt", severity: "critical", time: "07:12" },
+        { title: "Tiger pugmarks near Tummurukota waterhole", severity: "high", time: "09:24" },
         { title: "Elephant herd near village road", severity: "high", time: "10:05" },
       ],
       recentReports: mockObservations.slice(0, 5),
@@ -538,19 +542,36 @@ export const gis = {
     return defaultLayers.map((l) => ({ ...l }));
   },
   /**
-   * Beats + compartments from the backend GIS API (GeoJSON → SVG polygons,
-   * viewBox 1000×700). Both collections project with ONE shared extent so the
-   * layers align in the same map space; falls back to mocks/[] when the
-   * backend is unreachable or the tables are empty.
+   * Beats + compartments + forest boundary + reference grids from the backend
+   * GIS API (GeoJSON → SVG polygons, viewBox 1000×700). All collections
+   * project with ONE shared extent so the layers align in the same map space;
+   * falls back to mocks/[] when the backend is unreachable or tables are empty.
    */
-  spatial: async (): Promise<{ beats: BeatPolygon[]; compartments: CompartmentPolygon[] }> => {
-    const fallback = { beats: [...mapBeatsRaw], compartments: compartmentsMock };
+  spatial: async (): Promise<{
+    beats: BeatPolygon[];
+    compartments: CompartmentPolygon[];
+    boundary: BoundaryPolygon[];
+    grids: GridPolygon[];
+  }> => {
+    const fallback = {
+      beats: [...mapBeatsRaw],
+      compartments: compartmentsMock,
+      boundary: [] as BoundaryPolygon[],
+      grids: [] as GridPolygon[],
+    };
     try {
-      const [beatFc, compFc] = await Promise.all([api.gis.beats(), api.gis.compartments()]);
+      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
+        api.gis.beats(),
+        api.gis.compartments(),
+        api.gis.boundary(),
+        api.gis.grids(),
+      ]);
       const extent: GeoExtent | null = unionExtent(beatFc, compFc);
       return {
         beats: beatsFromGeoJson(beatFc, extent),
         compartments: compartmentsFromGeoJson(compFc, extent),
+        boundary: boundariesFromGeoJson(boundaryFc, extent),
+        grids: gridsFromGeoJson(gridFc, extent),
       };
     } catch (err) {
       if (isRetryableFailure(err)) return fallback;
@@ -565,6 +586,16 @@ export const gis = {
   compartments: async (): Promise<CompartmentPolygon[]> => {
     const s = await gis.spatial();
     return s.compartments;
+  },
+  /** Reserved forest boundary (GeoJSON → SVG polygons). */
+  boundary: async (): Promise<BoundaryPolygon[]> => {
+    const s = await gis.spatial();
+    return s.boundary;
+  },
+  /** Reference grid cells (GeoJSON → SVG polygons). */
+  grids: async (): Promise<GridPolygon[]> => {
+    const s = await gis.spatial();
+    return s.grids;
   },
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => {
@@ -743,7 +774,7 @@ export const admin = {
           email: input.email,
           roleId: input.roleId,
           status: "invited",
-          division: input.division ?? "d-north",
+          division: input.division ?? "d-markapur",
           created: new Date().toISOString().slice(0, 10),
         };
         createdUsers.unshift(record);

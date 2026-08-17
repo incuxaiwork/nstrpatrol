@@ -16,7 +16,7 @@ import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
-import { unitName } from "@/lib/mock/hierarchy";
+import { mockDivisions, unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { DutyStatus } from "@/lib/types";
@@ -118,7 +118,7 @@ export default function RangersPage() {
             <FilterSelect label="Duty status" value={status} onChange={setStatus}
               options={Object.entries(dutyStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
             <FilterSelect label="Division" value={division} onChange={setDivision}
-              options={["d-north", "d-central", "d-south"].map((d) => ({ value: d, label: unitName(d) }))} />
+              options={mockDivisions.map((d) => ({ value: d.id, label: d.name }))} />
           </FilterBar>
           {view === "table" && (
             <DataTable

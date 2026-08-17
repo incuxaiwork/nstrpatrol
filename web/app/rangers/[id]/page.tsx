@@ -21,6 +21,8 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone, patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { RangerReportDialog } from "@/components/reports/dialogs";
 
 export default function RangerDetailPage() {
   const params = useParams<{ id: string }>();
@@ -31,6 +33,7 @@ export default function RangerDetailPage() {
   const auths = useAsyncData(() => authorizations.list());
   const patrolData = useAsyncData(() => patrols.list());
   const [removeOpen, setRemoveOpen] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const myAuths = useMemo(
     () => (auths.data ?? []).filter((a) => a.rangerId === params.id),
@@ -67,6 +70,7 @@ export default function RangerDetailPage() {
         actions={
           <>
             <Badge tone={dutyStatusTone[ranger.dutyStatus]} dot>{dutyStatusLabel[ranger.dutyStatus]}</Badge>
+            <ReportButton onClick={() => setReportOpen(true)} />
             <Link
               href={`/rangers/${ranger.id}/edit`}
               className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
@@ -355,6 +359,7 @@ export default function RangerDetailPage() {
           router.push("/rangers");
         }}
       />
+      <RangerReportDialog open={reportOpen} onClose={() => setReportOpen(false)} ranger={ranger} />
     </div>
   );
 }

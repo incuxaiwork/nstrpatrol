@@ -51,10 +51,10 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [scope, setScopeState] = useState<Scope>({
-    forest: "NSTR Forest",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1a",
+    forest: "Markapur Division",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-tummurukota",
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);

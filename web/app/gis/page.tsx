@@ -12,8 +12,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { api } from "@/lib/api";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
-import { GLMapWorkspace } from "@/components/gl-map";
-import { LayerManager, MapSidebarFacts } from "@/components/map";
+import { MapWorkspace, MapSidebarFacts } from "@/components/map";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -22,6 +21,8 @@ import { zeroPatrolZones, gisMarkers, gisRoutes } from "@/lib/mock/gis";
 import { mockRangers } from "@/lib/mock/people";
 import { mockObservations, categoryMeta } from "@/lib/mock/observations";
 import { stamp, exportRows } from "@/lib/export";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { RegionReportDialog } from "@/components/reports/dialogs";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
   return b.isZeroPatrol ?? zeroPatrolZones.includes(b.id);
@@ -33,7 +34,7 @@ function heatTone(v: number): number {
 
 function selectedDetail(
   selected: string | null,
-  beats: { id: string; name: string; coveragePct: number }[],
+  beats: { id: string; name: string; coveragePct: number | null }[],
   comps: { id: string; compNo: string; beat: string; areaHa: number }[]
 ) {
   if (!selected) return null;
@@ -66,8 +67,8 @@ function selectedDetail(
     const zero = beatIsZero(beat);
     return {
       kind: "beat" as const,
-      title: `${unitName(beat.id)} beat`,
-      body: `${beat.coveragePct}% coverage`,
+      title: `${beat.name} beat`,
+      body: beat.coveragePct == null ? "Coverage data pending" : `${beat.coveragePct}% coverage`,
       href: "/gis",
       cta: "Zoom to beat",
       tone: zero ? "danger" : ("neutral" as const),
@@ -137,34 +138,29 @@ function selectedDetail(
 }
 
 export default function GisPage() {
-  const layersData = useAsyncData(() => gis.layers());
-  // Beats come from the backend GIS API (GeoJSON → SVG) with a mock fallback.
+  // Beats come from the backend GIS API (GeoJSON → GL layers) with a mock fallback.
   const beatsData = useAsyncData(() => gis.beats());
   const assetsData = useAsyncData(() => gis.assets());
-  const [visibility, setVisibility] = useState<Record<string, boolean>>({});
   const [selected, setSelected] = useState<string | null>(null);
   // No patrol preselected — play/pause appears only after the admin picks one.
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const routes = useMemo(() => gis.routes(), []);
   const heat = useMemo(() => gis.heat(), []);
   const compartmentsData = useAsyncData(() => gis.compartments());
+  const boundaryData = useAsyncData(() => gis.boundary());
+  const gridsData = useAsyncData(() => gis.grids());
 
-  if (layersData.loading || !layersData.data || beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data)
+  if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data)
     return <SkeletonRows rows={8} />;
-  if (layersData.error) return <ErrorState message={layersData.error.message} onRetry={layersData.reload} />;
   if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
   if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
 
   const beats = beatsData.data;
   const compartments = compartmentsData.data;
-
-  const layers = layersData.data.map((l) => ({
-    ...l,
-    visible: visibility[l.id] ?? l.visible,
-  }));
-  const onToggle = (id: string) =>
-    setVisibility((v) => ({ ...v, [id]: !(v[id] ?? layers.find((l) => l.id === id)!.visible) }));
+  const boundary = boundaryData.data;
+  const grids = gridsData.data;
 
   // Selecting a patrol route on the map arms the replay for that patrol.
   const handleSelect = (id: string | null) => {
@@ -192,7 +188,7 @@ export default function GisPage() {
       ...zeroPatrolBeats.map((b) => ({
         id: b.id,
         kind: "zero-patrol-beat",
-        label: unitName(b.id),
+        label: b.name,
         coveragePct: b.coveragePct,
       })),
       ...compartments.map((c) => ({
@@ -213,6 +209,7 @@ export default function GisPage() {
         actions={
           <div className="flex items-center gap-2">
             <ExportButton onExport={handleExport} />
+            <ReportButton onClick={() => setReportOpen(true)} />
             <Link
               href="/observations/list"
               className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
@@ -226,16 +223,16 @@ export default function GisPage() {
       <div className="grid gap-4 xl:grid-cols-4">
         <div className="xl:col-span-3">
           <Card className="overflow-hidden">
-            <GLMapWorkspace
+            <MapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
-              layers={layers}
               liveBeats={beats}
               compartments={compartments}
+              boundary={boundary}
+              grids={grids}
               selectedId={selected}
               onSelect={handleSelect}
               replayPatrolId={replayPatrol}
-              headerActions={<LayerManager layers={layers} onToggle={onToggle} />}
               detailCard={detail ? <SelectedCard detail={detail} onClose={() => setSelected(null)} /> : undefined}
             />
           </Card>
@@ -311,7 +308,7 @@ export default function GisPage() {
                 key: "id", header: "Beat",
                 render: (b) => (
                   <div>
-                    <p className="font-medium text-ink">{unitName(b.id)}</p>
+                    <p className="font-medium text-ink">{b.name}</p>
                     <p className="font-mono text-xs text-ink-soft">{b.id}</p>
                   </div>
                 ),
@@ -343,6 +340,7 @@ export default function GisPage() {
           </div>
         </Card>
       </div>
+      <RegionReportDialog open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 }

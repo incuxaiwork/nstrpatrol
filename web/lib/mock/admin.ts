@@ -13,13 +13,13 @@ import {
 } from "@/lib/types";
 
 export const mockUsers: AdminUser[] = [
-  { id: "u1", name: "Suresh Iyer", email: "suresh.iyer@nstr.gov.in", roleId: "admin", status: "active", division: "d-north", lastActive: new Date(Date.now() - 12 * 60_000).toISOString(), created: "2023-01-15" },
-  { id: "u2", name: "Meena Krishnan", email: "meena.krishnan@nstr.gov.in", roleId: "dfo", status: "active", division: "d-central", lastActive: new Date(Date.now() - 45 * 60_000).toISOString(), created: "2023-02-01" },
-  { id: "u3", name: "Arjun Mehta", email: "arjun.mehta@nstr.gov.in", roleId: "range-officer", status: "active", division: "d-north", lastActive: new Date(Date.now() - 3 * 3_600_000).toISOString(), created: "2023-03-10" },
-  { id: "u4", name: "Priya Nair", email: "priya.nair@nstr.gov.in", roleId: "forest-officer", status: "active", division: "d-south", lastActive: new Date(Date.now() - 90 * 60_000).toISOString(), created: "2023-04-22" },
-  { id: "u5", name: "Vikram Singh", email: "vikram.singh@nstr.gov.in", roleId: "admin", status: "invited", division: "d-south", created: "2024-11-02" },
-  { id: "u6", name: "Tara Das", email: "tara.das@nstr.gov.in", roleId: "forest-officer", status: "active", division: "d-central", lastActive: new Date(Date.now() - 2 * 3_600_000).toISOString(), created: "2023-06-18" },
-  { id: "u7", name: "Ravi Kumar", email: "ravi.kumar@nstr.gov.in", roleId: "range-officer", status: "disabled", division: "d-south", created: "2023-08-09" },
+  { id: "u1", name: "Suresh Iyer", email: "suresh.iyer@nstr.gov.in", roleId: "admin", status: "active", division: "d-markapur", lastActive: new Date(Date.now() - 12 * 60_000).toISOString(), created: "2023-01-15" },
+  { id: "u2", name: "Meena Krishnan", email: "meena.krishnan@nstr.gov.in", roleId: "dfo", status: "active", division: "d-markapur", lastActive: new Date(Date.now() - 45 * 60_000).toISOString(), created: "2023-02-01" },
+  { id: "u3", name: "Arjun Mehta", email: "arjun.mehta@nstr.gov.in", roleId: "range-officer", status: "active", division: "d-markapur", lastActive: new Date(Date.now() - 3 * 3_600_000).toISOString(), created: "2023-03-10" },
+  { id: "u4", name: "Priya Nair", email: "priya.nair@nstr.gov.in", roleId: "forest-officer", status: "active", division: "d-markapur", lastActive: new Date(Date.now() - 90 * 60_000).toISOString(), created: "2023-04-22" },
+  { id: "u5", name: "Vikram Singh", email: "vikram.singh@nstr.gov.in", roleId: "admin", status: "invited", division: "d-markapur", created: "2024-11-02" },
+  { id: "u6", name: "Tara Das", email: "tara.das@nstr.gov.in", roleId: "forest-officer", status: "active", division: "d-markapur", lastActive: new Date(Date.now() - 2 * 3_600_000).toISOString(), created: "2023-06-18" },
+  { id: "u7", name: "Ravi Kumar", email: "ravi.kumar@nstr.gov.in", roleId: "range-officer", status: "disabled", division: "d-markapur", created: "2023-08-09" },
 ];
 
 export const mockRoles: Role[] = [

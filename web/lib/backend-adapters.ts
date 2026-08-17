@@ -94,7 +94,7 @@ export function beatsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExten
       division: String(f.properties.Division ?? ""),
       range: String(f.properties.Range ?? ""),
       points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
-      coveragePct: Number.isFinite(coverage) ? coverage : 0,
+      coveragePct: Number.isFinite(coverage) ? coverage : null,
       // Zero-patrol flag only when the backend supplies a coverage value.
       ...(Number.isFinite(coverage) ? { isZeroPatrol: coverage < 70 } : {}),
     };
@@ -107,6 +107,70 @@ export interface CompartmentPolygon {
   beat: string;
   points: string;
   areaHa: number;
+}
+
+/** Reserved forest boundary — one or more outer rings (MultiPolygon-safe). */
+export interface BoundaryPolygon {
+  id: string;
+  name: string;
+  forestCode: string;
+  /** One SVG point-string per polygon part. */
+  parts: string[];
+}
+
+/** Reference grid cell. */
+export interface GridPolygon {
+  id: string;
+  gridCode: string;
+  points: string;
+}
+
+/** All outer rings of a Polygon or MultiPolygon + overall bbox. */
+function ringsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): LngLatRing[][] {
+  const g = feature.geometry;
+  if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
+  const coords = g.coordinates as unknown[][];
+  return coords.map((poly: unknown) => {
+    const outer = Array.isArray(poly) ? poly[0] : poly;
+    if (!Array.isArray(outer)) return [];
+    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+  });
+}
+
+export function boundariesFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BoundaryPolygon[] {
+  const features = fc.features.filter(
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
+  );
+  if (features.length === 0) return [];
+
+  const proj = makeProjector(extentOf(fc, extent ?? null));
+
+  return features.map((f, i) => ({
+    id: String(f.id ?? `api-boundary-${i}`),
+    name: String(f.properties.name ?? "Forest boundary"),
+    forestCode: String(f.properties.forestCode ?? ""),
+    parts: ringsOf(f).map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")),
+  }));
+}
+
+export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): GridPolygon[] {
+  const features = fc.features.filter(
+    (f) => f.geometry?.type === "Polygon" && Array.isArray((f.geometry.coordinates as unknown[])[0])
+  );
+  if (features.length === 0) return [];
+
+  const proj = makeProjector(extentOf(fc, extent ?? null));
+
+  return features.map((f, i) => {
+    const ring = ringOf(f);
+    return {
+      id: String(f.id ?? `api-grid-${i}`),
+      gridCode: String(f.properties.gridCode ?? `G${i + 1}`),
+      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+    };
+  });
 }
 
 export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentPolygon[] {

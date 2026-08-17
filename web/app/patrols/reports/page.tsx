@@ -20,6 +20,8 @@ import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatKm, formatMinutes, formatDate } from "@/lib/utils";
 import { downloadJson, downloadCsv } from "@/lib/export";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { PatrolsReportDialog } from "@/components/reports/dialogs";
 
 const PAGE_SIZE = 8;
 
@@ -30,6 +32,7 @@ export default function PatrolReportsPage() {
   const [type, setType] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -113,6 +116,7 @@ export default function PatrolReportsPage() {
         actions={
           <div className="flex items-center gap-2">
             <SearchInput value={query} onChange={(v) => { setQuery(v); setPage(1); }} placeholder="Search reports…" className="w-56" />
+            <ReportButton onClick={() => setReportOpen(true)} />
             <ExportButton
               rows={exportRows}
               filename="patrol-reports"
@@ -212,6 +216,7 @@ export default function PatrolReportsPage() {
           </Card>
         ))}
       </div>
+      <PatrolsReportDialog open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 }

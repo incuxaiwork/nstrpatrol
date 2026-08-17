@@ -1,15 +1,15 @@
 /**
- * Shared "map space" helpers. The SVG renderer (components/map.tsx) and the
- * MapLibre GL renderer (components/gl-map.tsx) position demo features in the
- * same coordinate space; this module owns the SVG viewBox → lon/lat mapping
- * (the exact inverse of the projection in lib/backend-adapters.ts) plus the
- * GeoJSON builders for every GL layer, so the two renderers stay in sync.
+ * Shared "map space" helpers. The MapLibre GL renderer (components/map.tsx)
+ * positions demo and backend features in the same coordinate space; this
+ * module owns the SVG viewBox → lon/lat mapping (the exact inverse of the
+ * projection in lib/backend-adapters.ts) plus the GeoJSON builders for every
+ * GL layer.
  */
 
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { zeroPatrolZones } from "@/lib/mock/gis";
 import { mockAuthorizations } from "@/lib/mock/authorizations";
-import type { CompartmentPolygon } from "@/lib/backend-adapters";
+import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 
 /** SVG viewBox shared by the mock renderers (see lib/backend-adapters.ts). */
 export const SVG_MAP_SPACE = {
@@ -91,6 +91,41 @@ export function beatsToFeatures(
         selected: selectedId === b.id,
       }),
       geometry: { type: "Polygon", coordinates: [svgRingToLngLat(b.points)] },
+    })),
+  };
+}
+
+/** Forest boundary polygons (MultiPolygon-safe, one feature per part). */
+export function boundariesToFeatures(boundaries: BoundaryPolygon[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: boundaries.flatMap((b) =>
+      b.parts.map((points, i) => ({
+        type: "Feature",
+        id: b.parts.length > 1 ? `${b.id}-${i}` : b.id,
+        properties: flatProps({
+          id: b.id,
+          name: b.name,
+          forestCode: b.forestCode,
+        }),
+        geometry: { type: "Polygon", coordinates: [svgRingToLngLat(points)] },
+      }))
+    ),
+  };
+}
+
+/** Reference grid cells. */
+export function gridsToFeatures(grids: GridPolygon[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: grids.map((g) => ({
+      type: "Feature",
+      id: g.id,
+      properties: flatProps({
+        id: g.id,
+        gridCode: g.gridCode,
+      }),
+      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
     })),
   };
 }

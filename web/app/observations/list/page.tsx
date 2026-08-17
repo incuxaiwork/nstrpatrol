@@ -19,6 +19,8 @@ import { categoryMeta } from "@/lib/mock/observations";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { ObservationsReportDialog } from "@/components/reports/dialogs";
 
 const PERIOD_ANCHOR_MS = Date.now();
 
@@ -44,6 +46,7 @@ function ObservationsList() {
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ViewMode>("table");
   const [page, setPage] = useState(1);
+  const [reportOpen, setReportOpen] = useState(false);
 
   const pageSize = 8;
 
@@ -123,6 +126,7 @@ function ObservationsList() {
           <div className="flex items-center gap-2">
             <SearchInput value={query} onChange={setQuery} placeholder="Search reports…" className="w-56" />
             <ViewSwitcher value={view} onChange={setView} />
+            <ReportButton onClick={() => setReportOpen(true)} />
             <ExportButton onExport={handleExport} />
           </div>
         }
@@ -230,6 +234,7 @@ function ObservationsList() {
           </div>
         )}
       </Card>
+      <ObservationsReportDialog open={reportOpen} onClose={() => setReportOpen(false)} />
     </div>
   );
 }

@@ -31,9 +31,7 @@ import { timeAgo } from "@/lib/utils";
 import type { AnalyticsDataset } from "@/lib/types";
 
 const heatRows = [
-  { division: "North", ranges: ["N-1", "N-2"], cells: [87, 45] },
-  { division: "Central", ranges: ["C-1", "C-2"], cells: [95, 61] },
-  { division: "South", ranges: ["S-1", "S-2"], cells: [70, 44] },
+  { division: "Markapur", ranges: ["V.P. South", "Y. Palem", "Nekkanti", "G.V. Palli", "Dornala", "Korraprolu", "Markapur"], cells: [87, 91, 45, 61, 70, 44, 38] },
 ];
 
 export default function DashboardPage() {
@@ -83,7 +81,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        subtitle={`Operational picture — ${scope.forest} · ${scope.division} · ${scope.range} · ${scope.beat}`}
+        subtitle={`Operational picture — ${scope.forest} · ${unitName(scope.division)} · ${unitName(scope.range)} · ${unitName(scope.beat)}`}
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -92,13 +90,6 @@ export default function DashboardPage() {
             >
               <Icon name="refresh" size={15} />
               Refresh
-            </button>
-            <button
-              onClick={() => router.push("/patrols/permissions/new")}
-              className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
-            >
-              <Icon name="lock" size={15} />
-              Create authorization
             </button>
           </div>
         }
@@ -133,6 +124,8 @@ export default function DashboardPage() {
               heightClass="h-[340px]"
               liveBeats={spatial.data.beats}
               compartments={spatial.data.compartments}
+              boundary={spatial.data.boundary}
+              grids={spatial.data.grids}
               onSelect={(id) => {
                 if (id && id.startsWith("m")) pushToast("info", "Map selection", `Selected map item ${id}`);
               }}
@@ -205,15 +198,15 @@ export default function DashboardPage() {
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-ink-soft">
                   <span>Patrols</span>
-                  <span className="font-semibold text-ink">42</span>
+                  <span className="font-semibold text-ink">368</span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
                   <span>Coverage</span>
-                  <span className="font-semibold text-ink">86%</span>
+                  <span className="font-semibold text-ink">79%</span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
                   <span>Rangers</span>
-                  <span className="font-semibold text-ink">8</span>
+                  <span className="font-semibold text-ink">10</span>
                 </div>
               </div>
             ))}
@@ -358,7 +351,7 @@ export default function DashboardPage() {
           }
         />
         <div className="p-4">
-          <div className="grid gap-1" style={{ gridTemplateColumns: "auto repeat(6, minmax(40px, 1fr))" }}>
+          <div className="grid gap-1" style={{ gridTemplateColumns: "auto repeat(7, minmax(40px, 1fr))" }}>
             {heatRows.map((row, ri) => (
               <div key={row.division} className="contents">
                 <div className="pr-2 text-[11px] font-medium text-ink-soft">{row.division}</div>

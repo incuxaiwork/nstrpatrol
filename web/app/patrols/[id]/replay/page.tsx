@@ -115,6 +115,8 @@ export default function PatrolReplayPage() {
                 replayPoints={patrol.route}
                 liveBeats={spatial.data.beats}
                 compartments={spatial.data.compartments}
+                boundary={spatial.data.boundary}
+                grids={spatial.data.grids}
                 onProgress={(p) => setPlayback(p)}
                 seekSignal={seek}
                 onSelect={() => undefined}
