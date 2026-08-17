@@ -7,8 +7,6 @@
  */
 
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
-import { zeroPatrolZones } from "@/lib/mock/gis";
-import { mockAuthorizations } from "@/lib/mock/authorizations";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 
 /** SVG viewBox shared by the mock renderers (see lib/backend-adapters.ts). */
@@ -34,6 +32,14 @@ export function svgToLngLat(x: number, y: number): [number, number] {
   const lon = minLon + ((x - pad) / availW) * (maxLon - minLon);
   const lat = maxLat - ((y - pad) / availH) * (maxLat - minLat);
   return [round6(lon), round6(lat)];
+}
+
+/** [lon, lat] → SVG viewBox point (inverse of svgToLngLat). */
+export function lngLatToSvg(lng: number, lat: number): { x: number; y: number } {
+  const { pad, minLon, maxLon, minLat, maxLat } = SVG_MAP_SPACE;
+  const x = pad + ((lng - minLon) / (maxLon - minLon)) * availW;
+  const y = pad + ((maxLat - lat) / (maxLat - minLat)) * availH;
+  return { x, y };
 }
 
 /** "x,y x,y …" SVG polygon string → [lon, lat][] ring. */
@@ -72,9 +78,6 @@ export function beatsToFeatures(
   beats: BeatPolygon[],
   selectedId?: string | null
 ): GeoFeatureCollection {
-  const authBeatIds = new Set(
-    mockAuthorizations.filter((a) => a.status === "active").map((a) => a.authBeat)
-  );
   return {
     type: "FeatureCollection",
     features: beats.map((b) => ({
@@ -86,8 +89,8 @@ export function beatsToFeatures(
         division: b.division,
         range: b.range,
         coveragePct: b.coveragePct,
-        isZero: b.isZeroPatrol ?? zeroPatrolZones.includes(b.id),
-        isAuth: authBeatIds.has(b.id),
+        isZero: b.isZeroPatrol === true,
+        isAuth: false,
         selected: selectedId === b.id,
       }),
       geometry: { type: "Polygon", coordinates: [svgRingToLngLat(b.points)] },

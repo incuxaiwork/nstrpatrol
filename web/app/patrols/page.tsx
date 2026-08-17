@@ -13,7 +13,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
-import { authorizations, patrols } from "@/lib/services";
+import { authorizations, patrols, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard } from "@/components/data";
@@ -24,7 +24,6 @@ import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
-import { mockRangers } from "@/lib/mock/people";
 import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
 import { ReportButton } from "@/components/reports/ReportButton";
@@ -35,6 +34,8 @@ export default function PatrolsDashboardPage() {
   const [reportOpen, setReportOpen] = useState(false);
   const { data: patrolData, error, loading, reload } = useAsyncData(() => patrols.list());
   const auths = useAsyncData(() => authorizations.list());
+  const rangersData = useAsyncData(() => rangers.list());
+  const rangersTotal = rangersData.data?.length ?? 0;
 
   const rows = useMemo(() => {
     if (!patrolData || !auths.data) return [];
@@ -102,7 +103,7 @@ export default function PatrolsDashboardPage() {
         <KpiCard label="Active patrols" value={active.length} icon="route" tone="success" tillDate={rows.length} today={active.length} onClick={() => router.push("/patrols/all?status=ongoing")} />
         <KpiCard label="Started today" value={today.length} icon="play" tone="info" tillDate={rows.length} today={today.length} onClick={() => router.push("/patrols/all")} />
         <KpiCard label="Completed (7d)" value={completed.length} icon="check" tone="forest" tillDate={completed.length} today={completedToday} onClick={() => router.push("/patrols/all?status=completed")} />
-        <KpiCard label="Rangers patrolling" value={ongoing.length ? ongoing.length : 0} icon="users" tone="khaki" tillDate={mockRangers.length} today={ongoing.length} onClick={() => router.push("/rangers")} />
+        <KpiCard label="Rangers patrolling" value={ongoing.length ? ongoing.length : 0} icon="users" tone="khaki" tillDate={rangersTotal} today={ongoing.length} onClick={() => router.push("/rangers")} />
         <KpiCard label="Cross-jurisdiction" value={crossJurisdiction.length} icon="map" tone="warning" tillDate={crossJurisdiction.length} today={todayCross} onClick={() => router.push("/patrols/all?jurisdiction=authorized")} />
         <KpiCard label="Requiring review" value={review.length} icon="alert" tone="danger" tillDate={review.length} today={todayReview} onClick={() => router.push("/patrols/all?jurisdiction=review")} />
       </div>

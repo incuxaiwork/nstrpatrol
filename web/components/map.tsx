@@ -29,11 +29,11 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
-import { gisHeat, gisMarkers, gisRoutes, mapBeatsRaw, type BeatPolygon } from "@/lib/mock/gis";
+import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
-import { mockRangers } from "@/lib/mock/people";
 import { unitName } from "@/lib/mock/hierarchy";
-import { mockObservations, categoryMeta } from "@/lib/mock/observations";
+import { categoryMeta } from "@/lib/mock/observations";
+import type { Observation, Ranger } from "@/lib/types";
 import {
   beatsToFeatures,
   boundariesToFeatures,
@@ -69,6 +69,9 @@ export interface MapProps {
   compartments?: CompartmentPolygon[];
   boundary?: BoundaryPolygon[];
   grids?: GridPolygon[];
+  markers?: GisMarker[];
+  routes?: GisRoute[];
+  heat?: HeatBlock[];
   selectedId?: string | null;
   onSelect?(id: string | null): void;
   replayPatrolId?: string | null;
@@ -516,6 +519,9 @@ export function MapWorkspace({
   compartments,
   boundary,
   grids,
+  markers,
+  routes,
+  heat,
   detailCard,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -533,7 +539,7 @@ export function MapWorkspace({
   const [replaySpeed, setReplaySpeed] = useState(1);
   const [progress, setProgress] = useState(0);
 
-  const beats = liveBeats ?? mapBeatsRaw;
+  const beats = useMemo(() => liveBeats ?? [], [liveBeats]);
   const comps = useMemo(() => compartments ?? [], [compartments]);
   const ranges = useMemo(() => rangesFromBeats(beats), [beats]);
 
@@ -614,9 +620,9 @@ export function MapWorkspace({
 
   // Feed GeoJSON data into the sources.
   const beatsFc = useMemo(() => beatsToFeatures(beats, selectedId), [beats, selectedId]);
-  const markersFc = useMemo(() => markersToFeatures(gisMarkers), []);
-  const routesFc = useMemo(() => routesToFeatures(gisRoutes), []);
-  const heatFc = useMemo(() => heatToFeatures(gisHeat), []);
+  const markersFc = useMemo(() => markersToFeatures(markers ?? []), [markers]);
+  const routesFc = useMemo(() => routesToFeatures(routes ?? []), [routes]);
+  const heatFc = useMemo(() => heatToFeatures(heat ?? []), [heat]);
   const rangesFc = useMemo(() => rangesToFeatures(ranges), [ranges]);
   const rangeLabelsFc = useMemo(() => rangeLabelsToFeatures(ranges), [ranges]);
   const compartmentsFc = useMemo(() => compartmentsToFeatures(comps), [comps]);
@@ -694,10 +700,10 @@ export function MapWorkspace({
     };
   }, [ready, onSelect]);
 
-  // Replay model (demo GIS route or synthesized from real lat/lng points).
+  // Replay model (real GIS route or synthesized from real lat/lng points).
   const replayRoute = useMemo<ReplayModel | undefined>(() => {
     if (!replayPatrolId) return undefined;
-    const found = gisRoutes.find(
+    const found = (routes ?? []).find(
       (r) => r.patrolId.toLowerCase() === replayPatrolId.toLowerCase()
     );
     if (found) {
@@ -723,7 +729,7 @@ export function MapWorkspace({
       };
     }
     return undefined;
-  }, [replayPatrolId, replayPoints]);
+  }, [replayPatrolId, replayPoints, routes]);
 
   // Replay playback loop.
   useEffect(() => {
@@ -1001,13 +1007,19 @@ function LegendRow({
 /* Side panel bits used by the GIS workspace                           */
 /* ------------------------------------------------------------------ */
 
-export function MapSidebarFacts() {
+export function MapSidebarFacts({
+  rangers = [],
+  observations = [],
+}: {
+  rangers?: Ranger[];
+  observations?: Observation[];
+}) {
   return (
     <div className="space-y-4">
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Rangers in field</p>
         <div className="space-y-1.5">
-          {mockRangers
+          {rangers
             .filter((r) => r.dutyStatus === "field")
             .slice(0, 5)
             .map((r) => (
@@ -1017,16 +1029,19 @@ export function MapSidebarFacts() {
                 <span className="ml-auto text-xs text-ink-soft">{unitName(r.beat)}</span>
               </Link>
             ))}
+          {rangers.filter((r) => r.dutyStatus === "field").length === 0 && (
+            <p className="px-1.5 py-1 text-xs text-ink-soft">No rangers currently in field</p>
+          )}
         </div>
       </div>
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Recent observations</p>
         <div className="space-y-1.5">
-          {mockObservations.slice(0, 4).map((o) => (
+          {observations.slice(0, 4).map((o) => (
             <Link key={o.id} href={`/observations/${o.id}`} className="flex items-start gap-2.5 rounded-md px-1.5 py-1 hover:bg-forest-50">
               <span
                 className="mt-1 size-2.5 shrink-0 rounded-full"
-                style={{ background: categoryMeta[o.category].color }}
+                style={{ background: categoryMeta[o.category]?.color ?? "#4A6572" }}
               />
               <span className="min-w-0">
                 <span className="block truncate text-sm text-ink">{o.title}</span>
@@ -1034,6 +1049,9 @@ export function MapSidebarFacts() {
               </span>
             </Link>
           ))}
+          {observations.length === 0 && (
+            <p className="px-1.5 py-1 text-xs text-ink-soft">No observations recorded yet</p>
+          )}
         </div>
       </div>
     </div>

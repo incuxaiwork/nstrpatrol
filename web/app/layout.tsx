@@ -3,7 +3,7 @@ import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppProvider } from "@/lib/store";
-import { AppShell } from "@/components/shell";
+import { Shell } from "@/components/shell-gate";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -32,7 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     >
       <body className="min-h-full">
         <AppProvider>
-          <AppShell>{children}</AppShell>
+          <Shell>{children}</Shell>
         </AppProvider>
       </body>
     </html>

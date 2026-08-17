@@ -71,6 +71,7 @@ export default function PatrolReplayPage() {
 
   if (loading || !patrol || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
+  if (spatial.error) return <ErrorState message={spatial.error.message} onRetry={spatial.reload} />;
 
   return (
     <div>

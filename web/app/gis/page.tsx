@@ -5,9 +5,9 @@
  * live markers, patrol route playback, and the zero-patrol-zone board.
  */
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { gis } from "@/lib/services";
+import { gis, rangers as servicesRangers, observations as servicesObservations } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { api } from "@/lib/api";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
@@ -16,16 +16,13 @@ import { MapWorkspace, MapSidebarFacts } from "@/components/map";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
-import { unitName } from "@/lib/mock/hierarchy";
-import { zeroPatrolZones, gisMarkers, gisRoutes } from "@/lib/mock/gis";
-import { mockRangers } from "@/lib/mock/people";
-import { mockObservations, categoryMeta } from "@/lib/mock/observations";
 import { stamp, exportRows } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { RegionReportDialog } from "@/components/reports/dialogs";
+import type { GisMarker, GisRoute } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
-  return b.isZeroPatrol ?? zeroPatrolZones.includes(b.id);
+  return b.isZeroPatrol === true;
 }
 
 function heatTone(v: number): number {
@@ -35,10 +32,12 @@ function heatTone(v: number): number {
 function selectedDetail(
   selected: string | null,
   beats: { id: string; name: string; coveragePct: number | null }[],
-  comps: { id: string; compNo: string; beat: string; areaHa: number }[]
+  comps: { id: string; compNo: string; beat: string; areaHa: number }[],
+  routes: GisRoute[],
+  markers: GisMarker[]
 ) {
   if (!selected) return null;
-  const route = gisRoutes.find((r) => r.id === selected);
+  const route = routes.find((r) => r.id === selected);
   if (route) {
     return {
       kind: "route" as const,
@@ -75,70 +74,21 @@ function selectedDetail(
       tag: zero ? "Zero patrol zone" : undefined,
     };
   }
-  const marker = gisMarkers.find((m) => m.id === selected);
+  const marker = markers.find((m) => m.id === selected);
   if (!marker) return null;
-  if (marker.kind === "ranger") {
-    const r = mockRangers.find((x) => marker.label.toLowerCase().startsWith(x.code.toLowerCase()));
-    if (r) {
-      return {
-        kind: "ranger" as const,
-        title: r.name,
-        body: `${r.code} · ${r.designation} · ${unitName(r.beat)}`,
-        href: `/rangers/${r.id}`,
-        cta: "Open profile",
-        tone: "neutral" as const,
-        tag: "Ranger",
-      };
-    }
-  }
-  if (marker.kind === "observation" || marker.kind === "incident") {
-    const code = marker.label.match(/(OB-\d+)/i)?.[1];
-    const o = mockObservations.find((x) => x.code === code);
-    if (o) {
-      return {
-        kind: "observation" as const,
-        title: o.title,
-        body: `${o.code} · ${categoryMeta[o.category].label} · ${unitName(o.beat)}`,
-        href: `/observations/${o.id}`,
-        cta: "Open report",
-        tone: "danger" as const,
-        tag: o.severity.toUpperCase(),
-      };
-    }
-    return {
-      kind: "incident" as const,
-      title: marker.label,
-      body: "Incident marker on the live map",
-      href: "/observations/list",
-      cta: "View reports",
-      tone: "danger" as const,
-      tag: "Incident",
-    };
-  }
-  if (marker.kind === "sos") {
-    return {
-      kind: "sos" as const,
-      title: marker.label,
-      body: "SOS received — response team dispatched",
-      href: "/patrols",
-      cta: "Open patrols",
-      tone: "danger" as const,
-      tag: "SOS",
-    };
-  }
   return {
-    kind: "marker" as const,
+    kind: marker.kind,
     title: marker.label,
-    body: "Map feature",
-    href: "/gis",
-    cta: "Dismiss",
-    tone: "neutral" as const,
-    tag: "Marker",
+    body: "Incident marker on the live map",
+    href: "/observations/list",
+    cta: "View reports",
+    tone: "danger" as const,
+    tag: marker.kind === "sos" ? "SOS" : marker.kind === "observation" ? "Observation" : "Incident",
   };
 }
 
 export default function GisPage() {
-  // Beats come from the backend GIS API (GeoJSON → GL layers) with a mock fallback.
+  // Beats come from the backend GIS API (GeoJSON → GL layers).
   const beatsData = useAsyncData(() => gis.beats());
   const assetsData = useAsyncData(() => gis.assets());
   const [selected, setSelected] = useState<string | null>(null);
@@ -146,8 +96,11 @@ export default function GisPage() {
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
 
-  const routes = useMemo(() => gis.routes(), []);
-  const heat = useMemo(() => gis.heat(), []);
+  const markersData = useAsyncData(() => gis.markers());
+  const routesData = useAsyncData(() => gis.routes());
+  const heatData = useAsyncData(() => gis.heat());
+  const rangersData = useAsyncData(() => servicesRangers.list());
+  const observationsData = useAsyncData(() => servicesObservations.list());
   const compartmentsData = useAsyncData(() => gis.compartments());
   const boundaryData = useAsyncData(() => gis.boundary());
   const gridsData = useAsyncData(() => gis.grids());
@@ -156,11 +109,16 @@ export default function GisPage() {
     return <SkeletonRows rows={8} />;
   if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
   if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
+  if (boundaryData.error) return <ErrorState message={boundaryData.error.message} onRetry={boundaryData.reload} />;
+  if (gridsData.error) return <ErrorState message={gridsData.error.message} onRetry={gridsData.reload} />;
 
   const beats = beatsData.data;
   const compartments = compartmentsData.data;
   const boundary = boundaryData.data;
   const grids = gridsData.data;
+  const markers = markersData.data ?? [];
+  const routes = routesData.data ?? [];
+  const heat = heatData.data ?? [];
 
   // Selecting a patrol route on the map arms the replay for that patrol.
   const handleSelect = (id: string | null) => {
@@ -174,11 +132,11 @@ export default function GisPage() {
   };
 
   const zeroPatrolBeats = beats.filter((b) => beatIsZero(b));
-  const detail = selectedDetail(selected, beats, compartments);
+  const detail = selectedDetail(selected, beats, compartments, routes, markers);
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `gis-catalog-${stamp()}`, [
-      ...gisMarkers.map((m) => ({
+      ...markers.map((m) => ({
         id: m.id,
         kind: m.kind,
         label: m.label,
@@ -223,6 +181,11 @@ export default function GisPage() {
       <div className="grid gap-4 xl:grid-cols-4">
         <div className="xl:col-span-3">
           <Card className="overflow-hidden">
+            {markersData.error && (
+              <p className="border-b border-line px-4 py-2 text-xs text-danger">
+                Couldn&apos;t load map markers — showing the map without incident points.
+              </p>
+            )}
             <MapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
@@ -230,6 +193,9 @@ export default function GisPage() {
               compartments={compartments}
               boundary={boundary}
               grids={grids}
+              markers={markers}
+              routes={routes}
+              heat={heat}
               selectedId={selected}
               onSelect={handleSelect}
               replayPatrolId={replayPatrol}
@@ -239,7 +205,7 @@ export default function GisPage() {
         </div>
 
         <div className="space-y-4">
-          <MapSidebarFacts />
+          <MapSidebarFacts rangers={rangersData.data ?? []} observations={observationsData.data ?? []} />
 
           {assetsData.data && assetsData.data.length > 0 && (
             <Card>
@@ -272,6 +238,11 @@ export default function GisPage() {
 
           <Card>
             <CardHeader title="Route playback" icon="play" subtitle="Replay a completed patrol trace" />
+            {routesData.error && (
+              <p className="px-4 pb-2 text-xs text-danger">
+                Couldn&apos;t load patrol routes — {routesData.error.message}
+              </p>
+            )}
             <div className="space-y-2 p-4">
               {routes.map((r) => (
                 <button
@@ -292,6 +263,9 @@ export default function GisPage() {
                   {replayPatrol === r.patrolId && <Badge tone="success">Active</Badge>}
                 </button>
               ))}
+              {routes.length === 0 && !routesData.error && (
+                <p className="py-4 text-center text-sm text-ink-soft">No patrol routes with GPS traces yet.</p>
+              )}
             </div>
           </Card>
         </div>
@@ -327,7 +301,7 @@ export default function GisPage() {
         </Card>
 
         <Card>
-          <CardHeader title="Activity heatmap" icon="layers" subtitle="Patrol & incident density blocks (mock)" />
+          <CardHeader title="Activity heatmap" icon="layers" subtitle="Patrol & incident density blocks (API GAP — backend does not expose heat aggregates)" />
           <div className="grid grid-cols-2 gap-2 p-4">
             {heat.map((h) => (
               <div key={`${h.x}-${h.y}`} className="rounded-card border border-line" style={{ height: 64, background: `rgba(179, 38, 30, ${heatTone(h.intensity)})` }}>
@@ -337,6 +311,11 @@ export default function GisPage() {
                 <span className="block px-3 text-[10px] text-white/70">block {h.x},{h.y}</span>
               </div>
             ))}
+            {heat.length === 0 && (
+              <p className="col-span-2 py-6 text-center text-sm text-ink-soft">
+                Heat aggregation is not available from the backend yet.
+              </p>
+            )}
           </div>
         </Card>
       </div>

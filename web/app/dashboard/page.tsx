@@ -9,7 +9,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/lib/store";
-import { dashboard, gis } from "@/lib/services";
+import { dashboard, gis, hierarchy as hierarchyService } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard } from "@/components/data";
@@ -26,28 +26,40 @@ import {
   observationStatusTone,
 } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { mockDivisions, unitName } from "@/lib/mock/hierarchy";
+import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import type { AnalyticsDataset } from "@/lib/types";
-
-const heatRows = [
-  { division: "Markapur", ranges: ["V.P. South", "Y. Palem", "Nekkanti", "G.V. Palli", "Dornala", "Korraprolu", "Markapur"], cells: [87, 91, 45, 61, 70, 44, 38] },
-];
 
 export default function DashboardPage() {
   const router = useRouter();
   const { pushToast, scope } = useApp();
   const { data, error, loading, reload } = useAsyncData(() => dashboard.summary());
-  // Live boundaries for the GIS overview card (backend GeoJSON, mock fallback).
+  // Live boundaries for the GIS overview card (backend GeoJSON).
   const spatial = useAsyncData(() => gis.spatial());
+  // Real division/ranges for the hierarchy card (backend GIS layers).
+  const units = useAsyncData(() => hierarchyService.units());
 
-  if (loading || !data || spatial.loading || !spatial.data) {
+  if (loading || !data || spatial.loading || !spatial.data || units.loading || !units.data) {
     return <DashboardSkeleton />;
   }
   if (error) {
     return (
       <div className="flex min-h-64 items-center justify-center">
         <ErrorState message={error.message} onRetry={reload} />
+      </div>
+    );
+  }
+  if (spatial.error) {
+    return (
+      <div className="flex min-h-64 items-center justify-center">
+        <ErrorState message={spatial.error.message} onRetry={spatial.reload} />
+      </div>
+    );
+  }
+  if (units.error) {
+    return (
+      <div className="flex min-h-64 items-center justify-center">
+        <ErrorState message={units.error.message} onRetry={units.reload} />
       </div>
     );
   }
@@ -59,6 +71,9 @@ export default function DashboardPage() {
       { name: "Reports", values: data.activity.map((a) => a.reports) },
     ],
   };
+
+  const divisions = units.data.divisions;
+  const rangesByDivision = units.data.ranges;
 
   const statusSegments = data.byStatus
     .filter((s) => s.count > 0)
@@ -188,28 +203,35 @@ export default function DashboardPage() {
 
         {/* Forest hierarchy */}
         <Card className="lg:col-span-2 xl:col-span-2">
-          <CardHeader title="Forest hierarchy" icon="tree" subtitle="Distribution across operational units" />
+          <CardHeader title="Forest hierarchy" icon="tree" subtitle="Operational units with live figures" />
           <div className="grid gap-3 p-4 sm:grid-cols-3">
-            {mockDivisions.map((d) => (
+            {divisions.map((d) => (
               <div key={d.id} className="rounded-card border border-line bg-surface p-3">
                 <div className="flex items-center justify-between">
                   <p className="text-sm font-medium text-ink">{d.name}</p>
-                  <Badge tone="forest">{d.areaKm2} km²</Badge>
+                  <Badge tone="forest">{rangesByDivision[d.id]?.length ?? 0} ranges</Badge>
                 </div>
                 <div className="mt-3 flex items-center justify-between text-xs text-ink-soft">
                   <span>Patrols</span>
-                  <span className="font-semibold text-ink">368</span>
+                  <span className="font-semibold text-ink">{data.patrolsTotal}</span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
                   <span>Coverage</span>
-                  <span className="font-semibold text-ink">79%</span>
+                  <span className="font-semibold text-ink">
+                    {data.coveragePct > 0 ? `${data.coveragePct}%` : "—"}
+                  </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
                   <span>Rangers</span>
-                  <span className="font-semibold text-ink">10</span>
+                  <span className="font-semibold text-ink">{data.rangersTotal}</span>
                 </div>
               </div>
             ))}
+            {divisions.length === 0 && (
+              <p className="col-span-full py-6 text-center text-sm text-ink-soft">
+                No hierarchy data available yet.
+              </p>
+            )}
           </div>
         </Card>
       </div>
@@ -351,24 +373,30 @@ export default function DashboardPage() {
           }
         />
         <div className="p-4">
-          <div className="grid gap-1" style={{ gridTemplateColumns: "auto repeat(7, minmax(40px, 1fr))" }}>
-            {heatRows.map((row, ri) => (
-              <div key={row.division} className="contents">
-                <div className="pr-2 text-[11px] font-medium text-ink-soft">{row.division}</div>
-                {row.cells.map((c, ci) => (
-                  <div
-                    key={`${ri}-${ci}`}
-                    className="flex h-9 items-center justify-center rounded text-[11px] font-medium"
-                    style={{ background: `rgba(29, 70, 38, ${0.12 + c * 0.55})`, color: c > 0.45 ? "#fff" : "#1F4626" }}
-                    title={`${row.ranges[ci]}: ${c}`}
-                  >
-                    {c}
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-          <p className="mt-2 text-[11px] text-ink-faint">Patrol count per division × range, last 30 days (mock).</p>
+          {data.heatmap && data.heatmap.length > 0 ? (
+            <div className="grid gap-1" style={{ gridTemplateColumns: "auto repeat(7, minmax(40px, 1fr))" }}>
+              {data.heatmap.map((row, ri) => (
+                <div key={row.division} className="contents">
+                  <div className="pr-2 text-[11px] font-medium text-ink-soft">{row.division}</div>
+                  {row.cells.map((c, ci) => (
+                    <div
+                      key={`${ri}-${ci}`}
+                      className="flex h-9 items-center justify-center rounded text-[11px] font-medium"
+                      style={{ background: `rgba(29, 70, 38, ${0.12 + c * 0.55})`, color: c > 0.45 ? "#fff" : "#1F4626" }}
+                      title={`${row.ranges[ci]}: ${c}`}
+                    >
+                      {c}
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="py-6 text-center text-sm text-ink-soft">
+              No patrol density data yet — start patrols to populate the heatmap.
+            </p>
+          )}
+          <p className="mt-2 text-[11px] text-ink-faint">Patrol count per division × range, last 30 days.</p>
         </div>
       </Card>
 

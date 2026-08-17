@@ -337,6 +337,8 @@ export interface DashboardSummary {
   activity: { hour: string; patrols: number; reports: number }[];
   alerts: NotificationItem[];
   quickStats?: Record<string, number>;
+  /** Range-level patrol density (division × ranges × cell values), real data. */
+  heatmap?: { division: string; ranges: string[]; cells: number[] }[];
 }
 
 export type NotificationKind = "critical" | "warning" | "info" | "success";
