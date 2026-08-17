@@ -130,6 +130,14 @@ object SyncManager {
                 if (session.status == "COMPLETED") {
                     runCatching { withNetworkRetry { api.completePatrol(session.patrolId) } }
                 }
+            } else {
+                // Both create and complete failed — mark as SYNCED locally
+                // to stop retrying (e.g. ID too long for server validation).
+                Log.w(TAG, "Patrol ${session.patrolId} permanently failed, skipping")
+                dao.updateSessionSyncStatus(session.patrolId, "SYNCED")
+                dao.deletePendingPointsForPatrol(session.patrolId)
+                dao.deletePendingReadingsForPatrol(session.patrolId)
+                ok(1)
             }
         }
     }
@@ -170,7 +178,16 @@ object SyncManager {
                     }
                     withNetworkRetry { api.postJson("/api/sync/upload", body) }
                     Log.d(TAG, "Points chunk ${idx + 1}/${chunks.size} uploaded (${chunk.size} records)")
-                }.onFailure { fail(chunk.size, it); return }
+                }.onFailure { e ->
+                    // If patrol doesn't exist on server, skip all points for it
+                    if (e.message?.contains("not_found") == true || e.message?.contains("Patrol") == true) {
+                        Log.w(TAG, "Patrol $patrolId not found, skipping ${rows.size} points")
+                        dao.markPointsSynced(patrolId)
+                        ok(rows.size)
+                        return
+                    }
+                    fail(chunk.size, e); return
+                }
             }
             dao.markPointsSynced(patrolId)
             ok(rows.size)

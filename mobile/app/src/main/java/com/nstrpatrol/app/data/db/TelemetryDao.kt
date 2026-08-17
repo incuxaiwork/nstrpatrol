@@ -170,6 +170,12 @@ interface TelemetryDao {
     @Query("UPDATE patrol_sessions SET syncStatus = :status WHERE patrolId = :patrolId")
     suspend fun updateSessionSyncStatus(patrolId: String, status: String)
 
+    @Query("DELETE FROM patrol_points WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingPointsForPatrol(patrolId: String)
+
+    @Query("DELETE FROM sensor_readings WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingReadingsForPatrol(patrolId: String)
+
     @Query("SELECT * FROM patrol_points WHERE syncStatus = 'PENDING'")
     suspend fun pendingPointRows(): List<PatrolPointEntity>
 

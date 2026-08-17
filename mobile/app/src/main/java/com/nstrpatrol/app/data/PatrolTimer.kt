@@ -28,7 +28,7 @@ class PatrolTimer {
         private set
 
     fun start(trustedUtcNow: Long, wallClockNow: Long) {
-        patrolId = "patrol-${UUID.randomUUID()}"
+        patrolId = UUID.randomUUID().toString()
         startElapsedRealtime = SystemClock.elapsedRealtime()
         startTrustedMillis = trustedUtcNow
         startWallClockMillis = wallClockNow

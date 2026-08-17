@@ -55,6 +55,7 @@ import com.nstrpatrol.app.ui.theme.StatusCompleted
 import com.nstrpatrol.app.ui.theme.StatusInProgress
 import com.nstrpatrol.app.ui.theme.StatusScheduled
 
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -63,6 +64,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
+private const val TAG = "AllPatrolsScreen"
 
 @Composable
 fun AllPatrolsScreen(
@@ -90,9 +93,14 @@ fun AllPatrolsScreen(
         loading = true
         try {
             val arr = withContext(Dispatchers.IO) { api.getJsonArray("/api/patrols") }
-            if (arr != null) backendEntries = parsePatrols(arr)
-        } catch (_: Exception) {
-            // Offline or auth error: keep whatever local data we have.
+            if (arr != null) {
+                Log.d(TAG, "Fetched ${arr.length()} patrols from backend")
+                backendEntries = parsePatrols(arr)
+            } else {
+                Log.w(TAG, "Backend returned null – offline or auth error")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch patrols", e)
         } finally {
             loading = false
         }

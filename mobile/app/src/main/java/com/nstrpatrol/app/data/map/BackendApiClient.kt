@@ -168,6 +168,7 @@ class BackendApiClient {
         var errorCode: String? = null
         var message: String? = null
         if (res.second != null) {
+            Log.w("BackendApiClient", "HTTP ${res.first} $path body: ${res.second?.take(500)}")
             runCatching {
                 val err = JSONObject(res.second).optJSONObject("error")
                 if (err != null) {
