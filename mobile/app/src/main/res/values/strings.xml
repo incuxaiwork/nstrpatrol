@@ -2,6 +2,12 @@
 <resources>
     <string name="app_name">nstrpatrol</string>
 
+    <!-- Foreground service (active patrol) -->
+    <string name="fgs_patrol_channel_name">Patrol tracking</string>
+    <string name="fgs_patrol_title">Patrol in progress</string>
+    <string name="fgs_patrol_text">Tracking and recording patrol data</string>
+    <string name="exit_sync_message">Syncing data before closing…</string>
+
     <!-- Navigation tabs -->
     <string name="nav_home">Home</string>
     <string name="nav_maps">Maps</string>
@@ -64,10 +70,19 @@
     <string name="settings_general">General</string>
     <string name="settings_language">Language</string>
     <string name="settings_sync_interval">Sync Interval</string>
+    <string name="settings_sync_auto">Auto (sync when online)</string>
+    <string name="settings_sync_manual">Manual</string>
     <string name="settings_map_layer">Map Layer</string>
     <string name="settings_diagnostics">Diagnostics &amp; System</string>
     <string name="settings_gps_diagnostics">GPS Diagnostics</string>
     <string name="settings_gps_diagnostics_desc">GNSS Status, Constellations &amp; Accuracy</string>
+
+    <string name="settings_gps_recording">GPS Recording</string>
+    <string name="settings_gps_poll">Fix Poll Interval</string>
+    <string name="settings_gps_sample_interval">Min Time Between Points</string>
+    <string name="settings_gps_displacement">Min Distance Between Points</string>
+    <string name="settings_gps_max_age">Max Fix Age</string>
+    <string name="settings_gps_update_interval">GPS Provider Update Rate</string>
     <string name="settings_logout">LOG OUT</string>
 
     <!-- Patrol Start -->
@@ -115,6 +130,11 @@
     <string name="incident_detail_subtitle">Report details</string>
     <string name="incident_report">Report</string>
     <string name="common_offline">Offline</string>
+    <string name="status_connected">Connected to internet</string>
+    <string name="status_offline">Could not connect to internet</string>
+    <string name="status_syncing">Syncing… %1$d%%</string>
+    <string name="status_synced">Synced ✓</string>
+    <string name="status_sync_failed">Sync failed</string>
 
     <!-- Logs -->
     <string name="logs_title">Logs</string>
@@ -145,6 +165,7 @@
     <string name="sos_subtitle">Emergency assistance</string>
     <string name="sos_tap">Tap to send an SOS alert to your patrol team</string>
     <string name="sos_emergency_contacts">Emergency contacts</string>
+    <string name="sos_no_contacts">No emergency contacts configured</string>
 
     <!-- GPS Diagnostics -->
     <string name="gps_title">GPS Diagnostics</string>

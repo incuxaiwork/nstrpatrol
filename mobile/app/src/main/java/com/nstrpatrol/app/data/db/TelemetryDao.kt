@@ -2,6 +2,7 @@ package com.nstrpatrol.app.data.db
 
 import androidx.room.Dao
 import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import kotlinx.coroutines.flow.Flow
 
@@ -86,6 +87,20 @@ interface TelemetryDao {
     suspend fun activeMovementSamplesForPatrol(patrolId: String): Int
 
     @Query(
+        "SELECT CAST(value AS INTEGER) AS value, COUNT(*) AS count FROM sensor_readings " +
+            "WHERE patrolId = :patrolId AND type = 'MOVEMENT_MODE' " +
+            "GROUP BY CAST(value AS INTEGER)"
+    )
+    suspend fun movementModeCountsForPatrol(patrolId: String): List<MovementModeCount>
+
+    @Query(
+        "SELECT timestamp, CAST(value AS INTEGER) AS value FROM sensor_readings " +
+            "WHERE patrolId = :patrolId AND type = 'MOVEMENT_MODE' " +
+            "ORDER BY timestamp ASC"
+    )
+    suspend fun movementSamplesForPatrol(patrolId: String): List<MovementSample>
+
+    @Query(
         "SELECT COUNT(*) FROM sensor_readings " +
             "WHERE type = 'MOVEMENT_MODE' " +
             "AND CAST(value AS INTEGER) IN (2, 3, 4) " +
@@ -125,6 +140,18 @@ interface TelemetryDao {
     @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun upsertPatrolSession(session: PatrolSessionEntity)
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertSessionIfAbsent(session: PatrolSessionEntity)
+
+    @Query("UPDATE patrol_sessions SET detectedMethod = :method WHERE patrolId = :patrolId")
+    suspend fun setDetectedMethod(patrolId: String, method: String?)
+
+    @Query("SELECT * FROM patrol_sessions WHERE patrolId = :patrolId")
+    fun patrolSessionFlow(patrolId: String): Flow<PatrolSessionEntity?>
+
+    @Query("SELECT * FROM patrol_points WHERE patrolId = :patrolId ORDER BY timestamp ASC")
+    fun patrolPointsFlow(patrolId: String): Flow<List<PatrolPointEntity>>
+
     @Query("SELECT * FROM patrol_sessions WHERE patrolId = :patrolId")
     suspend fun patrolSession(patrolId: String): PatrolSessionEntity?
 
@@ -143,6 +170,12 @@ interface TelemetryDao {
     @Query("UPDATE patrol_sessions SET syncStatus = :status WHERE patrolId = :patrolId")
     suspend fun updateSessionSyncStatus(patrolId: String, status: String)
 
+    @Query("DELETE FROM patrol_points WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingPointsForPatrol(patrolId: String)
+
+    @Query("DELETE FROM sensor_readings WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingReadingsForPatrol(patrolId: String)
+
     @Query("SELECT * FROM patrol_points WHERE syncStatus = 'PENDING'")
     suspend fun pendingPointRows(): List<PatrolPointEntity>
 
@@ -160,6 +193,30 @@ interface TelemetryDao {
         "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
     )
     suspend fun markReadingsSynced(patrolId: String)
+
+    @Query("SELECT COUNT(*) FROM patrol_sessions")
+    suspend fun countSessions(): Int
+
+    @Query("SELECT COUNT(*) FROM patrol_sessions WHERE syncStatus = 'SYNCED'")
+    suspend fun countSyncedSessions(): Int
+
+    @Query("SELECT COUNT(*) FROM patrol_points")
+    suspend fun countPoints(): Int
+
+    @Query("SELECT COUNT(*) FROM patrol_points WHERE syncStatus = 'SYNCED'")
+    suspend fun countSyncedPoints(): Int
+
+    @Query("SELECT COUNT(*) FROM sensor_readings")
+    suspend fun countReadings(): Int
+
+    @Query("SELECT COUNT(*) FROM sensor_readings WHERE syncStatus = 'SYNCED'")
+    suspend fun countSyncedReadings(): Int
+
+    @Query("SELECT COUNT(*) FROM incidents")
+    suspend fun countIncidents(): Int
+
+    @Query("SELECT COUNT(*) FROM incidents WHERE syncStatus = 'SYNCED'")
+    suspend fun countSyncedIncidents(): Int
 
     @Query(
         "UPDATE patrol_sessions SET endTime = :endTime, status = 'COMPLETED', " +
@@ -180,3 +237,9 @@ interface TelemetryDao {
         points: Int
     )
 }
+
+/** Aggregated count of a movement mode (its persisted `value` code) in a patrol. */
+data class MovementModeCount(val value: Int, val count: Int)
+
+/** A single tracked movement-mode reading with its exact capture time. */
+data class MovementSample(val timestamp: Long, val value: Int)

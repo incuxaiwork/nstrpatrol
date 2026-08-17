@@ -37,10 +37,13 @@ class ConnectivityObserver(context: Context) {
                 network: Network,
                 caps: NetworkCapabilities
             ) {
-                trySend(
-                    caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                )
+                // Note: we intentionally do NOT require NET_CAPABILITY_VALIDATED.
+                // Many networks (and emulators) have working internet but never
+                // pass Android's captive-portal validation, which would wrongly
+                // report "offline" and block all syncing. We treat any network
+                // that advertises the INTERNET capability as online; failed
+                // uploads are retried on the next attempt.
+                trySend(caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET))
             }
         }
 
@@ -55,7 +58,6 @@ class ConnectivityObserver(context: Context) {
 
     private fun hasInternet(): Boolean {
         val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
-        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+        return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

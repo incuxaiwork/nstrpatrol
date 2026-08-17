@@ -6,17 +6,16 @@ const envSchema = z.object({
   DATABASE_URL: z.string().min(1),
   JWT_SECRET: z.string().min(16).default('dev-only-change-me-in-production-0000'),
   JWT_REFRESH_SECRET: z.string().min(16).default('dev-only-refresh-change-me-00000000'),
-  JWT_EXPIRES_IN: z.string().default('15m'),
   JWT_REFRESH_EXPIRES_IN: z.string().default('30d'),
   STORAGE_DIR: z.string().default('.storage'),
-  S3_ENDPOINT: z.string().optional(),
-  S3_PORT: z.coerce.number().int().positive().optional(),
-  S3_USE_SSL: z.string().optional(),
-  S3_ACCESS_KEY: z.string().optional(),
-  S3_SECRET_KEY: z.string().optional(),
-  /** Alias for S3_SECRET_KEY — accepted for compatibility with team env files. */
-  S3_SECRET: z.string().optional(),
   S3_BUCKET: z.string().optional(),
+  S3_REGION: z.string().default('us-east-1'),
+  S3_ENDPOINT: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_ACCESS_KEY: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
+  S3_SECRET: z.string().optional(),
+  S3_FORCE_PATH_STYLE: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

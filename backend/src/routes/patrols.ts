@@ -14,7 +14,7 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 const patrolCreateSchema = z.object({
-  id: z.string().min(1).max(40).optional(),
+  id: z.string().min(1).max(50).optional(),
   forestId: z.string().cuid().nullish(),
   name: z.string().trim().max(160).nullish(),
   description: z.string().trim().max(500).nullish(),

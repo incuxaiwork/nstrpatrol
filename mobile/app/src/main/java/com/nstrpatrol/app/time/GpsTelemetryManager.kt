@@ -19,6 +19,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import com.nstrpatrol.app.AppConfig
+import com.nstrpatrol.app.data.SettingsStore
 import android.view.Surface
 import android.view.WindowManager
 import androidx.core.content.ContextCompat
@@ -153,7 +154,10 @@ data class GpsTelemetry(
  *  - the full satellite constellation table via [GnssStatus.Callback]
  *  - satellite-derived UTC time from raw NMEA sentences ([NmeaParser])
  */
-class GpsTelemetryManager(private val appContext: Context) {
+class GpsTelemetryManager(
+    private val appContext: Context,
+    private val settings: SettingsStore? = null
+) {
 
     private val locationManager =
         appContext.getSystemService(Context.LOCATION_SERVICE) as LocationManager
@@ -455,7 +459,8 @@ class GpsTelemetryManager(private val appContext: Context) {
                 try {
                     locationManager.requestLocationUpdates(
                         provider,
-                        AppConfig.GPS_UPDATE_INTERVAL_MS,
+                        settings?.gpsUpdateIntervalMs?.value
+                            ?: AppConfig.DEFAULT_GPS_UPDATE_INTERVAL_MS,
                         0f,
                         locationListener,
                         Looper.getMainLooper()

@@ -3,9 +3,13 @@ package com.nstrpatrol.app.data
 import android.content.Context
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -61,6 +65,7 @@ class AuthSession(context: Context) {
     private val appContext = context.applicationContext
     private val prefs = appContext.getSharedPreferences("nstr_auth", Context.MODE_PRIVATE)
     private val client = BackendApiClient()
+    private val deviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Whether a session is stored. Call [restore] after creation to activate it. */
     fun hasSession(): Boolean = prefs.getString("accessToken", null) != null
@@ -69,6 +74,9 @@ class AuthSession(context: Context) {
     fun restore(): Boolean {
         val token = prefs.getString("accessToken", null) ?: return false
         client.setAccessToken(token)
+        // Re-register this handset in the background if it hasn't been done for
+        // this install yet (e.g. after an app upgrade or a missed registration).
+        deviceScope.launch { registerDevice() }
         return true
     }
 
@@ -106,12 +114,18 @@ class AuthSession(context: Context) {
     private fun registerDevice() {
         val deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
             ?: Build.FINGERPRINT
+        // Already registered for this install — don't re-POST on every login.
+        if (prefs.getString("deviceRegisteredFor", null) == deviceId) return
         val body = JSONObject()
             .put("deviceId", deviceId)
             .put("deviceName", "NSTR Patrol")
             .put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
         runCatching { client.postJson("/api/devices", body) }
-            .onFailure { /* device registration is best-effort */ }
+            .onSuccess { prefs.edit().putString("deviceRegisteredFor", deviceId).apply() }
+            .onFailure { t ->
+                // Best-effort, but surface it so failures aren't invisible.
+                Log.w("AuthSession", "device registration failed: ${t.message}")
+            }
     }
 
     /** Currently assigned patrol name (first ACTIVE/AUTO assignment), best-effort. */

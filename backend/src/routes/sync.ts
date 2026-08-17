@@ -17,7 +17,7 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
 
 const uploadSchema = z.object({
   deviceId: z.string().trim().min(1).max(255).optional(),
-  patrolId: z.string().min(1).max(40).optional(),
+  patrolId: z.string().min(1).max(50).optional(),
   batches: z
     .array(
       z.object({

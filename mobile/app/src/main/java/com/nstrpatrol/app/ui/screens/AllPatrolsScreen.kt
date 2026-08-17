@@ -31,24 +31,31 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
-import com.nstrpatrol.app.data.Patrols
-import com.nstrpatrol.app.data.db.PatrolSessionEntity
-import com.nstrpatrol.app.data.db.TelemetryDao
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nstrpatrol.app.data.AuthUser
 import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.data.db.PatrolSessionEntity
+import com.nstrpatrol.app.data.db.PatrolPointEntity
+import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.i18n.SupportedLanguages
+import com.nstrpatrol.app.ui.components.DangerButton
 import com.nstrpatrol.app.ui.components.NstrScaffold
+import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.navigation.BottomTab
+import com.nstrpatrol.app.ui.theme.OutlineCard
+import com.nstrpatrol.app.ui.theme.OutlineSoft
+import com.nstrpatrol.app.ui.theme.Surface
+import com.nstrpatrol.app.ui.theme.TextPrimary
+import com.nstrpatrol.app.ui.theme.TextSecondary
 import com.nstrpatrol.app.ui.theme.ChipCompleted
 import com.nstrpatrol.app.ui.theme.ChipInProgress
 import com.nstrpatrol.app.ui.theme.ChipScheduled
 import com.nstrpatrol.app.ui.theme.ForestGreen
-import com.nstrpatrol.app.ui.theme.OutlineCard
-import com.nstrpatrol.app.ui.theme.OutlineSoft
 import com.nstrpatrol.app.ui.theme.StatusCompleted
 import com.nstrpatrol.app.ui.theme.StatusInProgress
 import com.nstrpatrol.app.ui.theme.StatusScheduled
-import com.nstrpatrol.app.ui.theme.Surface
-import com.nstrpatrol.app.ui.theme.TextPrimary
-import com.nstrpatrol.app.ui.theme.TextSecondary
+
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -57,6 +64,8 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+
+private const val TAG = "AllPatrolsScreen"
 
 @Composable
 fun AllPatrolsScreen(
@@ -84,9 +93,14 @@ fun AllPatrolsScreen(
         loading = true
         try {
             val arr = withContext(Dispatchers.IO) { api.getJsonArray("/api/patrols") }
-            if (arr != null) backendEntries = parsePatrols(arr)
-        } catch (_: Exception) {
-            // Offline or auth error: keep whatever local data we have.
+            if (arr != null) {
+                Log.d(TAG, "Fetched ${arr.length()} patrols from backend")
+                backendEntries = parsePatrols(arr)
+            } else {
+                Log.w(TAG, "Backend returned null – offline or auth error")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to fetch patrols", e)
         } finally {
             loading = false
         }
@@ -158,7 +172,7 @@ fun AllPatrolsScreen(
                 }
                 DisplaySource.Backend -> {
                     val be = backendEntries.first { it.id == entry.id }
-                    MockPatrolCard(
+                    BackendPatrolCard(
                         patrol = be.patrol,
                         onClick = { onOpenPatrol(be.id) },
                         modifier = Modifier.padding(bottom = 12.dp)
@@ -178,7 +192,16 @@ private data class DisplayPatrol(
     val whenText: String,
     val source: DisplaySource
 )
-private data class PatrolEntry(val id: String, val patrol: Patrols.Patrol)
+private data class Patrol(
+    val name: String,
+    val status: String,
+    val ranger: String,
+    val whenText: String,
+    val distance: String,
+    val target: String
+)
+
+private data class PatrolEntry(val id: String, val patrol: Patrol)
 
 private fun parsePatrols(arr: JSONArray): List<PatrolEntry> {
     val out = mutableListOf<PatrolEntry>()
@@ -195,7 +218,7 @@ private fun parsePatrols(arr: JSONArray): List<PatrolEntry> {
         val user = o.optJSONObject("user")
         val ranger = user?.optString("fullName")?.takeIf { it.isNotEmpty() } ?: "—"
         val whenText = formatIso(o.optString("startedAt"))
-        out.add(PatrolEntry(id, Patrols.Patrol(name, status, ranger, whenText, "—", "")))
+        out.add(PatrolEntry(id, Patrol(name, status, ranger, whenText, "—", "")))
     }
     return out
 }
@@ -274,8 +297,8 @@ private fun SessionPatrolCard(
 }
 
 @Composable
-private fun MockPatrolCard(
-    patrol: Patrols.Patrol,
+private fun BackendPatrolCard(
+    patrol: Patrol,
     modifier: Modifier = Modifier,
     onClick: (() -> Unit)? = null
 ) {

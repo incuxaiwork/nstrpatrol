@@ -17,7 +17,7 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 export const incidentCreateSchema = z.object({
-  patrolId: z.string().min(1).max(40).nullish(),
+  patrolId: z.string().min(1).max(50).nullish(),
   type: z.enum(['HUMAN_IMPACT', 'ANIMAL_MORTALITY', 'SIGHTING', 'WATER_SOURCE', 'QUICK_CAPTURE', 'GENERAL']),
   title: z.string().trim().min(1).max(200),
   description: z.string().trim().max(2000).nullish(),

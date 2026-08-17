@@ -5,10 +5,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
@@ -23,20 +25,29 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.nstrpatrol.app.R
+import com.nstrpatrol.app.data.SyncController
+import com.nstrpatrol.app.data.SyncController.SyncState
+import com.nstrpatrol.app.data.NetworkStatus
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.ForestGreen
+import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextSecondary
 
@@ -102,6 +113,67 @@ fun NstrAppBar(
                 )
             }
         }
+    }
+}
+
+/** Full-width top banner showing internet/sync state on every screen. */
+@Composable
+private fun StatusBanner(modifier: Modifier = Modifier) {
+    val online by NetworkStatus.online.collectAsState()
+    val syncState by SyncController.state.collectAsState()
+
+    // Offline is an absolute state, whatever the sync is doing.
+    val isOffline = !online
+    // A fresh Idle with a healthy connection is the "connected to internet" state.
+    val isConnected = online && syncState is SyncState.Idle
+    val isSyncing = online && syncState is SyncState.Syncing
+    val isSynced = online && syncState is SyncState.Success
+    val isFailed = online && syncState is SyncState.Failed
+
+    val bg = when {
+        isOffline -> ErrorRed
+        isFailed -> ErrorRed
+        else -> ForestGreen
+    }
+    val text = when {
+        isOffline -> stringResource(R.string.status_offline)
+        isSyncing -> stringResource(
+            R.string.status_syncing,
+            ((syncState as SyncState.Syncing).progress * 100).toInt()
+        )
+        isConnected -> stringResource(R.string.status_connected)
+        isSynced -> stringResource(R.string.status_synced)
+        else -> stringResource(R.string.status_sync_failed)
+    }
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 14.dp)
+            .background(bg)
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        if (isSyncing) {
+            LinearProgressIndicator(
+                progress = { (syncState as SyncState.Syncing).progress.coerceIn(0f, 1f) },
+                color = Color.White,
+                trackColor = Color.White.copy(alpha = 0.3f),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(3.dp)
+            )
+            Spacer(Modifier.height(5.dp))
+        }
+        Text(
+            text = text,
+            color = Color.White,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -171,22 +243,32 @@ fun NstrScaffold(
     onBack: (() -> Unit)? = null,
     activeTab: BottomTab? = null,
     onTabSelected: ((BottomTab) -> Unit)? = null,
-    content: @Composable () -> Unit
+    scrollable: Boolean = true,
+    fullWidthContent: Boolean = false,
+    showHeader: Boolean = true,
+    content: @Composable ColumnScope.() -> Unit
 ) {
     Column(modifier = modifier) {
-        NstrAppBar(
-            title = title,
-            subtitle = subtitle,
-            largeTitle = largeTitle,
-            avatarText = avatarText,
-            onBack = onBack
-        )
+        StatusBanner()
+        if (showHeader) {
+            NstrAppBar(
+                title = title,
+                subtitle = subtitle,
+                largeTitle = largeTitle,
+                avatarText = avatarText,
+                onBack = onBack
+            )
+        }
         Column(
             modifier = Modifier
                 .weight(1f)
-                .padding(horizontal = 24.dp)
-                .verticalScroll(rememberScrollState())
-                .padding(bottom = 24.dp)
+                .padding(horizontal = if (fullWidthContent) 0.dp else 24.dp)
+                .then(
+                    if (scrollable) Modifier
+                        .verticalScroll(rememberScrollState())
+                        .padding(bottom = 24.dp)
+                    else Modifier
+                )
         ) {
             content()
         }
