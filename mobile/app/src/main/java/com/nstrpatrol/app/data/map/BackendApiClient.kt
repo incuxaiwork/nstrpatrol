@@ -9,8 +9,6 @@ import java.io.File
 import java.io.FileOutputStream
 import java.net.HttpURLConnection
 import java.net.URL
-import java.util.zip.GZIPInputStream
-import java.util.zip.GZIPOutputStream
 
 /** Raised when the backend answers a JSON request with a non-2xx status. */
 class ApiException(val statusCode: Int, val errorCode: String?, message: String?) :
@@ -200,27 +198,15 @@ class BackendApiClient {
             try {
                 val conn = openUrl("$baseUrl$path", method)
                 try {
+                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
                     if (body != null) {
                         conn.doOutput = true
                         conn.setRequestProperty("Content-Type", "application/json")
-                        conn.setRequestProperty("Content-Encoding", "gzip")
-                        conn.outputStream.use { raw ->
-                            GZIPOutputStream(raw).use { gz ->
-                                gz.write(body.toString().toByteArray())
-                            }
-                        }
+                        conn.outputStream.use { it.write(body.toString().toByteArray()) }
                     }
-                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
                     val code = conn.responseCode
                     val stream = if (code in 200..299) conn.inputStream else conn.errorStream
-                    val text = if (stream != null) {
-                        val encoding = conn.getHeaderField("Content-Encoding")
-                        if (encoding == "gzip") {
-                            GZIPInputStream(stream).bufferedReader().use { it.readText() }
-                        } else {
-                            stream.bufferedReader().use { it.readText() }
-                        }
-                    } else null
+                    val text = stream?.bufferedReader()?.use { it.readText() }
                     activeBaseUrl = baseUrl
                     return Pair(code, text)
                 } finally {

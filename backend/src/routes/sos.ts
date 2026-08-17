@@ -10,7 +10,7 @@ export const alertsRouter = Router();
 sosRouter.use(requireAuth);
 
 const sosSchema = z.object({
-  patrolId: z.string().min(1).max(40).nullish(),
+  patrolId: z.string().min(1).max(50).nullish(),
   latitude: z.number().finite().min(-90).max(90).nullish(),
   longitude: z.number().finite().min(-180).max(180).nullish(),
   accuracy: z.number().finite().nonnegative().nullish(),
