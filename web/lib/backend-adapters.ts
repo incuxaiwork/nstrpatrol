@@ -110,6 +110,10 @@ export interface CompartmentPolygon {
   beat: string;
   points: string;
   areaHa: number;
+  /** Region tags (client-side spatial resolution over real polygons). */
+  rangeId?: string;
+  beatId?: string;
+  compId?: string;
 }
 
 /** Reserved forest boundary — one or more outer rings (MultiPolygon-safe). */
@@ -126,6 +130,11 @@ export interface GridPolygon {
   id: string;
   gridCode: string;
   points: string;
+  /** Region resolution (client-side spatial containment over real polygons). */
+  rangeId?: string;
+  beatId?: string;
+  /** Contained compartment id, when the grid centroid falls inside one. */
+  compId?: string;
 }
 
 /** All outer rings of a Polygon or MultiPolygon + overall bbox. */
@@ -264,6 +273,32 @@ function rangeUnit(rangeName: string, divisionId: string): HierarchyUnit {
 function beatUnit(beatName: string, range: HierarchyUnit): HierarchyUnit {
   const id = `b-${range.id.replace(/^r-/, "")}-${slugify(beatName)}`;
   return { id, name: beatName, parent: range.id };
+}
+
+/* ------------------------------------------------------------------ */
+/* Region key resolution (raw names ↔ hierarchy ids)                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Normalize a range reference to its hierarchy range id. Accepts either the
+ * raw feature property ("V.P.SOUTH") or an already-normalized id
+ * ("r-vp-south") — beat polygons from the backend carry raw names, mock
+ * fixtures carry ids.
+ */
+export function rangeIdFor(rawRange: string): string | undefined {
+  if (!rawRange) return undefined;
+  const known = RANGE_MAP[rawRange];
+  if (known) return known.id;
+  if (/^r-/.test(rawRange)) return rawRange;
+  const id = `r-${slugify(rawRange)}`;
+  return RANGE_MAP[id]?.id ?? id;
+}
+
+/** Beat hierarchy id for a (range, beat) pair, mirroring hierarchyFromGeoJson. */
+export function beatIdFor(rawRange: string, beatName: string): string | undefined {
+  const rangeId = rangeIdFor(rawRange);
+  if (!rangeId || !beatName) return undefined;
+  return `b-${rangeId.replace(/^r-/, "")}-${slugify(beatName)}`;
 }
 
 /** Derive the division → range → beat tree + compartments from the backend

@@ -14,6 +14,9 @@ export interface BeatPolygon {
   points: string; // SVG polygon points
   coveragePct: number | null;
   isZeroPatrol?: boolean;
+  /** Region tags (client-side spatial resolution over real polygons). */
+  rangeId?: string;
+  beatId?: string;
 }
 
 export interface GisMarker {

@@ -8,9 +8,11 @@ import type { BadgeTone } from "@/components/ui";
 import { mockRangers } from "@/lib/mock/people";
 import type {
   AuthorizationStatus,
+  BeatJurisdiction,
   JurisdictionState,
   Patrol,
   PatrolAuthorization,
+  Ranger,
 } from "@/lib/types";
 
 export interface JurisdictionResolution {
@@ -62,6 +64,27 @@ export function rangerHome(
   const ranger = mockRangers.find((r) => r.id === patrol.rangerId || r.name === patrol.leader);
   if (!ranger) return undefined;
   return { division: ranger.division, range: ranger.range, beat: ranger.beat };
+}
+
+/**
+ * Jurisdiction foundation (PRD §16) — frontend data/context only.
+ *
+ * Resolves the beat a ranger normally patrols from whatever the data source
+ * provides: `assignedBeatId` when the backend exposes explicit beat
+ * assignments, otherwise the ranger's home beat field. Absence of both yields
+ * a jurisdiction record with no beat — never a guessed value. No enforcement
+ * happens here (final RBAC / permissions are deferred).
+ */
+export function rangerJurisdiction(ranger: Pick<Ranger, "id" | "name" | "division" | "range" | "beat" | "assignedBeatId"> | undefined): BeatJurisdiction {
+  if (!ranger) return { rangerId: "" };
+  return {
+    rangerId: ranger.id,
+    rangerName: ranger.name,
+    divisionId: ranger.division || undefined,
+    rangeId: ranger.range || undefined,
+    beatId: ranger.assignedBeatId || ranger.beat || undefined,
+    assignedBeatId: ranger.assignedBeatId || undefined,
+  };
 }
 
 /** Does the authorization's area match a patrol area exactly (division/range/beat)? */

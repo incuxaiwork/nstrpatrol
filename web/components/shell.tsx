@@ -6,7 +6,7 @@
  * Includes notification center and profile menu.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -15,6 +15,7 @@ import { useApp } from "@/lib/store";
 import { auth as authService } from "@/lib/services";
 import { navModules, breadcrumbsFor, type NavItem } from "@/lib/nav";
 import { Avatar, Badge } from "@/components/ui";
+import { DivisionContextChip } from "@/components/forest-context";
 import {
   Dropdown,
   DropdownItem,
@@ -448,6 +449,7 @@ function Topbar({ onMenu }: { onMenu(): void }) {
       >
         <Icon name="chevronLeft" size={18} />
       </button>
+      <DivisionContextChip className="hidden md:inline-flex" />
       <div className="flex-1" />
       <NotificationsMenu />
       <ProfileMenu />

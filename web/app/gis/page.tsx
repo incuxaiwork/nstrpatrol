@@ -5,20 +5,23 @@
  * live markers, patrol route playback, and the zero-patrol-zone board.
  */
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
-import { gis, rangers as servicesRangers, observations as servicesObservations } from "@/lib/services";
+import { gis, rangers as servicesRangers, observations as servicesObservations, hierarchy as hierarchyService } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { api } from "@/lib/api";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
-import { MapWorkspace, MapSidebarFacts } from "@/components/map";
+import { MapWorkspace, MapSidebarFacts, type GridRegionFilter } from "@/components/map";
+import { RegionFilter } from "@/components/gis-region-filter";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { stamp, exportRows } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { RegionReportDialog } from "@/components/reports/dialogs";
+import { FOREST_CONTEXT } from "@/lib/forest-context";
+import { tagBeats, tagCompartments, tagGrids } from "@/lib/grid-regions";
 import type { GisMarker, GisRoute } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
@@ -34,7 +37,9 @@ function selectedDetail(
   beats: { id: string; name: string; coveragePct: number | null }[],
   comps: { id: string; compNo: string; beat: string; areaHa: number }[],
   routes: GisRoute[],
-  markers: GisMarker[]
+  markers: GisMarker[],
+  grids: { id: string; gridCode: string; rangeId?: string; beatId?: string; compId?: string }[],
+  names: { rangeName(id?: string): string | undefined; beatName(id?: string): string | undefined; compNo(id?: string): string | undefined }
 ) {
   if (!selected) return null;
   const route = routes.find((r) => r.id === selected);
@@ -47,6 +52,17 @@ function selectedDetail(
       cta: "Open patrol",
       tone: "neutral" as const,
       tag: "Patrol route",
+    };
+  }
+  const grid = grids.find((g) => g.id === selected);
+  if (grid) {
+    return {
+      kind: "grid" as const,
+      title: grid.gridCode || "Grid",
+      rangeName: names.rangeName(grid.rangeId),
+      beatName: names.beatName(grid.beatId),
+      compNo: names.compNo(grid.compId),
+      tag: "Survey grid",
     };
   }
   const comp = comps.find((c) => c.id === selected);
@@ -95,6 +111,8 @@ export default function GisPage() {
   // No patrol preselected — play/pause appears only after the admin picks one.
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  // Range → Beat → Compartment filter (division is the fixed context).
+  const [regionFilter, setRegionFilter] = useState<GridRegionFilter>({});
 
   const markersData = useAsyncData(() => gis.markers());
   const routesData = useAsyncData(() => gis.routes());
@@ -104,6 +122,41 @@ export default function GisPage() {
   const compartmentsData = useAsyncData(() => gis.compartments());
   const boundaryData = useAsyncData(() => gis.boundary());
   const gridsData = useAsyncData(() => gis.grids());
+  // Real hierarchy register for the region filters (independent of the map).
+  const unitsData = useAsyncData(() => hierarchyService.units());
+
+  // Region attribution of beats → compartments → grids over the real
+  // polygons (shared projection space — exact within it). Division is
+  // implicitly FOREST_CONTEXT.divisionId everywhere. Computed unconditionally
+  // (before loading guards) to satisfy the rules of hooks.
+  const taggedBeats = useMemo(() => tagBeats(beatsData.data ?? []), [beatsData.data]);
+  const taggedCompartments = useMemo(
+    () => tagCompartments(compartmentsData.data ?? [], taggedBeats),
+    [compartmentsData.data, taggedBeats]
+  );
+  const taggedGrids = useMemo(
+    () => tagGrids(gridsData.data ?? [], taggedBeats, taggedCompartments),
+    [gridsData.data, taggedBeats, taggedCompartments]
+  );
+
+  // Name lookups for the grid popup (real register only — never fabricated).
+  const unitNames = useMemo(() => {
+    const rangeName = new Map<string, string>();
+    const beatName = new Map<string, string>();
+    for (const list of Object.values(unitsData.data?.ranges ?? {})) {
+      for (const r of list) rangeName.set(r.id, r.name);
+    }
+    for (const list of Object.values(unitsData.data?.beats ?? {})) {
+      for (const b of list) beatName.set(b.id, b.name);
+    }
+    const compNo = new Map<string, string>();
+    for (const c of unitsData.data?.compartments ?? []) compNo.set(c.id, c.compNo);
+    return {
+      rangeName(id?: string) { return id ? rangeName.get(id) : undefined; },
+      beatName(id?: string) { return id ? beatName.get(id) : undefined; },
+      compNo(id?: string) { return id ? compNo.get(id) : undefined; },
+    };
+  }, [unitsData.data]);
 
   if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data)
     return <SkeletonRows rows={8} />;
@@ -119,6 +172,7 @@ export default function GisPage() {
   const markers = markersData.data ?? [];
   const routes = routesData.data ?? [];
   const heat = heatData.data ?? [];
+  const units = unitsData.data ?? null;
 
   // Selecting a patrol route on the map arms the replay for that patrol.
   const handleSelect = (id: string | null) => {
@@ -132,7 +186,7 @@ export default function GisPage() {
   };
 
   const zeroPatrolBeats = beats.filter((b) => beatIsZero(b));
-  const detail = selectedDetail(selected, beats, compartments, routes, markers);
+  const detail = selectedDetail(selected, beats, compartments, routes, markers, taggedGrids, unitNames);
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `gis-catalog-${stamp()}`, [
@@ -189,10 +243,10 @@ export default function GisPage() {
             <MapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
-              liveBeats={beats}
-              compartments={compartments}
+              liveBeats={taggedBeats}
+              compartments={taggedCompartments}
               boundary={boundary}
-              grids={grids}
+              grids={taggedGrids}
               markers={markers}
               routes={routes}
               heat={heat}
@@ -200,7 +254,61 @@ export default function GisPage() {
               onSelect={handleSelect}
               replayPatrolId={replayPatrol}
               detailCard={detail ? <SelectedCard detail={detail} onClose={() => setSelected(null)} /> : undefined}
+              regionFilter={regionFilter}
             />
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader
+              title="GIS filters"
+              icon="layers"
+              subtitle={`${FOREST_CONTEXT.divisionName} is the fixed forest context — filtering starts at Range`}
+            />
+            <div className="p-4">
+              <RegionFilter
+                units={units}
+                error={unitsData.error?.message ?? null}
+                loading={unitsData.loading}
+                value={regionFilter}
+                onChange={setRegionFilter}
+              />
+            </div>
+          </Card>
+
+          {/* Grid data availability — explicit API GAP states, never fabricated values */}
+          <Card className="mt-4">
+            <CardHeader
+              title="Grid data availability"
+              icon="grid"
+              subtitle="Reference grid cells from the backend GIS API (ForestGrid)"
+            />
+            <div className="space-y-2 p-4 text-sm">
+              {grids.length > 0 ? (
+                <>
+                  <p className="flex items-center gap-2 text-ink">
+                    <Badge tone="success" dot>{taggedGrids.length} grid cells loaded</Badge>
+                    <span className="text-xs text-ink-soft">
+                      Range / beat / compartment attribution is resolved from the real GIS polygons.
+                    </span>
+                  </p>
+                  <p className="flex items-start gap-2 rounded-field border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-[#8a4b00]">
+                    <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+                    API GAP — per-grid patrol coverage is not exposed by the backend. Grid coverage
+                    visualization will activate when a coverage aggregation API exists.
+                  </p>
+                  <p className="flex items-start gap-2 rounded-field border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-[#8a4b00]">
+                    <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+                    API GAP — zero / unpatrolled grid flags are not exposed by the backend.
+                    The layer is prepared for them (covered / uncovered / no data).
+                  </p>
+                </>
+              ) : (
+                <p className="rounded-field border border-line bg-surface px-3 py-2 text-xs text-ink-soft">
+                  No grid data available. The grid layer stays hidden until the backend GIS API
+                  returns survey grid polygons.
+                </p>
+              )}
+            </div>
           </Card>
         </div>
 
@@ -329,12 +437,13 @@ function cn(...args: unknown[]) { return args.filter(Boolean).join(" "); }
 type Detail = ReturnType<typeof selectedDetail>;
 
 function SelectedCard({ detail, onClose }: { detail: NonNullable<Detail>; onClose(): void }) {
+  const isGrid = detail.kind === "grid";
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-pop" role="dialog" aria-label={detail.title}>
       <div className="flex items-start justify-between gap-2 border-b border-line bg-surface px-3 py-2">
         <div className="flex items-center gap-2">
           {detail.tag && (
-            <Badge tone={detail.tone === "danger" ? "danger" : "neutral"}>{detail.tag}</Badge>
+            <Badge tone={isGrid ? "forest" : detail.tone === "danger" ? "danger" : "neutral"}>{detail.tag}</Badge>
           )}
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Map selection</p>
         </div>
@@ -344,15 +453,45 @@ function SelectedCard({ detail, onClose }: { detail: NonNullable<Detail>; onClos
       </div>
       <div className="p-3">
         <p className="text-sm font-semibold text-ink">{detail.title}</p>
-        <p className="mt-0.5 text-xs text-ink-soft">{detail.body}</p>
-        <Link
-          href={detail.href}
-          onClick={onClose}
-          className="mt-2.5 inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700"
-        >
-          <Icon name="chevronRight" size={12} /> {detail.cta}
-        </Link>
+
+        {isGrid ? (
+          <div className="mt-2.5 space-y-1.5 text-xs">
+            <InfoRow label="Division" value={FOREST_CONTEXT.divisionName} />
+            <InfoRow label="Range" value={detail.rangeName ?? "Not available"} />
+            <InfoRow label="Beat" value={detail.beatName ?? "Not available"} />
+            <InfoRow label="Compartment" value={detail.compNo ?? "Not available"} />
+            <div className="flex items-start gap-2 rounded-field border border-warning/30 bg-warning-soft px-2.5 py-1.5">
+              <Icon name="alert" size={13} className="mt-0.5 shrink-0 text-[#8a4b00]" />
+              <span className="text-[11px] leading-snug text-[#8a4b00]">
+                Coverage data unavailable — the backend does not expose per-grid patrol coverage yet.
+              </span>
+            </div>
+            <InfoRow label="Last patrol" value="Not available" />
+            <InfoRow label="Patrol count" value="Not available" />
+          </div>
+        ) : (
+          <p className="mt-0.5 text-xs text-ink-soft">{detail.body}</p>
+        )}
+
+        {!isGrid && (
+          <Link
+            href={detail.href}
+            onClick={onClose}
+            className="mt-2.5 inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700"
+          >
+            <Icon name="chevronRight" size={12} /> {detail.cta}
+          </Link>
+        )}
       </div>
+    </div>
+  );
+}
+
+function InfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3">
+      <span className="shrink-0 text-ink-soft">{label}</span>
+      <span className="text-right font-medium text-ink">{value}</span>
     </div>
   );
 }

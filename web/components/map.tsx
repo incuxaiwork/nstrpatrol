@@ -25,10 +25,13 @@ import {
   NavigationControl,
   LngLatBounds,
   type MapMouseEvent,
+  type ExpressionSpecification,
+  type FilterSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
+import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel } from "@/lib/forest-context";
 import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 import { unitName } from "@/lib/mock/hierarchy";
@@ -79,6 +82,29 @@ export interface MapProps {
   onProgress?(p: number): void;
   seekSignal?: { value: number } | null;
   detailCard?: ReactNode;
+  /**
+   * Range → Beat → Compartment region filter. Division is NOT part of the
+   * filter — Markapur Division is the fixed context (lib/forest-context.ts).
+   * Applied to beats / compartments / ranges / grid layers by their region
+   * properties; clears to null when empty.
+   */
+  regionFilter?: GridRegionFilter;
+}
+
+export interface GridRegionFilter {
+  rangeId?: string | null;
+  beatId?: string | null;
+  compId?: string | null;
+}
+
+/** MapLibre expression filtering a layer by the region filter (null = all). */
+function regionFilterExpression(v: GridRegionFilter | undefined): FilterSpecification | null {
+  if (!v) return null;
+  const parts: ExpressionSpecification[] = [];
+  if (v.rangeId) parts.push(["==", ["get", "rangeId"], v.rangeId]);
+  if (v.beatId) parts.push(["==", ["get", "beatId"], v.beatId]);
+  if (v.compId) parts.push(["==", ["get", "compId"], v.compId]);
+  return parts.length > 0 ? ["all", ...parts] : null;
 }
 
 /** Layer visibility state — the web counterpart of GisLayerState. */
@@ -121,7 +147,7 @@ const LAYER_ROWS: { key: keyof ForestLayerState; title: string; subtitle: string
   { key: "beats", title: "Forest Beat Boundaries", subtitle: "44 Markapur Division beats" },
   { key: "ranges", title: "Ranges", subtitle: "Range division outlines & labels" },
   { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
-  { key: "grids", title: "Grid Lines", subtitle: "Survey grid overlay" },
+  { key: "grids", title: `${gridSizeLabel(DEFAULT_GRID_SIZE)} Grid`, subtitle: "Survey grid overlay (backend cells)" },
   { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
   { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
   { key: "markers", title: "Sightings & Incidents", subtitle: "Observation, incident & SOS points" },
@@ -152,16 +178,16 @@ const CLICKABLE = [
   "gl-markers-ranger",
   "gl-markers-obs",
   "gl-markers-sos",
+  "gl-grids-fill",
 ];
 
-const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {
-  basemap: ["gl-basemap"],
+const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {  basemap: ["gl-basemap"],
   satellite: ["gl-satellite"],
   boundary: ["gl-boundary-fill", "gl-boundary-line", "gl-boundary-label"],
   beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
-  grids: ["gl-grids-line"],
+  grids: ["gl-grids-fill", "gl-grids-line", "gl-grids-coverage", "gl-grids-coverage-line"],
   routes: ["gl-routes", "gl-replay-trail", "gl-replay-head"],
   rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
   markers: ["gl-markers-obs", "gl-markers-sos", "gl-markers-sos-label"],
@@ -169,6 +195,27 @@ const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {
   coverage: ["gl-beats-coverage"],
   heat: ["gl-heat"],
 };
+
+/** Layers whose visibility is constrained by the Range → Beat → Compartment
+ *  region filter (division is fixed context, never filtered). */
+const REGION_FILTERED_LAYERS = [
+  "gl-beats-fill",
+  "gl-beats-outline",
+  "gl-beats-zero-dash",
+  "gl-beats-label",
+  "gl-beats-coverage",
+  "gl-auth-fill",
+  "gl-auth-line",
+  "gl-compartments-fill",
+  "gl-compartments-line",
+  "gl-compartments-label",
+  "gl-ranges-outline",
+  "gl-ranges-label",
+  "gl-grids-fill",
+  "gl-grids-line",
+  "gl-grids-coverage",
+  "gl-grids-coverage-line",
+];
 
 function buildLayers(m: MapLibreMap) {
   m.addSource("tiles", {
@@ -208,12 +255,64 @@ function buildLayers(m: MapLibreMap) {
   // 1b. Satellite imagery overlay (app parity — Esri World Imagery).
   m.addLayer({ id: "gl-satellite", type: "raster", source: "satellite", paint: { "raster-opacity": 0.9 } });
 
-  // 2. Survey grids.
+  // 2. Survey grids — geographic grid cells from the backend GIS API.
+  //    Subtle by design: lines must never overpower patrol routes, incidents,
+  //    observations or forest boundaries (zoomed out → lighter/simplified,
+  //    zoomed in → clearer). Geometry is the backend's real grid — this
+  //    frontend never generates a second grid in the browser.
+  m.addLayer({
+    id: "gl-grids-fill",
+    type: "fill",
+    source: "grids",
+    paint: { "fill-color": "#8a8f98", "fill-opacity": 0.05 },
+  });
   m.addLayer({
     id: "gl-grids-line",
     type: "line",
     source: "grids",
-    paint: { "line-color": "#8a8f98", "line-width": 0.8, "line-opacity": 0.6 },
+    minzoom: 5.5,
+    paint: {
+      "line-color": "#8a8f98",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.5, 13, 1.1, 16, 1.6],
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.2, 10, 0.45, 14, 0.75],
+    },
+  });
+  // Per-cell coverage tint — data-driven layer that renders NOTHING until a
+  // backend coverage aggregation API populates coverageStatus (currently
+  // null for every cell → explicit "no data" state, never fabricated).
+  m.addLayer({
+    id: "gl-grids-coverage",
+    type: "fill",
+    source: "grids",
+    filter: ["!=", ["get", "coverageStatus"], null],
+    paint: {
+      "fill-color": [
+        "case",
+        ["==", ["get", "coverageStatus"], "covered"],
+        "#2E7D32",
+        ["==", ["get", "coverageStatus"], "uncovered"],
+        "#B3261E",
+        "#8a8f98",
+      ],
+      "fill-opacity": 0.18,
+    },
+  });
+  m.addLayer({
+    id: "gl-grids-coverage-line",
+    type: "line",
+    source: "grids",
+    filter: ["!=", ["get", "coverageStatus"], null],
+    paint: {
+      "line-color": [
+        "case",
+        ["==", ["get", "coverageStatus"], "covered"],
+        "#2E7D32",
+        ["==", ["get", "coverageStatus"], "uncovered"],
+        "#B3261E",
+        "#8a8f98",
+      ],
+      "line-width": 1.6,
+    },
   });
 
   // 3. Reserve boundary.
@@ -523,6 +622,7 @@ export function MapWorkspace({
   routes,
   heat,
   detailCard,
+  regionFilter,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -672,6 +772,17 @@ export function MapWorkspace({
     }
   }, [ready, layerState]);
 
+  // Region filter (Range → Beat → Compartment; division is fixed context).
+  useEffect(() => {
+    if (!ready) return;
+    const m = mapRef.current!;
+    const expr = regionFilterExpression(regionFilter);
+    for (const lid of REGION_FILTERED_LAYERS) {
+      if (!m.getLayer(lid)) continue;
+      m.setFilter(lid, expr);
+    }
+  }, [ready, regionFilter]);
+
   // Feature pick + hover cursor.
   useEffect(() => {
     if (!ready) return;
@@ -769,9 +880,12 @@ export function MapWorkspace({
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">
       {/* Map header strip */}
       <div className="flex items-center justify-between gap-2 border-b border-line bg-white px-3 py-2">
-        <div className="flex items-center gap-2 text-xs text-ink-soft">
-          <Icon name="map" size={14} className="text-forest-700" />
-          <span>NSTR Forest — operational view</span>
+        <div className="flex min-w-0 items-center gap-2 text-xs text-ink-soft">
+          <Icon name="map" size={14} className="shrink-0 text-forest-700" />
+          <span className="truncate">
+            NSTR Forest — operational view · {FOREST_CONTEXT.divisionName}
+            {grids && grids.length > 0 ? ` · ${grids.length} grid cells` : ""}
+          </span>
         </div>
         <button
           onClick={() => setLayersOpen((v) => !v)}
@@ -872,6 +986,9 @@ export function MapWorkspace({
               <LegendRow color="#FF8F00" isPoint label="SOS / alert" />
               <LegendRow color="#B3261E" dashed label="Zero patrol zone" />
               <LegendRow color="#FF8F00" dashed label="Authorization area" />
+              <LegendRow color="#8a8f98" label="Survey grid" />
+              <LegendRow color="#2E7D32" label="Grid covered (API)" />
+              <LegendRow color="#B3261E" label="Grid uncovered (API)" />
               <LegendRow color="#5b7684" isRaster label="Satellite / offline basemap" />
             </div>
           )}

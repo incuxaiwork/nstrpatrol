@@ -88,6 +88,8 @@ export function beatsToFeatures(
         name: b.name,
         division: b.division,
         range: b.range,
+        rangeId: b.rangeId ?? null,
+        beatId: b.beatId ?? null,
         coveragePct: b.coveragePct,
         isZero: b.isZeroPatrol === true,
         isAuth: false,
@@ -117,7 +119,11 @@ export function boundariesToFeatures(boundaries: BoundaryPolygon[]): GeoFeatureC
   };
 }
 
-/** Reference grid cells. */
+/**
+ * Reference grid cells. Coverage fields are explicitly null until a backend
+ * coverage aggregation API exists — the layer and popup render "no data"
+ * states from these placeholders, never fabricated coverage.
+ */
 export function gridsToFeatures(grids: GridPolygon[]): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
@@ -127,6 +133,12 @@ export function gridsToFeatures(grids: GridPolygon[]): GeoFeatureCollection {
       properties: flatProps({
         id: g.id,
         gridCode: g.gridCode,
+        rangeId: g.rangeId ?? null,
+        beatId: g.beatId ?? null,
+        compId: g.compId ?? null,
+        coverageStatus: null,
+        lastPatrolAt: null,
+        patrolCount: null,
       }),
       geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
     })),
@@ -243,6 +255,8 @@ export interface RangePolygon {
   division: string;
   points: string; // SVG ring of the range's outer hull
   color: string;
+  /** Hierarchy range id, when the beats carry region tags. */
+  rangeId?: string;
 }
 
 export const RANGE_COLORS = [
@@ -310,6 +324,7 @@ export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
       id: `range-${key}`,
       name: rangeLabel(key),
       division: group[0]?.division ?? "",
+      rangeId: group.find((b) => b.rangeId)?.rangeId,
       points: hull.map((p) => `${p[0]},${p[1]}`).join(" "),
       color: RANGE_COLORS[i % RANGE_COLORS.length],
     };
@@ -334,6 +349,7 @@ export function rangesToFeatures(ranges: RangePolygon[]): GeoFeatureCollection {
         id: r.id,
         name: r.name,
         division: r.division,
+        rangeId: r.rangeId ?? null,
         color: r.color,
       }),
       geometry: { type: "Polygon", coordinates: [svgRingToLngLat(r.points)] },
@@ -349,7 +365,7 @@ export function rangeLabelsToFeatures(ranges: RangePolygon[]): GeoFeatureCollect
       return {
         type: "Feature",
         id: `${r.id}-label`,
-        properties: flatProps({ name: r.name, color: r.color }),
+        properties: flatProps({ name: r.name, rangeId: r.rangeId ?? null, color: r.color }),
         geometry: { type: "Point", coordinates: svgToLngLat(x, y) },
       };
     }),
@@ -367,6 +383,9 @@ export function compartmentsToFeatures(comps: CompartmentPolygon[]): GeoFeatureC
         compNo: c.compNo,
         beat: c.beat,
         areaHa: c.areaHa,
+        rangeId: c.rangeId ?? null,
+        beatId: c.beatId ?? null,
+        compId: c.compId ?? c.id,
       }),
       geometry: { type: "Polygon", coordinates: [svgRingToLngLat(c.points)] },
     })),
@@ -381,7 +400,12 @@ export function compartmentLabelsToFeatures(comps: CompartmentPolygon[]): GeoFea
       return {
         type: "Feature",
         id: `${c.id}-label`,
-        properties: flatProps({ compNo: c.compNo }),
+        properties: flatProps({
+          compNo: c.compNo,
+          rangeId: c.rangeId ?? null,
+          beatId: c.beatId ?? null,
+          compId: c.compId ?? c.id,
+        }),
         geometry: { type: "Point", coordinates: svgToLngLat(x, y) },
       };
     }),
