@@ -146,6 +146,12 @@ interface TelemetryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertPatrolPoints(points: List<PatrolPointEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertMovementModeReadings(readings: List<MovementModeReadingEntity>)
+
+    @Query("SELECT * FROM movement_mode_readings WHERE patrolId = :patrolId ORDER BY timestamp ASC")
+    suspend fun movementModeReadingsForPatrol(patrolId: String): List<MovementModeReadingEntity>
+
     @Query("UPDATE patrol_sessions SET detectedMethod = :method WHERE patrolId = :patrolId")
     suspend fun setDetectedMethod(patrolId: String, method: String?)
 

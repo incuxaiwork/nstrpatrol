@@ -99,6 +99,7 @@ model Patrol {
   user                  User                   @relation(fields: [userId], references: [id])
   points                PatrolPoint[]
   stepReadings          StepReading[]
+  movementModeReadings  MovementModeReading[]
   integrityLogs         TimeIntegrityLog[]
 
   @@index([userId])
@@ -132,6 +133,20 @@ model StepReading {
   timestamp  DateTime
   steps      Int
   cadence    Float?
+  syncStatus SyncStatus @default(PENDING)
+  createdAt  DateTime   @default(now())
+  patrolId   String
+  patrol     Patrol     @relation(fields: [patrolId], references: [id])
+
+  @@index([patrolId, timestamp])
+}
+
+model MovementModeReading {
+  id         String     @id @default(cuid())
+  timestamp  DateTime
+  mode       String
+  confidence Float?
+  speedKmh   Float?
   syncStatus SyncStatus @default(PENDING)
   createdAt  DateTime   @default(now())
   patrolId   String

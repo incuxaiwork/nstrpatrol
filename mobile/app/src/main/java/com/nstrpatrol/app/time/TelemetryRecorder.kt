@@ -207,7 +207,9 @@ class TelemetryRecorder(
                 patrolId = pid,
                 timestamp = now,
                 type = TYPE_MOVEMENT_MODE,
-                value = info.mode.code.toFloat()
+                value = info.mode.code.toFloat(),
+                x = info.confidence,
+                y = info.speedKmh
             )
         )
     }

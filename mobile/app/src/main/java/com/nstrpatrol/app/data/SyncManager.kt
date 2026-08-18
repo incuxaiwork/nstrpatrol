@@ -5,6 +5,7 @@ import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.db.SensorReadingEntity
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.time.MovementMode
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -263,6 +264,12 @@ object SyncManager {
                             when (entity) {
                                 "step-readings" -> put("steps", r.value?.toInt() ?: 0)
                                 "barometer" -> put("pressureHpa", r.value?.toDouble() ?: 0.0)
+                                "movement-mode" -> {
+                                    val modeCode = r.value?.toInt() ?: 0
+                                    put("mode", MovementMode.fromCode(modeCode).name)
+                                    r.x?.let { put("confidence", it.toDouble()) }
+                                    r.y?.let { put("speedKmh", it.toDouble()) }
+                                }
                                 else -> {
                                     r.x?.let { put("x", it.toDouble()) }
                                     r.y?.let { put("y", it.toDouble()) }
@@ -452,6 +459,28 @@ object SyncManager {
                 dao.upsertPatrolPoints(points)
                 Log.d(TAG, "Pulled ${points.size} points for patrol $id")
             }
+
+            // Fetch movement-mode readings
+            val movArr = api.getJsonArray("/api/patrols/$id/movement")
+            if (movArr != null && movArr.length() > 0) {
+                val movReadings = mutableListOf<com.nstrpatrol.app.data.db.MovementModeReadingEntity>()
+                for (j in 0 until movArr.length()) {
+                    val m = movArr.optJSONObject(j) ?: continue
+                    movReadings.add(
+                        com.nstrpatrol.app.data.db.MovementModeReadingEntity(
+                            id = "bm-$id-$j",
+                            patrolId = id,
+                            timestamp = parseIsoMs(m.optString("t")),
+                            mode = m.optString("mode", "UNKNOWN"),
+                            confidence = if (!m.isNull("confidence")) m.optDouble("confidence").toFloat() else null,
+                            speedKmh = if (!m.isNull("speedKmh")) m.optDouble("speedKmh").toFloat() else null
+                        )
+                    )
+                }
+                dao.upsertMovementModeReadings(movReadings)
+                Log.d(TAG, "Pulled ${movReadings.size} movement-mode readings for patrol $id")
+            }
+
             pulled++
         }
         Log.i(TAG, "Pull complete: $pulled patrols pulled from backend")
@@ -482,6 +511,7 @@ object SyncManager {
         "MAGNETOMETER" -> "magnetometer"
         "BAROMETER" -> "barometer"
         "STEP_COUNTER" -> "step-readings"
+        "MOVEMENT_MODE" -> "movement-mode"
         else -> null
     }
 

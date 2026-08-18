@@ -51,3 +51,24 @@ data class SensorReadingEntity(
     val value: Float? = null,
     val syncStatus: String = "PENDING"
 )
+
+/**
+ * A raw movement-mode reading pulled from the backend. Stores the same data
+ * as [SensorReadingEntity] with type=MOVEMENT_MODE, but in a dedicated table
+ * so pulled data doesn't mix with locally-recorded sensor readings.
+ *
+ * When the patrol report opens, the same processing code runs on this data
+ * regardless of whether it was recorded locally or pulled from the backend.
+ */
+@Entity(
+    tableName = "movement_mode_readings",
+    indices = [Index(value = ["patrolId", "timestamp"])]
+)
+data class MovementModeReadingEntity(
+    @PrimaryKey val id: String,
+    val patrolId: String,
+    val timestamp: Long,
+    val mode: String,
+    val confidence: Float? = null,
+    val speedKmh: Float? = null
+)

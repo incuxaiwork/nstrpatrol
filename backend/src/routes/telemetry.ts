@@ -88,6 +88,13 @@ const schemas = {
   'accelerometer': z.array(ts.extend(axis)),
   'gyroscope': z.array(ts.extend(axis)),
   'magnetometer': z.array(ts.extend(axis)),
+  'movement-mode': z.array(
+    ts.extend({
+      mode: z.string().min(1).max(50),
+      confidence: z.number().finite().min(0).max(1).nullish(),
+      speedKmh: z.number().finite().nonnegative().nullish(),
+    }),
+  ),
   'activity-segments': z.array(
     z.object({
       patrolId: z.string().min(1).max(50),
@@ -127,7 +134,7 @@ const schemas = {
 type EndpointKey = keyof typeof schemas;
 type DataMap = Record<
   EndpointKey,
-  { model: 'patrolPoint' | 'stepReading' | 'barometerReading' | 'accelerometerReading' | 'gyroscopeReading' | 'magnetometerReading' | 'activitySegment' | 'coverageEvent' | 'timeIntegrityLog' }
+  { model: 'patrolPoint' | 'stepReading' | 'barometerReading' | 'accelerometerReading' | 'gyroscopeReading' | 'magnetometerReading' | 'movementModeReading' | 'activitySegment' | 'coverageEvent' | 'timeIntegrityLog' }
 >;
 
 const modelMap: DataMap = {
@@ -137,6 +144,7 @@ const modelMap: DataMap = {
   'accelerometer': { model: 'accelerometerReading' },
   'gyroscope': { model: 'gyroscopeReading' },
   'magnetometer': { model: 'magnetometerReading' },
+  'movement-mode': { model: 'movementModeReading' },
   'activity-segments': { model: 'activitySegment' },
   'coverage-events': { model: 'coverageEvent' },
   'integrity-logs': { model: 'timeIntegrityLog' },

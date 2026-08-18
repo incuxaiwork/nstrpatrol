@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SensorReadingEntity::class,
         DailyActivityEntity::class,
         PatrolSessionEntity::class,
-        IncidentEntity::class
+        IncidentEntity::class,
+        MovementModeReadingEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class NstrDatabase : RoomDatabase() {
@@ -31,6 +32,22 @@ abstract class NstrDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS movement_mode_readings (
+                        id TEXT NOT NULL PRIMARY KEY,
+                        patrolId TEXT NOT NULL,
+                        timestamp INTEGER NOT NULL,
+                        mode TEXT NOT NULL,
+                        confidence REAL,
+                        speedKmh REAL
+                    )
+                """.trimIndent())
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_movement_mode_readings_patrolId_timestamp ON movement_mode_readings (patrolId, timestamp)")
+            }
+        }
+
         @Volatile
         private var instance: NstrDatabase? = null
 
@@ -41,7 +58,7 @@ abstract class NstrDatabase : RoomDatabase() {
                     NstrDatabase::class.java,
                     NAME
                 )
-                    .addMigrations(MIGRATION_4_5)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }

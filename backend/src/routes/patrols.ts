@@ -166,6 +166,33 @@ patrolsRouter.get('/:id/points', async (req, res) => {
   );
 });
 
+// Raw movement-mode readings for cross-device pull.
+patrolsRouter.get('/:id/movement', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const readings = await prisma.movementModeReading.findMany({
+    where: { patrolId: id },
+    orderBy: { timestamp: 'asc' },
+    select: { mode: true, confidence: true, speedKmh: true, timestamp: true },
+  });
+  res.json(
+    readings.map((r) => ({
+      mode: r.mode,
+      confidence: r.confidence,
+      speedKmh: r.speedKmh,
+      t: r.timestamp,
+    }))
+  );
+});
+
 const startSchema = z.object({ startedAt: z.coerce.date().optional() });
 
 patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => {

@@ -28,6 +28,7 @@ const uploadSchema = z.object({
           'accelerometer',
           'gyroscope',
           'magnetometer',
+          'movement-mode',
           'activity-segments',
           'coverage-events',
           'integrity-logs',
