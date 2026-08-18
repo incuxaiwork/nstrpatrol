@@ -381,6 +381,101 @@ object SyncManager {
         ok(incidents.size)
     }
 
+    /**
+     * Pulls all patrols and their GPS points from the backend into the local
+     * database. This enables cross-device viewing: a patrol recorded on device A
+     * becomes visible (with route map) on device B after pulling.
+     *
+     * Only upserts — existing local data (SYNCED or PENDING) is not overwritten.
+     * Returns the number of patrols pulled.
+     */
+    suspend fun pullFromBackend(
+        dao: TelemetryDao,
+        api: BackendApiClient
+    ): Int = withContext(Dispatchers.IO) {
+        Log.i(TAG, "Pulling patrols from backend")
+        val arr = api.getJsonArray("/api/patrols") ?: return@withContext 0
+        var pulled = 0
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("id")
+            if (id.isEmpty()) continue
+
+            // Skip if we already have a local session for this patrol
+            if (dao.patrolSession(id) != null) {
+                pulled++
+                continue
+            }
+
+            // Fetch full detail from backend
+            val detail = api.getJson("/api/patrols/$id") ?: continue
+            val startedMs = parseIsoMs(detail.optString("startedAt"))
+            val endedMs = detail.optString("endedAt").takeIf { it.isNotEmpty() }
+                ?.let { parseIsoMs(it) }
+            val stats = detail.optJSONObject("stats")
+            val distanceKm = stats?.optDouble("distanceKm", 0.0) ?: 0.0
+            val durationSec = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
+            val pointCount = stats?.optInt("points", 0) ?: 0
+
+            val session = com.nstrpatrol.app.data.db.PatrolSessionEntity(
+                patrolId = id,
+                startTime = startedMs,
+                endTime = endedMs,
+                status = detail.optString("status", "COMPLETED"),
+                patrolType = detail.optString("type").ifEmpty { null },
+                totalDistanceMeters = distanceKm * 1000,
+                moveMinutes = (durationSec / 60).toInt(),
+                pointCount = pointCount,
+                syncStatus = "SYNCED"
+            )
+            dao.upsertPatrolSession(session)
+
+            // Fetch GPS points
+            val pointsArr = api.getJsonArray("/api/patrols/$id/points")
+            if (pointsArr != null && pointsArr.length() > 0) {
+                val points = mutableListOf<com.nstrpatrol.app.data.db.PatrolPointEntity>()
+                for (j in 0 until pointsArr.length()) {
+                    val p = pointsArr.optJSONObject(j) ?: continue
+                    points.add(
+                        com.nstrpatrol.app.data.db.PatrolPointEntity(
+                            id = "bp-$id-$j",
+                            patrolId = id,
+                            latitude = p.optDouble("lat", 0.0),
+                            longitude = p.optDouble("lng", 0.0),
+                            altitude = if (!p.isNull("altitude")) p.optDouble("altitude") else null,
+                            speed = if (!p.isNull("speed")) p.optDouble("speed").toFloat() else null,
+                            timestamp = parseIsoMs(p.optString("t")),
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                }
+                dao.upsertPatrolPoints(points)
+                Log.d(TAG, "Pulled ${points.size} points for patrol $id")
+            }
+            pulled++
+        }
+        Log.i(TAG, "Pull complete: $pulled patrols pulled from backend")
+        pulled
+    }
+
+    private fun parseIsoMs(iso: String): Long {
+        if (iso.isEmpty()) return System.currentTimeMillis()
+        val patterns = listOf(
+            "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ss.SSSXXX",
+            "yyyy-MM-dd'T'HH:mm:ssXXX"
+        )
+        for (pattern in patterns) {
+            runCatching {
+                val sdf = java.text.SimpleDateFormat(pattern, java.util.Locale.US)
+                    .apply { timeZone = java.util.TimeZone.getTimeZone("UTC") }
+                return sdf.parse(iso)!!.time
+            }
+        }
+        return System.currentTimeMillis()
+    }
+
     private fun mapReadingEntity(type: String): String? = when (type) {
         "ACCELEROMETER" -> "accelerometer"
         "GYROSCOPE" -> "gyroscope"

@@ -143,6 +143,9 @@ interface TelemetryDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     suspend fun insertSessionIfAbsent(session: PatrolSessionEntity)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertPatrolPoints(points: List<PatrolPointEntity>)
+
     @Query("UPDATE patrol_sessions SET detectedMethod = :method WHERE patrolId = :patrolId")
     suspend fun setDetectedMethod(patrolId: String, method: String?)
 

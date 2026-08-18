@@ -22,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -37,6 +38,7 @@ import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.SyncManager
 import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.ui.components.DangerButton
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -51,12 +53,15 @@ import com.nstrpatrol.app.ui.theme.ChipCompleted
 import com.nstrpatrol.app.ui.theme.ChipInProgress
 import com.nstrpatrol.app.ui.theme.ChipScheduled
 import com.nstrpatrol.app.ui.theme.ForestGreen
+import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.StatusCompleted
 import com.nstrpatrol.app.ui.theme.StatusInProgress
 import com.nstrpatrol.app.ui.theme.StatusScheduled
 
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
@@ -78,6 +83,9 @@ fun AllPatrolsScreen(
     var sessions by remember { mutableStateOf(emptyList<PatrolSessionEntity>()) }
     var backendEntries by remember { mutableStateOf(emptyList<PatrolEntry>()) }
     var loading by remember { mutableStateOf(false) }
+    var pulling by remember { mutableStateOf(false) }
+    var pullMessage by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         kotlinx.coroutines.flow.combine(
@@ -86,25 +94,44 @@ fun AllPatrolsScreen(
         ) { list, _ -> list }.collect { sessions = it }
     }
 
-    // Real data from the backend (source of truth). No polling: fetched on entry
-    // and re-fetched when navigated back to. Local PENDING sessions (created
-    // offline, not yet uploaded) are shown separately to avoid duplicates.
-    LaunchedEffect(Unit) {
-        loading = true
-        try {
-            val arr = withContext(Dispatchers.IO) { api.getJsonArray("/api/patrols") }
-            if (arr != null) {
-                Log.d(TAG, "Fetched ${arr.length()} patrols from backend")
-                backendEntries = parsePatrols(arr)
-            } else {
-                Log.w(TAG, "Backend returned null – offline or auth error")
+    fun refreshBackend() {
+        scope.launch {
+            loading = true
+            try {
+                val arr = withContext(Dispatchers.IO) { api.getJsonArray("/api/patrols") }
+                if (arr != null) {
+                    Log.d(TAG, "Fetched ${arr.length()} patrols from backend")
+                    backendEntries = parsePatrols(arr)
+                } else {
+                    Log.w(TAG, "Backend returned null – offline or auth error")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to fetch patrols", e)
+            } finally {
+                loading = false
             }
-        } catch (e: Exception) {
-            Log.e(TAG, "Failed to fetch patrols", e)
-        } finally {
-            loading = false
         }
     }
+
+    LaunchedEffect(Unit) { refreshBackend() }
+
+    fun pullFromCloud() {
+        scope.launch {
+            pulling = true
+            pullMessage = null
+            try {
+                val count = withContext(Dispatchers.IO) { SyncManager.pullFromBackend(dao, api) }
+                pullMessage = "Pulled $count patrols from cloud"
+                refreshBackend()
+            } catch (e: Exception) {
+                Log.e(TAG, "Pull from cloud failed", e)
+                pullMessage = "Pull failed: ${e.message}"
+            } finally {
+                pulling = false
+            }
+        }
+    }
+
     val localPending = sessions.filter { it.syncStatus == "PENDING" }
     val allEntries: List<DisplayPatrol> =
         localPending.map { DisplayPatrol(it.patrolId, it.patrolType ?: it.beat ?: "Patrol", it.status, it.teamLeader, formatMillis(it.startTime), DisplaySource.Local) } +
@@ -127,11 +154,63 @@ fun AllPatrolsScreen(
 
     NstrScaffold(
         title = stringResource(R.string.all_patrols_title),
-        subtitle = if (loading) stringResource(R.string.common_syncing) else stringResource(R.string.all_patrols_subtitle),
+        subtitle = when {
+            pulling -> "Pulling from cloud..."
+            loading -> stringResource(R.string.common_syncing)
+            else -> stringResource(R.string.all_patrols_subtitle)
+        },
         activeTab = BottomTab.Patrol,
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(12.dp))
+
+        // Pull from cloud button
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            androidx.compose.material3.Button(
+                onClick = { refreshBackend() },
+                enabled = !loading && !pulling,
+                modifier = Modifier.weight(1f),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = ForestGreen
+                )
+            ) {
+                Text(
+                    text = if (loading) "Refreshing..." else "Refresh",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            androidx.compose.material3.Button(
+                onClick = { pullFromCloud() },
+                enabled = !loading && !pulling,
+                modifier = Modifier.weight(1f),
+                colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF1565C0)
+                )
+            ) {
+                Text(
+                    text = if (pulling) "Pulling..." else "Pull from Cloud",
+                    color = Color.White,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+        }
+
+        if (pullMessage != null) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = pullMessage ?: "",
+                color = if (pullMessage!!.contains("failed", true)) ErrorRed else ForestGreen,
+                fontSize = 12.sp
+            )
+        }
+
+        Spacer(Modifier.height(8.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             filterDefs.forEach { (key, label) ->
                 FilterChip(

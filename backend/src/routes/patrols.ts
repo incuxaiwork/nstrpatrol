@@ -86,24 +86,35 @@ patrolsRouter.get('/:id', async (req, res) => {
     throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
   }
 
-  const stats = await prisma.$queryRaw<{ points: bigint; distanceKm: number; durationSeconds: number }[]>`
-    SELECT COUNT(id)::bigint AS points,
-      COALESCE(
-        CASE WHEN COUNT(id) >= 2 THEN
-          ST_Length(
-            ST_MakeLine(
-              ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
-              ORDER BY timestamp
-            )
-          ) / 1000.0
-        ELSE 0 END, 0
-      ) AS "distanceKm",
-      COALESCE(
-        EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))), 0
-      ) AS "durationSeconds"
-    FROM "PatrolPoint"
-    WHERE "patrolId" = ${id}
-  `;
+  let pointCount = 0;
+  let distanceKm = 0;
+  let durationSeconds = 0;
+  try {
+    const stats = await prisma.$queryRaw<{ points: bigint; distanceKm: number; durationSeconds: number }[]>`
+      SELECT COUNT(id)::bigint AS points,
+        COALESCE(
+          CASE WHEN COUNT(id) >= 2 THEN
+            ST_Length(
+              ST_MakeLine(
+                ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
+                ORDER BY timestamp
+              )
+            ) / 1000.0
+          ELSE 0 END, 0
+        ) AS "distanceKm",
+        COALESCE(
+          EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))), 0
+        ) AS "durationSeconds"
+      FROM "PatrolPoint"
+      WHERE "patrolId" = ${id}
+    `;
+    pointCount = Number(stats[0]?.points ?? 0n);
+    distanceKm = Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100;
+    durationSeconds = Math.round(stats[0]?.durationSeconds ?? 0);
+  } catch {
+    // PostGIS may not be available — fall back to simple count
+    pointCount = await prisma.patrolPoint.count({ where: { patrolId: id } });
+  }
 
   const stepsAgg = await prisma.stepReading.aggregate({
     where: { patrolId: id },
@@ -121,12 +132,7 @@ patrolsRouter.get('/:id', async (req, res) => {
   res.json({
     ...patrol,
     detectedMethod,
-    stats: {
-      points: Number(stats[0]?.points ?? 0n),
-      distanceKm: Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100,
-      durationSeconds: Math.round(stats[0]?.durationSeconds ?? 0),
-      steps,
-    },
+    stats: { points: pointCount, distanceKm, durationSeconds, steps },
   });
 });
 
