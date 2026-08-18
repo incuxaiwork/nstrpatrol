@@ -152,6 +152,12 @@ interface TelemetryDao {
     @Query("SELECT * FROM movement_mode_readings WHERE patrolId = :patrolId ORDER BY timestamp ASC")
     suspend fun movementModeReadingsForPatrol(patrolId: String): List<MovementModeReadingEntity>
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertSensorReadings(readings: List<SensorReadingEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertIncidents(incidents: List<IncidentEntity>)
+
     @Query("UPDATE patrol_sessions SET detectedMethod = :method WHERE patrolId = :patrolId")
     suspend fun setDetectedMethod(patrolId: String, method: String?)
 

@@ -193,6 +193,107 @@ patrolsRouter.get('/:id/movement', async (req, res) => {
   );
 });
 
+// All sensor readings for cross-device pull (accelerometer, gyroscope,
+// magnetometer, barometer, step-readings) returned in one response.
+patrolsRouter.get('/:id/sensors', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const [accel, gyro, mag, baro, steps] = await Promise.all([
+    prisma.accelerometerReading.findMany({
+      where: { patrolId: id },
+      orderBy: { timestamp: 'asc' },
+      select: { x: true, y: true, z: true, timestamp: true },
+    }),
+    prisma.gyroscopeReading.findMany({
+      where: { patrolId: id },
+      orderBy: { timestamp: 'asc' },
+      select: { x: true, y: true, z: true, timestamp: true },
+    }),
+    prisma.magnetometerReading.findMany({
+      where: { patrolId: id },
+      orderBy: { timestamp: 'asc' },
+      select: { x: true, y: true, z: true, timestamp: true },
+    }),
+    prisma.barometerReading.findMany({
+      where: { patrolId: id },
+      orderBy: { timestamp: 'asc' },
+      select: { pressureHpa: true, altitudeM: true, timestamp: true },
+    }),
+    prisma.stepReading.findMany({
+      where: { patrolId: id },
+      orderBy: { timestamp: 'asc' },
+      select: { steps: true, cadence: true, timestamp: true },
+    }),
+  ]);
+
+  res.json({
+    accelerometer: accel.map((r) => ({
+      x: r.x, y: r.y, z: r.z, t: r.timestamp,
+    })),
+    gyroscope: gyro.map((r) => ({
+      x: r.x, y: r.y, z: r.z, t: r.timestamp,
+    })),
+    magnetometer: mag.map((r) => ({
+      x: r.x, y: r.y, z: r.z, t: r.timestamp,
+    })),
+    barometer: baro.map((r) => ({
+      pressureHpa: r.pressureHpa, altitudeM: r.altitudeM, t: r.timestamp,
+    })),
+    steps: steps.map((r) => ({
+      steps: r.steps, cadence: r.cadence, t: r.timestamp,
+    })),
+  });
+});
+
+// Incidents for cross-device pull.
+patrolsRouter.get('/:id/incidents', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const incidents = await prisma.incident.findMany({
+    where: { patrolId: id },
+    orderBy: { reportedAt: 'asc' },
+    select: {
+      id: true, type: true, title: true, description: true,
+      severity: true, details: true, latitude: true, longitude: true,
+      accuracy: true, photos: true, occurredAt: true, reportedAt: true,
+      status: true, syncStatus: true,
+    },
+  });
+  res.json(
+    incidents.map((i) => ({
+      id: i.id,
+      type: i.type,
+      title: i.title,
+      description: i.description,
+      severity: i.severity,
+      details: i.details,
+      latitude: i.latitude,
+      longitude: i.longitude,
+      accuracy: i.accuracy,
+      photos: i.photos,
+      occurredAt: i.occurredAt,
+      reportedAt: i.reportedAt,
+      status: i.status,
+    }))
+  );
+});
+
 const startSchema = z.object({ startedAt: z.coerce.date().optional() });
 
 patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => {

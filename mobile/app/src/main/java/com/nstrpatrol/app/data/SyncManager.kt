@@ -481,6 +481,142 @@ object SyncManager {
                 Log.d(TAG, "Pulled ${movReadings.size} movement-mode readings for patrol $id")
             }
 
+            // Fetch all sensor readings (accel, gyro, mag, barometer, steps)
+            val sensorsObj = api.getJson("/api/patrols/$id/sensors")
+            if (sensorsObj != null) {
+                val sensorEntities = mutableListOf<com.nstrpatrol.app.data.db.SensorReadingEntity>()
+                // Accelerometer
+                val accelArr = sensorsObj.optJSONArray("accelerometer")
+                if (accelArr != null) {
+                    for (j in 0 until accelArr.length()) {
+                        val a = accelArr.optJSONObject(j) ?: continue
+                        sensorEntities.add(
+                            com.nstrpatrol.app.data.db.SensorReadingEntity(
+                                id = "bs-a-$id-$j",
+                                patrolId = id,
+                                timestamp = parseIsoMs(a.optString("t")),
+                                type = "ACCELEROMETER",
+                                x = if (!a.isNull("x")) a.optDouble("x").toFloat() else null,
+                                y = if (!a.isNull("y")) a.optDouble("y").toFloat() else null,
+                                z = if (!a.isNull("z")) a.optDouble("z").toFloat() else null,
+                                syncStatus = "SYNCED"
+                            )
+                        )
+                    }
+                }
+                // Gyroscope
+                val gyroArr = sensorsObj.optJSONArray("gyroscope")
+                if (gyroArr != null) {
+                    for (j in 0 until gyroArr.length()) {
+                        val g = gyroArr.optJSONObject(j) ?: continue
+                        sensorEntities.add(
+                            com.nstrpatrol.app.data.db.SensorReadingEntity(
+                                id = "bs-g-$id-$j",
+                                patrolId = id,
+                                timestamp = parseIsoMs(g.optString("t")),
+                                type = "GYROSCOPE",
+                                x = if (!g.isNull("x")) g.optDouble("x").toFloat() else null,
+                                y = if (!g.isNull("y")) g.optDouble("y").toFloat() else null,
+                                z = if (!g.isNull("z")) g.optDouble("z").toFloat() else null,
+                                syncStatus = "SYNCED"
+                            )
+                        )
+                    }
+                }
+                // Magnetometer
+                val magArr = sensorsObj.optJSONArray("magnetometer")
+                if (magArr != null) {
+                    for (j in 0 until magArr.length()) {
+                        val m = magArr.optJSONObject(j) ?: continue
+                        sensorEntities.add(
+                            com.nstrpatrol.app.data.db.SensorReadingEntity(
+                                id = "bs-m-$id-$j",
+                                patrolId = id,
+                                timestamp = parseIsoMs(m.optString("t")),
+                                type = "MAGNETOMETER",
+                                x = if (!m.isNull("x")) m.optDouble("x").toFloat() else null,
+                                y = if (!m.isNull("y")) m.optDouble("y").toFloat() else null,
+                                z = if (!m.isNull("z")) m.optDouble("z").toFloat() else null,
+                                syncStatus = "SYNCED"
+                            )
+                        )
+                    }
+                }
+                // Barometer
+                val baroArr = sensorsObj.optJSONArray("barometer")
+                if (baroArr != null) {
+                    for (j in 0 until baroArr.length()) {
+                        val b = baroArr.optJSONObject(j) ?: continue
+                        sensorEntities.add(
+                            com.nstrpatrol.app.data.db.SensorReadingEntity(
+                                id = "bs-b-$id-$j",
+                                patrolId = id,
+                                timestamp = parseIsoMs(b.optString("t")),
+                                type = "BAROMETER",
+                                value = if (!b.isNull("pressureHpa")) b.optDouble("pressureHpa").toFloat() else null,
+                                syncStatus = "SYNCED"
+                            )
+                        )
+                    }
+                }
+                // Step counter
+                val stepsArr = sensorsObj.optJSONArray("steps")
+                if (stepsArr != null) {
+                    for (j in 0 until stepsArr.length()) {
+                        val s = stepsArr.optJSONObject(j) ?: continue
+                        sensorEntities.add(
+                            com.nstrpatrol.app.data.db.SensorReadingEntity(
+                                id = "bs-s-$id-$j",
+                                patrolId = id,
+                                timestamp = parseIsoMs(s.optString("t")),
+                                type = "STEP_COUNTER",
+                                value = s.optInt("steps", 0).toFloat(),
+                                syncStatus = "SYNCED"
+                            )
+                        )
+                    }
+                }
+                if (sensorEntities.isNotEmpty()) {
+                    dao.upsertSensorReadings(sensorEntities)
+                    Log.d(TAG, "Pulled ${sensorEntities.size} sensor readings for patrol $id")
+                }
+            }
+
+            // Fetch incidents
+            val incArr = api.getJsonArray("/api/patrols/$id/incidents")
+            if (incArr != null && incArr.length() > 0) {
+                val incidents = mutableListOf<com.nstrpatrol.app.data.db.IncidentEntity>()
+                for (j in 0 until incArr.length()) {
+                    val i = incArr.optJSONObject(j) ?: continue
+                    val photosArr = i.optJSONArray("photos")
+                    val photosStr = if (photosArr != null && photosArr.length() > 0) {
+                        (0 until photosArr.length()).mapNotNull { photosArr.optString(it) }
+                            .filter { it.isNotEmpty() }.joinToString(",")
+                    } else null
+                    incidents.add(
+                        com.nstrpatrol.app.data.db.IncidentEntity(
+                            id = i.optString("id", "bi-$id-$j"),
+                            patrolId = id,
+                            type = i.optString("type", "GENERAL"),
+                            title = i.optString("title", ""),
+                            description = i.optString("description").takeIf { it.isNotEmpty() },
+                            severity = i.optString("severity", "LOW"),
+                            detailsJson = if (!i.isNull("details")) i.optJSONObject("details")?.toString() else null,
+                            latitude = if (!i.isNull("latitude")) i.optDouble("latitude") else null,
+                            longitude = if (!i.isNull("longitude")) i.optDouble("longitude") else null,
+                            accuracy = if (!i.isNull("accuracy")) i.optDouble("accuracy").toFloat() else null,
+                            photos = photosStr,
+                            occurredAt = parseIsoMs(i.optString("occurredAt")),
+                            reportedAt = parseIsoMs(i.optString("reportedAt")),
+                            status = i.optString("status", "SUBMITTED"),
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                }
+                dao.upsertIncidents(incidents)
+                Log.d(TAG, "Pulled ${incidents.size} incidents for patrol $id")
+            }
+
             pulled++
         }
         Log.i(TAG, "Pull complete: $pulled patrols pulled from backend")
