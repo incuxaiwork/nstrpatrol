@@ -294,6 +294,96 @@ patrolsRouter.get('/:id/incidents', async (req, res) => {
   );
 });
 
+// Activity segments for cross-device pull.
+patrolsRouter.get('/:id/segments', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const segments = await prisma.activitySegment.findMany({
+    where: { patrolId: id },
+    orderBy: { startTime: 'asc' },
+    select: { mode: true, startTime: true, endTime: true, confidence: true },
+  });
+  res.json(
+    segments.map((s) => ({
+      mode: s.mode,
+      start: s.startTime,
+      end: s.endTime,
+      confidence: s.confidence,
+    }))
+  );
+});
+
+// Coverage events for cross-device pull.
+patrolsRouter.get('/:id/coverage', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const events = await prisma.coverageEvent.findMany({
+    where: { patrolId: id },
+    orderBy: { timestamp: 'asc' },
+    select: { type: true, latitude: true, longitude: true, timestamp: true },
+  });
+  res.json(
+    events.map((e) => ({
+      type: e.type,
+      lat: e.latitude,
+      lng: e.longitude,
+      t: e.timestamp,
+    }))
+  );
+});
+
+// Time-integrity logs for cross-device pull.
+patrolsRouter.get('/:id/integrity', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  }
+
+  const logs = await prisma.timeIntegrityLog.findMany({
+    where: { patrolId: id },
+    orderBy: { timestamp: 'asc' },
+    select: {
+      timestamp: true,
+      gnssTimeAvailable: true,
+      divergenceSeconds: true,
+      autoTimeEnabled: true,
+      tamperDetected: true,
+      satellites: true,
+    },
+  });
+  res.json(
+    logs.map((l) => ({
+      t: l.timestamp,
+      gnssTimeAvailable: l.gnssTimeAvailable,
+      divergenceSeconds: l.divergenceSeconds,
+      autoTimeEnabled: l.autoTimeEnabled,
+      tamperDetected: l.tamperDetected,
+      satellites: l.satellites,
+    }))
+  );
+});
+
 const startSchema = z.object({ startedAt: z.coerce.date().optional() });
 
 patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => {

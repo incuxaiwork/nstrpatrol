@@ -42,7 +42,10 @@ object SyncManager {
         val totalItems = dao.sessionsToSync().size +
             dao.pendingPointRows().size +
             dao.pendingReadingRows().size +
-            dao.pendingIncidents().size
+            dao.pendingIncidents().size +
+            dao.pendingActivitySegments().size +
+            dao.pendingCoverageEvents().size +
+            dao.pendingIntegrityLogs().size
 
         Log.i(TAG, "Sync started: $totalItems pending items")
 
@@ -77,6 +80,9 @@ object SyncManager {
         syncPoints(dao, api, ok, fail)
         syncReadings(dao, api, ok, fail)
         syncIncidents(dao, api, ok, fail)
+        syncActivitySegments(dao, api, ok, fail)
+        syncCoverageEvents(dao, api, ok, fail)
+        syncIntegrityLogs(dao, api, ok, fail)
         onProgress(1f)
 
         Log.i(TAG, "Sync complete: $syncedItems synced, $failedItems failed")
@@ -388,6 +394,143 @@ object SyncManager {
         ok(incidents.size)
     }
 
+    private suspend fun syncActivitySegments(
+        dao: TelemetryDao,
+        api: BackendApiClient,
+        ok: (Int) -> Unit,
+        fail: (Int, Throwable?) -> Unit
+    ) {
+        val segments = dao.pendingActivitySegments()
+        if (segments.isEmpty()) return
+        Log.d(TAG, "Syncing ${segments.size} activity segments")
+        val byPatrol = segments.groupBy { it.patrolId }
+        var totalSynced = 0
+        for ((patrolId, rows) in byPatrol) {
+            val chunks = rows.chunked(CHUNK_SIZE)
+            var okCount = 0
+            for (chunk in chunks) {
+                val records = JSONArray()
+                for (s in chunk) {
+                    records.put(JSONObject().apply {
+                        put("patrolId", s.patrolId)
+                        put("startTime", s.startTime)
+                        put("endTime", s.endTime)
+                        put("mode", s.mode)
+                        s.confidence?.let { put("confidence", it.toDouble()) }
+                    })
+                }
+                val success = runCatching {
+                    val body = JSONObject().apply {
+                        put("patrolId", patrolId)
+                        put("batches", JSONArray().put(JSONObject().apply {
+                            put("entity", "activity-segments")
+                            put("records", records)
+                        }))
+                    }
+                    withNetworkRetry { api.postJson("/api/sync/upload", body) }
+                    true
+                }.getOrDefault(false)
+                if (success) okCount += chunk.size
+                else { fail(chunk.size, null); return }
+            }
+            dao.markActivitySegmentsSynced(patrolId)
+            totalSynced += okCount
+        }
+        ok(totalSynced)
+    }
+
+    private suspend fun syncCoverageEvents(
+        dao: TelemetryDao,
+        api: BackendApiClient,
+        ok: (Int) -> Unit,
+        fail: (Int, Throwable?) -> Unit
+    ) {
+        val events = dao.pendingCoverageEvents()
+        if (events.isEmpty()) return
+        Log.d(TAG, "Syncing ${events.size} coverage events")
+        val byPatrol = events.groupBy { it.patrolId }
+        var totalSynced = 0
+        for ((patrolId, rows) in byPatrol) {
+            val chunks = rows.chunked(CHUNK_SIZE)
+            var okCount = 0
+            for (chunk in chunks) {
+                val records = JSONArray()
+                for (e in chunk) {
+                    records.put(JSONObject().apply {
+                        put("patrolId", e.patrolId)
+                        put("timestamp", e.timestamp)
+                        put("type", e.type)
+                        e.latitude?.let { put("latitude", it) }
+                        e.longitude?.let { put("longitude", it) }
+                    })
+                }
+                val success = runCatching {
+                    val body = JSONObject().apply {
+                        put("patrolId", patrolId)
+                        put("batches", JSONArray().put(JSONObject().apply {
+                            put("entity", "coverage-events")
+                            put("records", records)
+                        }))
+                    }
+                    withNetworkRetry { api.postJson("/api/sync/upload", body) }
+                    true
+                }.getOrDefault(false)
+                if (success) okCount += chunk.size
+                else { fail(chunk.size, null); return }
+            }
+            dao.markCoverageEventsSynced(patrolId)
+            totalSynced += okCount
+        }
+        ok(totalSynced)
+    }
+
+    private suspend fun syncIntegrityLogs(
+        dao: TelemetryDao,
+        api: BackendApiClient,
+        ok: (Int) -> Unit,
+        fail: (Int, Throwable?) -> Unit
+    ) {
+        val logs = dao.pendingIntegrityLogs()
+        if (logs.isEmpty()) return
+        Log.d(TAG, "Syncing ${logs.size} integrity logs")
+        val byPatrol = logs.groupBy { it.patrolId }
+        var totalSynced = 0
+        for ((patrolId, rows) in byPatrol) {
+            val chunks = rows.chunked(CHUNK_SIZE)
+            var okCount = 0
+            for (chunk in chunks) {
+                val records = JSONArray()
+                for (l in chunk) {
+                    records.put(JSONObject().apply {
+                        put("patrolId", l.patrolId)
+                        put("timestamp", l.timestamp)
+                        put("gnssTimeAvailable", l.gnssTimeAvailable)
+                        put("divergenceSeconds", l.divergenceSeconds)
+                        put("autoTimeEnabled", l.autoTimeEnabled)
+                        put("tamperDetected", l.tamperDetected)
+                        put("satellites", l.satellites)
+                    })
+                }
+                val success = runCatching {
+                    val body = JSONObject().apply {
+                        put("patrolId", patrolId)
+                        put("batches", JSONArray().put(JSONObject().apply {
+                            put("entity", "integrity-logs")
+                            put("records", records)
+                        }))
+                    }
+                    withNetworkRetry { api.postJson("/api/sync/upload", body) }
+                    true
+                }.getOrDefault(false)
+                if (success) okCount += chunk.size
+                else { fail(chunk.size, null); return }
+            }
+            dao.markIntegrityLogsSynced(patrolId)
+            totalSynced += okCount
+        }
+        ok(totalSynced)
+    }
+
     /**
      * Pulls all patrols and their GPS points from the backend into the local
      * database. This enables cross-device viewing: a patrol recorded on device A
@@ -615,6 +758,74 @@ object SyncManager {
                 }
                 dao.upsertIncidents(incidents)
                 Log.d(TAG, "Pulled ${incidents.size} incidents for patrol $id")
+            }
+
+            // Fetch activity segments
+            val segArr = api.getJsonArray("/api/patrols/$id/segments")
+            if (segArr != null && segArr.length() > 0) {
+                val segments = mutableListOf<com.nstrpatrol.app.data.db.ActivitySegmentEntity>()
+                for (j in 0 until segArr.length()) {
+                    val s = segArr.optJSONObject(j) ?: continue
+                    segments.add(
+                        com.nstrpatrol.app.data.db.ActivitySegmentEntity(
+                            id = "bseg-$id-$j",
+                            patrolId = id,
+                            mode = s.optString("mode", "WALK"),
+                            startTime = parseIsoMs(s.optString("start")),
+                            endTime = parseIsoMs(s.optString("end")),
+                            confidence = if (!s.isNull("confidence")) s.optDouble("confidence").toFloat() else null,
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                }
+                dao.upsertActivitySegments(segments)
+                Log.d(TAG, "Pulled ${segments.size} activity segments for patrol $id")
+            }
+
+            // Fetch coverage events
+            val covArr = api.getJsonArray("/api/patrols/$id/coverage")
+            if (covArr != null && covArr.length() > 0) {
+                val events = mutableListOf<com.nstrpatrol.app.data.db.CoverageEventEntity>()
+                for (j in 0 until covArr.length()) {
+                    val e = covArr.optJSONObject(j) ?: continue
+                    events.add(
+                        com.nstrpatrol.app.data.db.CoverageEventEntity(
+                            id = "bcov-$id-$j",
+                            patrolId = id,
+                            type = e.optString("type", "GENERAL"),
+                            latitude = if (!e.isNull("lat")) e.optDouble("lat") else null,
+                            longitude = if (!e.isNull("lng")) e.optDouble("lng") else null,
+                            timestamp = parseIsoMs(e.optString("t")),
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                }
+                dao.upsertCoverageEvents(events)
+                Log.d(TAG, "Pulled ${events.size} coverage events for patrol $id")
+            }
+
+            // Fetch integrity logs
+            val intArr = api.getJsonArray("/api/patrols/$id/integrity")
+            if (intArr != null && intArr.length() > 0) {
+                val logs = mutableListOf<com.nstrpatrol.app.data.db.IntegrityLogEntity>()
+                for (j in 0 until intArr.length()) {
+                    val l = intArr.optJSONObject(j) ?: continue
+                    logs.add(
+                        com.nstrpatrol.app.data.db.IntegrityLogEntity(
+                            id = "bint-$id-$j",
+                            patrolId = id,
+                            timestamp = parseIsoMs(l.optString("t")),
+                            gnssTimeAvailable = l.optBoolean("gnssTimeAvailable"),
+                            divergenceSeconds = l.optInt("divergenceSeconds", 0),
+                            autoTimeEnabled = l.optBoolean("autoTimeEnabled"),
+                            tamperDetected = l.optBoolean("tamperDetected"),
+                            satellites = l.optInt("satellites", 0),
+                            syncStatus = "SYNCED"
+                        )
+                    )
+                }
+                dao.upsertIntegrityLogs(logs)
+                Log.d(TAG, "Pulled ${logs.size} integrity logs for patrol $id")
             }
 
             pulled++

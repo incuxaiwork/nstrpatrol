@@ -72,3 +72,66 @@ data class MovementModeReadingEntity(
     val confidence: Float? = null,
     val speedKmh: Float? = null
 )
+
+/**
+ * A contiguous same-mode activity run generated from movement-mode samples.
+ *
+ * Mirrors the backend [ActivitySegment] Prisma model. `mode` is one of
+ * WALK | BICYCLE | VEHICLE | STATIONARY.
+ */
+@Entity(
+    tableName = "activity_segments",
+    indices = [Index(value = ["patrolId", "startTime"])]
+)
+data class ActivitySegmentEntity(
+    @PrimaryKey val id: String,
+    val patrolId: String,
+    val mode: String,
+    val startTime: Long,
+    val endTime: Long,
+    val confidence: Float? = null,
+    val syncStatus: String = "PENDING"
+)
+
+/**
+ * A coverage/anomaly event raised during a patrol.
+ *
+ * Mirrors the backend [CoverageEvent] Prisma model. `type` is one of
+ * OUTSIDE_BEAT | NON_FOREST | OFF_ROUTE | SPEED_MISMATCH | JUMP |
+ * WAYPOINT_MISSED | MOCK_LOCATION | DEVICE_STATIONARY | TIME_TAMPER.
+ */
+@Entity(
+    tableName = "coverage_events",
+    indices = [Index(value = ["patrolId", "timestamp"])]
+)
+data class CoverageEventEntity(
+    @PrimaryKey val id: String,
+    val patrolId: String,
+    val type: String,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
+    val timestamp: Long,
+    val syncStatus: String = "PENDING"
+)
+
+/**
+ * A time-integrity snapshot captured during a patrol.
+ *
+ * Mirrors the backend [TimeIntegrityLog] Prisma model. Persisted from
+ * [com.nstrpatrol.app.time.TrustedTimeManager] state while a patrol runs.
+ */
+@Entity(
+    tableName = "integrity_logs",
+    indices = [Index(value = ["patrolId", "timestamp"])]
+)
+data class IntegrityLogEntity(
+    @PrimaryKey val id: String,
+    val patrolId: String,
+    val timestamp: Long,
+    val gnssTimeAvailable: Boolean,
+    val divergenceSeconds: Int,
+    val autoTimeEnabled: Boolean,
+    val tamperDetected: Boolean,
+    val satellites: Int,
+    val syncStatus: String = "PENDING"
+)

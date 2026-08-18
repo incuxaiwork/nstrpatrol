@@ -90,6 +90,7 @@ class TelemetryRecorder(
     private var lastPointLon: Double? = null
     private var lastPointTime: Long = 0L
     private var lastPersistedMode: MovementMode = MovementMode.UNKNOWN
+    private var lastIntegrityLogAt: Long = 0L
     private var arPendingIntent: PendingIntent? = null
     private var sensorsRegistered = false
 
@@ -163,6 +164,7 @@ class TelemetryRecorder(
         if (pid != null) {
             scope.launch {
                 tryRecordPoint(pid, timeManager.trustedUtcNow(), force = true)
+                PatrolDataGenerator.generateForPatrol(pid, dao)
                 val metrics = ActivitySummary.computeForPatrol(pid, dao)
                 val endTime = timeManager.trustedUtcNow()
                 dao.completePatrol(
@@ -210,6 +212,28 @@ class TelemetryRecorder(
                 value = info.mode.code.toFloat(),
                 x = info.confidence,
                 y = info.speedKmh
+            )
+        )
+        persistIntegrityLog(pid, now)
+    }
+
+    /** Snapshots the trusted-time state into Room every [AppConfig.INTEGRITY_LOG_INTERVAL_MS]. */
+    private suspend fun persistIntegrityLog(pid: String, now: Long) {
+        if (now - lastIntegrityLogAt < AppConfig.INTEGRITY_LOG_INTERVAL_MS) return
+        lastIntegrityLogAt = now
+        val s = timeManager.state.value
+        dao.insertIntegrityLogs(
+            listOf(
+                com.nstrpatrol.app.data.db.IntegrityLogEntity(
+                    id = "il-${UUID.randomUUID()}",
+                    patrolId = pid,
+                    timestamp = now,
+                    gnssTimeAvailable = s.gnssTimeAvailable,
+                    divergenceSeconds = s.divergenceSeconds.toInt(),
+                    autoTimeEnabled = s.autoTimeEnabled,
+                    tamperDetected = s.tamperDetected,
+                    satellites = s.satellites
+                )
             )
         )
     }

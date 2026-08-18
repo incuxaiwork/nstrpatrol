@@ -158,6 +158,69 @@ interface TelemetryDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertIncidents(incidents: List<IncidentEntity>)
 
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertActivitySegments(segments: List<ActivitySegmentEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertCoverageEvents(events: List<CoverageEventEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertIntegrityLogs(logs: List<IntegrityLogEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertActivitySegments(segments: List<ActivitySegmentEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertCoverageEvents(events: List<CoverageEventEntity>)
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertIntegrityLogs(logs: List<IntegrityLogEntity>)
+
+    @Query("SELECT * FROM activity_segments WHERE syncStatus = 'PENDING'")
+    suspend fun pendingActivitySegments(): List<ActivitySegmentEntity>
+
+    @Query("SELECT * FROM coverage_events WHERE syncStatus = 'PENDING'")
+    suspend fun pendingCoverageEvents(): List<CoverageEventEntity>
+
+    @Query("SELECT * FROM integrity_logs WHERE syncStatus = 'PENDING'")
+    suspend fun pendingIntegrityLogs(): List<IntegrityLogEntity>
+
+    @Query(
+        "UPDATE activity_segments SET syncStatus = 'SYNCED' " +
+        "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
+    )
+    suspend fun markActivitySegmentsSynced(patrolId: String)
+
+    @Query(
+        "UPDATE coverage_events SET syncStatus = 'SYNCED' " +
+        "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
+    )
+    suspend fun markCoverageEventsSynced(patrolId: String)
+
+    @Query(
+        "UPDATE integrity_logs SET syncStatus = 'SYNCED' " +
+        "WHERE patrolId = :patrolId AND syncStatus = 'PENDING'"
+    )
+    suspend fun markIntegrityLogsSynced(patrolId: String)
+
+    @Query("SELECT * FROM activity_segments WHERE patrolId = :patrolId ORDER BY startTime ASC")
+    suspend fun activitySegmentsForPatrol(patrolId: String): List<ActivitySegmentEntity>
+
+    @Query("SELECT * FROM coverage_events WHERE patrolId = :patrolId ORDER BY timestamp ASC")
+    suspend fun coverageEventsForPatrol(patrolId: String): List<CoverageEventEntity>
+
+    @Query("SELECT * FROM integrity_logs WHERE patrolId = :patrolId ORDER BY timestamp ASC")
+    suspend fun integrityLogsForPatrol(patrolId: String): List<IntegrityLogEntity>
+
+    @Query("DELETE FROM activity_segments WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingActivitySegmentsForPatrol(patrolId: String)
+
+    @Query("DELETE FROM coverage_events WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingCoverageEventsForPatrol(patrolId: String)
+
+    @Query("DELETE FROM integrity_logs WHERE patrolId = :patrolId AND syncStatus = 'PENDING'")
+    suspend fun deletePendingIntegrityLogsForPatrol(patrolId: String)
+
     @Query("UPDATE patrol_sessions SET detectedMethod = :method WHERE patrolId = :patrolId")
     suspend fun setDetectedMethod(patrolId: String, method: String?)
 

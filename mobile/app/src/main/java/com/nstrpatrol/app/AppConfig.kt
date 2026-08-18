@@ -26,4 +26,10 @@ object AppConfig {
 
     const val METRICS_SAMPLE_INTERVAL_MS = 5000L
     const val DEFAULT_RANGER_WEIGHT_KG = 70.0
+
+    // Coverage-event thresholds
+    /** A STILL stretch this long inside a patrol triggers DEVICE_STATIONARY. */
+    const val DEVICE_STATIONARY_THRESHOLD_MS = 300_000L
+    /** Integrity-log capture cadence while a patrol is running. */
+    const val INTEGRITY_LOG_INTERVAL_MS = 30_000L
 }
