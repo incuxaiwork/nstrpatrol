@@ -148,7 +148,7 @@ class TelemetryRecorder(
                 } catch (e: Exception) {
                     Log.w(TAG, "Sample failed", e)
                 }
-                delay(settings?.gpsPollMs?.value ?: AppConfig.DEFAULT_POINT_POLL_MS)
+                delay(effectivePollDelay())
             }
         }
     }
@@ -233,7 +233,8 @@ class TelemetryRecorder(
         }
         val timeSince = now - lastPointTime
         val minDisp = settings?.gpsMinDisplacementM?.value ?: AppConfig.DEFAULT_MIN_DISPLACEMENT_M
-        val sampleInterval = settings?.gpsSampleIntervalMs?.value ?: AppConfig.DEFAULT_SAMPLE_INTERVAL_MS
+        val baseSampleInterval = settings?.gpsSampleIntervalMs?.value ?: AppConfig.DEFAULT_SAMPLE_INTERVAL_MS
+        val sampleInterval = effectiveSampleInterval(baseSampleInterval)
         if (!force &&
             disp < minDisp &&
             timeSince < sampleInterval
@@ -435,6 +436,29 @@ class TelemetryRecorder(
         }
         arPendingIntent = null
         lastArResult = null
+    }
+
+    /** Shorter poll delay when moving fast so the track captures road curves. */
+    private fun effectivePollDelay(): Long {
+        val base = settings?.gpsPollMs?.value ?: AppConfig.DEFAULT_POINT_POLL_MS
+        return when (_movement.value.mode) {
+            MovementMode.VEHICLE -> minOf(1000L, base)
+            MovementMode.CYCLING -> minOf(2000L, base)
+            MovementMode.RUNNING -> minOf(3000L, base)
+            MovementMode.STILL -> maxOf(10000L, base)
+            else -> base
+        }
+    }
+
+    /** Shorter sample interval when moving fast so points are denser on the map. */
+    private fun effectiveSampleInterval(baseMs: Long): Long {
+        return when (_movement.value.mode) {
+            MovementMode.VEHICLE -> minOf(1000L, baseMs)
+            MovementMode.CYCLING -> minOf(2000L, baseMs)
+            MovementMode.RUNNING -> minOf(3000L, baseMs)
+            MovementMode.STILL -> maxOf(10000L, baseMs)
+            else -> baseMs
+        }
     }
 
     companion object {
