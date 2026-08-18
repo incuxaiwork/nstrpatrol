@@ -32,9 +32,9 @@ export default function RangerForm({
   const [code, setCode] = useState(initial?.code ?? "");
   const [designation, setDesignation] = useState(initial?.designation ?? "Forest Guard");
   const [dutyStatus, setDutyStatus] = useState<DutyStatus>(initial?.dutyStatus ?? "on-duty");
-  const [division, setDivision] = useState(initial?.division ?? "d-north");
-  const [range, setRange] = useState(initial?.range ?? "r-n1");
-  const [beat, setBeat] = useState(initial?.beat ?? "b-n1a");
+  const [division, setDivision] = useState(initial?.division ?? "d-markapur");
+  const [range, setRange] = useState(initial?.range ?? "r-vp-south");
+  const [beat, setBeat] = useState(initial?.beat ?? "b-vp-south-tummurukota");
   const [teamId, setTeamId] = useState(initial?.teamId ?? "t1");
   const [phone, setPhone] = useState(initial?.phone ?? "");
   const [bloodGroup, setBloodGroup] = useState(initial?.bloodGroup ?? "O+");

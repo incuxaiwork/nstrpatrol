@@ -69,6 +69,26 @@ export type JurisdictionState =
   | "pending-review"
   | "requires-review";
 
+/**
+ * Jurisdiction foundation (frontend data/context only — NOT enforcement).
+ *
+ * The operational rule to be enforced later: a beat officer / subordinate
+ * normally patrols their assigned beat; cross-beat / cross-range patrols
+ * require explicit administrative permission. This record is the shape the
+ * frontend can carry today — `assignedBeatId` when that data exists — without
+ * implementing final RBAC, roles or permission workflows.
+ */
+export interface BeatJurisdiction {
+  rangerId: string;
+  rangerName?: string;
+  divisionId?: string;
+  rangeId?: string;
+  /** Beat the ranger normally patrols (assignedBeatId ?? beat fallback). */
+  beatId?: string;
+  /** Explicit assignment id, only when the data source provides it. */
+  assignedBeatId?: string;
+}
+
 export interface AuthorizationEvent {
   time: string;
   user: string;
@@ -201,6 +221,12 @@ export interface Ranger {
   division: string;
   range: string;
   beat: string;
+  /**
+   * Jurisdiction foundation (not enforcement): the beat a ranger is assigned
+   * to, when the data source provides it. Absent until the backend exposes
+   * beat assignments; UI must treat absence as "unknown", never guess.
+   */
+  assignedBeatId?: string;
   teamId: string;
   emergencyContact?: string;
   bloodGroup?: string;
@@ -323,6 +349,11 @@ export interface DashboardSummary {
   rangersOnDuty: number;
   rangersTotal: number;
   coveragePct: number;
+  coverageToday: number;
+  patrolsTotal: number;
+  normalTotal: number;
+  authorizedTotal: number;
+  incidentsTotal: number;
   zeroPatrolZones: number;
   zeroPatrolList: { beat: string; days: number }[];
   byStatus: { status: PatrolStatus; count: number }[];
@@ -332,6 +363,8 @@ export interface DashboardSummary {
   activity: { hour: string; patrols: number; reports: number }[];
   alerts: NotificationItem[];
   quickStats?: Record<string, number>;
+  /** Range-level patrol density (division × ranges × cell values), real data. */
+  heatmap?: { division: string; ranges: string[]; cells: number[] }[];
 }
 
 export type NotificationKind = "critical" | "warning" | "info" | "success";

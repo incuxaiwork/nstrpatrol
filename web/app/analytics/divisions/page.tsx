@@ -13,9 +13,7 @@ import { unitName } from "@/lib/mock/hierarchy";
 import { exportRows, stamp } from "@/lib/export";
 
 const divisions = [
-  { id: "d-north", coverage: 84, patrols: 117, observations: 230, incidents: 25, areaKm2: 4120 },
-  { id: "d-central", coverage: 79, patrols: 112, observations: 230, incidents: 11, areaKm2: 3890 },
-  { id: "d-south", coverage: 77, patrols: 102, observations: 201, incidents: 16, areaKm2: 4830 },
+  { id: "d-markapur", coverage: 79, patrols: 368, observations: 728, incidents: 45, areaKm2: 2453 },
 ];
 
 export default function DivisionAnalyticsPage() {

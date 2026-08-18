@@ -9,13 +9,27 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useRef,
   useState,
   type ReactNode,
 } from "react";
 import { global as api } from "@/lib/services";
+import type { ApiUser } from "@/lib/api";
 import type { NotificationItem, SearchResult, Scope } from "@/lib/types";
+
+const STORAGE_USER = "nstr.auth.user";
+
+function readStoredUser(): ApiUser | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(STORAGE_USER);
+    return raw ? (JSON.parse(raw) as ApiUser) : null;
+  } catch {
+    return null;
+  }
+}
 
 export interface ToastItem {
   id: number;
@@ -25,6 +39,8 @@ export interface ToastItem {
 }
 
 interface AppContextValue {
+  user: ApiUser | null;
+  setUser(user: ApiUser | null): void;
   scope: Scope;
   setScope(scope: Scope): void;
   unitPath: string;
@@ -50,11 +66,12 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const [user, setUserState] = useState<ApiUser | null>(readStoredUser);
   const [scope, setScopeState] = useState<Scope>({
-    forest: "NSTR Forest",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1a",
+    forest: "Markapur Division",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-tummurukota",
   });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -67,6 +84,16 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const toastId = useRef(0);
 
   const setScope = useCallback((s: Scope) => setScopeState(s), []);
+
+  const setUser = useCallback((u: ApiUser | null) => {
+    setUserState(u);
+    if (typeof window !== "undefined") {
+      try {
+        if (u) window.localStorage.setItem(STORAGE_USER, JSON.stringify(u));
+        else window.localStorage.removeItem(STORAGE_USER);
+      } catch { /* ignore */ }
+    }
+  }, []);
 
   const unitPath = useMemo(
     () => `${scope.forest} / ${scope.division} / ${scope.range} / ${scope.beat}`,
@@ -85,6 +112,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setNotifications((ns) => ns.map((n) => ({ ...n, read: true })));
   }, []);
 
+  // Load the admin alert feed once on mount (backend /api/alerts, mock
+  // fallback). No polling — the bell refreshes on next page load.
+  useEffect(() => {
+    let active = true;
+    api
+      .notifications()
+      .then((ns) => {
+        if (active) setNotifications(ns);
+      })
+      .catch(() => { /* bell stays empty; console-level errors are enough */ });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const dismissToast = useCallback(
     (id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)),
     []
@@ -101,6 +143,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextValue>(
     () => ({
+      user,
+      setUser,
       scope,
       setScope,
       unitPath,
@@ -123,7 +167,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setExportOpen,
     }),
     [
-      scope, setScope, unitPath, sidebarCollapsed, toggleSidebar, mobileNavOpen,
+      user, setUser, scope, setScope, unitPath, sidebarCollapsed, toggleSidebar, mobileNavOpen,
       searchOpen, searchResults, searchQuery, runSearch, notifications,
       markAllRead, toasts, pushToast, dismissToast, exportOpen,
     ]

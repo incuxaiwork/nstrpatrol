@@ -3,22 +3,24 @@
  */
 
 import { Patrol, PatrolMethod, PatrolReport, PatrolTemplate } from "@/lib/types";
+import { mapBeatsRaw } from "@/lib/mock/gis";
+import { svgToLngLat } from "@/lib/map-space";
 
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 const hoursAhead = (h: number) => new Date(Date.now() + h * 3_600_000).toISOString();
 
-export const mockPatrols: Patrol[] = [
+const rawMockPatrols: Patrol[] = [
   {
     id: "p-2026-0118",
     code: "P-2026-0118",
-    title: "Morning beat N1-A sweep",
+    title: "Morning beat Tummurukota sweep",
     type: "general-duties",
     method: "foot",
     status: "ongoing",
     objective: "General surveillance & anti-poaching sweep",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1a",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-tummurukota",
     teamId: "t1",
     leader: "Aarav Sharma",
     members: ["Bimla Devi", "Chandra Mohan"],
@@ -39,7 +41,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.449, lng: 84.221 },
     ],
     timeline: [
-      { time: hoursAgo(1.5), kind: "start", label: "Patrol started at N1-A guard post" },
+      { time: hoursAgo(1.5), kind: "start", label: "Patrol started at Tummurukota guard post" },
       { time: hoursAgo(1.2), kind: "checkpoint", label: "Checkpoint CP-3 scanned" },
       { time: hoursAgo(0.6), kind: "observation", label: "Tiger pugmark sighting logged (indirect sign S8)" },
       { time: hoursAgo(0.2), kind: "observation", label: "Water source check logged", ranger: "Bimla Devi" },
@@ -48,14 +50,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "P-2026-0117",
     code: "P-2026-0117",
-    title: "N2-A combing operation",
+    title: "Akkapalem combing operation",
     type: "combing-surveillance",
     method: "foot",
     status: "completed",
     objective: "Night poaching check in riverine belt",
-    division: "d-north",
-    range: "r-n2",
-    beat: "b-n2a",
+    division: "d-markapur",
+    range: "r-y-palem",
+    beat: "b-y-palem-akkapalem",
     teamId: "t2",
     leader: "Chandra Mohan",
     members: ["Eknath Rao"],
@@ -77,7 +79,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.44, lng: 84.372 },
     ],
     timeline: [
-      { time: hoursAgo(10.5), kind: "start", label: "Night patrol began at N2-A base" },
+      { time: hoursAgo(10.5), kind: "start", label: "Night patrol began at Akkapalem base" },
       { time: hoursAgo(8.8), kind: "checkpoint", label: "Checkpoint-2 scanned" },
       { time: hoursAgo(7.5), kind: "incident", label: "Snare detected & removed", ranger: "Chandra Mohan" },
       { time: hoursAgo(6.2), kind: "end", label: "Patrol completed at base camp" },
@@ -86,14 +88,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0116",
     code: "P-2026-0116",
-    title: "C1 water-hole census",
+    title: "Guttalachenu water-hole census",
     type: "general-duties",
     method: "foot",
     status: "completed",
     objective: "Water body census & watering point survey",
-    division: "d-central",
-    range: "r-c1",
-    beat: "b-c1a",
+    division: "d-markapur",
+    range: "r-nekkanti",
+    beat: "b-nekkanti-guttalachenu",
     teamId: "t3",
     leader: "Deepa Nair",
     members: ["Ishita Sengupta", "Eknath Rao"],
@@ -115,7 +117,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.182, lng: 83.881 },
     ],
     timeline: [
-      { time: hoursAgo(29), kind: "start", label: "Census began at C1-A" },
+      { time: hoursAgo(29), kind: "start", label: "Census began at Guttalachenu" },
       { time: hoursAgo(27.3), kind: "end", label: "6 water points surveyed" },
     ],
   },
@@ -127,9 +129,9 @@ export const mockPatrols: Patrol[] = [
     method: "four-wheeler",
     status: "cancelled",
     objective: "SOS response verification",
-    division: "d-south",
-    range: "r-s1",
-    beat: "b-s1b",
+    division: "d-markapur",
+    range: "r-gv-palli",
+    beat: "b-gv-palli-palutla",
     teamId: "t4",
     leader: "Farhan Ali",
     members: ["Gauri Patil"],
@@ -149,14 +151,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0114",
     code: "P-2026-0114",
-    title: "S2-B elephant track follow-up",
+    title: "Peddamantanala elephant track follow-up",
     type: "general-duties",
     method: "motorcycle",
     status: "completed",
     objective: "Track herd movement & safety advisories",
-    division: "d-south",
-    range: "r-s2",
-    beat: "b-s2b",
+    division: "d-markapur",
+    range: "r-korraprolu",
+    beat: "b-korraprolu-peddamantanala",
     teamId: "t5",
     leader: "Harsh Vardhan",
     members: [],
@@ -178,20 +180,20 @@ export const mockPatrols: Patrol[] = [
     ],
     timeline: [
       { time: hoursAgo(48.5), kind: "start", label: "Track follow started" },
-      { time: hoursAgo(45.1), kind: "end", label: "Patch exit at S2-B" },
+      { time: hoursAgo(45.1), kind: "end", label: "Patch exit at Peddamantanala" },
     ],
   },
   {
     id: "p-2026-0113",
     code: "P-2026-0113",
-    title: "C2 morning route patrol",
+    title: "Chintala morning route patrol",
     type: "general-duties",
     method: "cycle",
     status: "completed",
     objective: "Routine beat patrol",
-    division: "d-central",
-    range: "r-c2",
-    beat: "b-c2a",
+    division: "d-markapur",
+    range: "r-dornala",
+    beat: "b-dornala-chintala",
     teamId: "t3",
     leader: "Raju Verma",
     members: ["Salim Khan"],
@@ -219,14 +221,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0112",
     code: "P-2026-0112",
-    title: "N2-B planned sweep",
+    title: "Pullalacheruvu planned sweep",
     type: "general-duties",
     method: "foot",
     status: "planned",
     objective: "Planned beat patrol for reserve zone",
-    division: "d-north",
-    range: "r-n2",
-    beat: "b-n2b",
+    division: "d-markapur",
+    range: "r-y-palem",
+    beat: "b-y-palem-pullalacheruvu",
     teamId: "t2",
     leader: "Bimla Devi",
     members: ["Jitendra Kashyap"],
@@ -250,9 +252,9 @@ export const mockPatrols: Patrol[] = [
     method: "four-wheeler",
     status: "delayed",
     objective: "SOC report verification",
-    division: "d-south",
-    range: "r-s2",
-    beat: "b-s2c",
+    division: "d-markapur",
+    range: "r-korraprolu",
+    beat: "b-korraprolu-y-cherlopalli",
     teamId: "t5",
     leader: "Gauri Patil",
     rangerId: "r-008",
@@ -276,14 +278,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0110",
     code: "P-2026-0110",
-    title: "S1-B boat patrol",
+    title: "Palutla boat patrol",
     type: "combing-surveillance",
     method: "boat",
     status: "ongoing",
-    objective: "Riverine belt surveillance along S1-B waterline",
-    division: "d-south",
-    range: "r-s1",
-    beat: "b-s1b",
+    objective: "Riverine belt surveillance along Palutla waterline",
+    division: "d-markapur",
+    range: "r-gv-palli",
+    beat: "b-gv-palli-palutla",
     teamId: "t4",
     leader: "Farhan Ali",
     rangerId: "r-007",
@@ -306,7 +308,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 26.87, lng: 84.45 },
     ],
     timeline: [
-      { time: hoursAgo(2.8), kind: "start", label: "Launched from S1-B jetty" },
+      { time: hoursAgo(2.8), kind: "start", label: "Launched from Palutla jetty" },
       { time: hoursAgo(1.9), kind: "checkpoint", label: "Buoy CP-R2 scanned" },
       { time: hoursAgo(0.7), kind: "observation", label: "Gharial basking count logged (6)", ranger: "Farhan Ali" },
     ],
@@ -314,14 +316,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0109",
     code: "P-2026-0109",
-    title: "N1-C aerial survey",
+    title: "Nagulavaram aerial survey",
     type: "combing-surveillance",
     method: "aerial",
     status: "completed",
     objective: "Canopy-level survey & fire line inspection",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1c",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-nagulavaram",
     teamId: "t1",
     leader: "Jitendra Kashyap",
     members: ["Aarav Sharma"],
@@ -344,21 +346,21 @@ export const mockPatrols: Patrol[] = [
     ],
     timeline: [
       { time: hoursAgo(27.8), kind: "start", label: "Aircraft departed helipad" },
-      { time: hoursAgo(26.9), kind: "incident", label: "Smouldering debris sighted near N1-C fire line", ranger: "Jitendra Kashyap" },
+      { time: hoursAgo(26.9), kind: "incident", label: "Smouldering debris sighted near Nagulavaram fire line", ranger: "Jitendra Kashyap" },
       { time: hoursAgo(26.1), kind: "end", label: "Survey completed, 4 transects covered" },
     ],
   },
   {
     id: "p-2026-0108",
     code: "P-2026-0108",
-    title: "C1-B dusk camera check",
+    title: "Nekkanti dusk camera check",
     type: "general-duties",
     method: "motorcycle",
     status: "completed",
     objective: "Trail camera battery & memory swap",
-    division: "d-central",
-    range: "r-c1",
-    beat: "b-c1b",
+    division: "d-markapur",
+    range: "r-nekkanti",
+    beat: "b-nekkanti-nekkanti",
     teamId: "t3",
     leader: "Ishita Sengupta",
     members: ["Deepa Nair"],
@@ -379,21 +381,21 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.19, lng: 83.86 },
     ],
     timeline: [
-      { time: hoursAgo(54.5), kind: "start", label: "Rode out to C1-B" },
+      { time: hoursAgo(54.5), kind: "start", label: "Rode out to Nekkanti" },
       { time: hoursAgo(53.2), kind: "end", label: "6 cameras serviced" },
     ],
   },
   {
     id: "p-2026-0107",
     code: "P-2026-0107",
-    title: "N2-A elephant corridor patrol",
+    title: "Akkapalem elephant corridor patrol",
     type: "combing-surveillance",
     method: "elephant",
     status: "planned",
     objective: "Corridor vigilance patrol on elephant back",
-    division: "d-north",
-    range: "r-n2",
-    beat: "b-n2a",
+    division: "d-markapur",
+    range: "r-y-palem",
+    beat: "b-y-palem-akkapalem",
     teamId: "t2",
     leader: "Chandra Mohan",
     members: ["Eknath Rao", "Bimla Devi"],
@@ -412,14 +414,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0106",
     code: "P-2026-0106",
-    title: "S2-A horse patrol",
+    title: "Peddachama horse patrol",
     type: "general-duties",
     method: "horse",
     status: "ongoing",
-    objective: "Fringe beat patrol along S2-A grassland",
-    division: "d-south",
-    range: "r-s2",
-    beat: "b-s2a",
+    objective: "Fringe beat patrol along Peddachama grassland",
+    division: "d-markapur",
+    range: "r-korraprolu",
+    beat: "b-korraprolu-peddachama",
     teamId: "t5",
     leader: "Harsh Vardhan",
     members: ["Gauri Patil"],
@@ -439,21 +441,21 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.28, lng: 84.01 },
     ],
     timeline: [
-      { time: hoursAgo(0.6), kind: "start", label: "Patrol set out from S2-A post" },
+      { time: hoursAgo(0.6), kind: "start", label: "Patrol set out from Peddachama post" },
       { time: hoursAgo(0.2), kind: "observation", label: "Grassland burn scar logged", ranger: "Harsh Vardhan" },
     ],
   },
   {
     id: "p-2026-0105",
     code: "P-2026-0105",
-    title: "C2-B fire watch ride",
+    title: "Tummalabailu fire watch ride",
     type: "combing-surveillance",
     method: "four-wheeler",
     status: "planned",
     objective: "Dry-season fire hazard sweep",
-    division: "d-central",
-    range: "r-c2",
-    beat: "b-c2b",
+    division: "d-markapur",
+    range: "r-dornala",
+    beat: "b-dornala-tummalabailu",
     teamId: "t3",
     leader: "Raju Verma",
     members: ["Ishita Sengupta"],
@@ -466,21 +468,21 @@ export const mockPatrols: Patrol[] = [
     incidents: 0,
     observations: 0,
     photos: 0,
-    notes: "Rally point at C2-B watchtower",
+    notes: "Rally point at Tummalabailu watchtower",
     route: [],
     timeline: [],
   },
   {
     id: "p-2026-0104",
     code: "P-2026-0104",
-    title: "N1-B jungle trail comb",
+    title: "Pasuvemula jungle trail comb",
     type: "combing-surveillance",
     method: "foot",
     status: "completed",
     objective: "Snare sweep of seasonal trails",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1b",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-pasuvemula",
     teamId: "t1",
     leader: "Aarav Sharma",
     members: ["Jitendra Kashyap"],
@@ -502,7 +504,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.4, lng: 84.25 },
     ],
     timeline: [
-      { time: hoursAgo(79.5), kind: "start", label: "Comb started at N1-B gate" },
+      { time: hoursAgo(79.5), kind: "start", label: "Comb started at Pasuvemula gate" },
       { time: hoursAgo(78), kind: "incident", label: "2 wire snares found & destroyed", ranger: "Aarav Sharma" },
       { time: hoursAgo(76.4), kind: "end", label: "All 5 trails cleared" },
     ],
@@ -510,14 +512,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0103",
     code: "P-2026-0103",
-    title: "S1-A camel patrol",
+    title: "Burugundala camel patrol",
     type: "general-duties",
     method: "camel",
     status: "planned",
     objective: "Fringe desert belt scouting",
-    division: "d-south",
-    range: "r-s1",
-    beat: "b-s1a",
+    division: "d-markapur",
+    range: "r-gv-palli",
+    beat: "b-gv-palli-burugundala",
     teamId: "t4",
     leader: "Farhan Ali",
     members: [],
@@ -536,14 +538,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0102",
     code: "P-2026-0102",
-    title: "C1-C water point restock",
+    title: "Chinnarutla water point restock",
     type: "general-duties",
     method: "cycle",
     status: "completed",
     objective: "Restock salt licks & water troughs",
-    division: "d-central",
-    range: "r-c1",
-    beat: "b-c1c",
+    division: "d-markapur",
+    range: "r-nekkanti",
+    beat: "b-nekkanti-chinnarutla",
     teamId: "t3",
     leader: "Deepa Nair",
     members: ["Eknath Rao"],
@@ -564,21 +566,21 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.21, lng: 83.94 },
     ],
     timeline: [
-      { time: hoursAgo(129.5), kind: "start", label: "Departed C1 depot" },
+      { time: hoursAgo(129.5), kind: "start", label: "Departed Nekkanti depot" },
       { time: hoursAgo(127.3), kind: "end", label: "3 troughs refilled, 2 salt licks placed" },
     ],
   },
   {
     id: "p-2026-0101",
     code: "P-2026-0101",
-    title: "N2-B night ambush watch",
+    title: "Pullalacheruvu night ambush watch",
     type: "combing-surveillance",
     method: "foot",
     status: "planned",
     objective: "Nocturnal poaching deterrent watch",
-    division: "d-north",
-    range: "r-n2",
-    beat: "b-n2b",
+    division: "d-markapur",
+    range: "r-y-palem",
+    beat: "b-y-palem-pullalacheruvu",
     teamId: "t2",
     leader: "Bimla Devi",
     members: ["Chandra Mohan"],
@@ -597,14 +599,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0100",
     code: "P-2026-0100",
-    title: "C1-A rhino census support",
+    title: "Guttalachenu rhino census support",
     type: "combing-surveillance",
     method: "foot",
     status: "completed",
     objective: "Assist rhino census transect 3 and 4 survey",
-    division: "d-central",
-    range: "r-c1",
-    beat: "b-c1a",
+    division: "d-markapur",
+    range: "r-nekkanti",
+    beat: "b-nekkanti-guttalachenu",
     teamId: "t4",
     leader: "Farhan Ali",
     rangerId: "r-007",
@@ -629,7 +631,7 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.118, lng: 83.915 },
     ],
     timeline: [
-      { time: hoursAgo(51.5), kind: "start", label: "Joined census team at C1-A guard post" },
+      { time: hoursAgo(51.5), kind: "start", label: "Joined census team at Guttalachenu guard post" },
       { time: hoursAgo(49.6), kind: "observation", label: "Rhino sighting logged on transect 3", ranger: "Farhan Ali" },
       { time: hoursAgo(48.2), kind: "end", label: "Transects 3 and 4 completed" },
     ],
@@ -637,14 +639,14 @@ export const mockPatrols: Patrol[] = [
   {
     id: "p-2026-0099",
     code: "P-2026-0099",
-    title: "N1-B fire line reinforcement",
+    title: "Pasuvemula fire line reinforcement",
     type: "combing-surveillance",
     method: "foot",
     status: "completed",
     objective: "Fire line clearing assist at eastern fringe",
-    division: "d-north",
-    range: "r-n1",
-    beat: "b-n1b",
+    division: "d-markapur",
+    range: "r-vp-south",
+    beat: "b-vp-south-pasuvemula",
     teamId: "t3",
     leader: "Deepa Nair",
     rangerId: "r-004",
@@ -667,21 +669,21 @@ export const mockPatrols: Patrol[] = [
       { lat: 27.405, lng: 84.26 },
     ],
     timeline: [
-      { time: hoursAgo(95.5), kind: "start", label: "Arrived at N1-B fire line" },
+      { time: hoursAgo(95.5), kind: "start", label: "Arrived at Pasuvemula fire line" },
       { time: hoursAgo(92.4), kind: "end", label: "Fire line clearing completed" },
     ],
   },
   {
     id: "p-2026-0098",
     code: "P-2026-0098",
-    title: "S1-B winter water relief",
+    title: "Palutla winter water relief",
     type: "general-duties",
     method: "four-wheeler",
     status: "ongoing",
     objective: "Water-point monitoring relief rotation",
-    division: "d-south",
-    range: "r-s1",
-    beat: "b-s1b",
+    division: "d-markapur",
+    range: "r-gv-palli",
+    beat: "b-gv-palli-palutla",
     teamId: "t2",
     leader: "Bimla Devi",
     rangerId: "r-002",
@@ -703,17 +705,17 @@ export const mockPatrols: Patrol[] = [
       { lat: 26.9, lng: 84.44 },
     ],
     timeline: [
-      { time: hoursAgo(0.7), kind: "start", label: "Departed S1 range office for relief rotation" },
+      { time: hoursAgo(0.7), kind: "start", label: "Departed G.V. Palli range office for relief rotation" },
     ],
   },
 ];
 
 export const mockPatrolTemplates: PatrolTemplate[] = [
   { id: "tmp-1", name: "Standard morning sweep", type: "general-duties", objective: "Perimeter sweep", durationMin: 180, checkpoints: 4, areas: "All beats", usedCount: 42 },
-  { id: "tmp-2", name: "Night watch route", type: "combing-surveillance", objective: "Nocturnal activity watch", durationMin: 360, checkpoints: 6, areas: "N1, N2", usedCount: 17 },
-  { id: "tmp-3", name: "Water census sweep", type: "general-duties", objective: "Water body survey", durationMin: 240, checkpoints: 5, areas: "C1, C2", usedCount: 9 },
+  { id: "tmp-2", name: "Night watch route", type: "combing-surveillance", objective: "Nocturnal activity watch", durationMin: 360, checkpoints: 6, areas: "V.P. South, Y. Palem", usedCount: 17 },
+  { id: "tmp-3", name: "Water census sweep", type: "general-duties", objective: "Water body survey", durationMin: 240, checkpoints: 5, areas: "Nekkanti, Dornala", usedCount: 9 },
   { id: "tmp-4", name: "SOS response bundle", type: "general-duties", objective: "SOS protocol", durationMin: 90, checkpoints: 2, areas: "All", usedCount: 33 },
-  { id: "tmp-5", name: "Combing operation", type: "combing-surveillance", objective: "Area clutter search", durationMin: 420, checkpoints: 8, areas: "S2, S1", usedCount: 5 },
+  { id: "tmp-5", name: "Combing operation", type: "combing-surveillance", objective: "Area clutter search", durationMin: 420, checkpoints: 8, areas: "Korraprolu, G.V. Palli", usedCount: 5 },
 ];
 
 export const patrolTypeLabels: Record<string, string> = {
@@ -739,11 +741,11 @@ export const mockPatrolReports: PatrolReport[] = [
     id: "rep-1",
     patrolId: "P-2026-0117",
     code: "P-2026-0117",
-    title: "N2-A combing operation",
+    title: "Akkapalem combing operation",
     type: "combing-surveillance",
-    division: "d-north",
-    range: "r-n2",
-    beat: "b-n2a",
+    division: "d-markapur",
+    range: "r-y-palem",
+    beat: "b-y-palem-akkapalem",
     leader: "Chandra Mohan",
     reportDate: hoursAgo(6),
     period: "2300 – 0540",
@@ -760,11 +762,11 @@ export const mockPatrolReports: PatrolReport[] = [
     id: "rep-2",
     patrolId: "P-2026-0116",
     code: "P-2026-0116",
-    title: "C1 water-hole census",
+    title: "Guttalachenu water-hole census",
     type: "general-duties",
-    division: "d-central",
-    range: "r-c1",
-    beat: "b-c1a",
+    division: "d-markapur",
+    range: "r-nekkanti",
+    beat: "b-nekkanti-guttalachenu",
     leader: "Deepa Nair",
     reportDate: hoursAgo(27),
     period: "0900 – 1120",
@@ -775,17 +777,17 @@ export const mockPatrolReports: PatrolReport[] = [
     observations: 6,
     incidents: 0,
     photos: 12,
-    summary: "All 6 watering points in C1 surveyed. N1-A shows seasonal regression with turbid water; khakhar bank usage noted. Recommended re-survey after monsoon onset.",
+    summary: "All 6 watering points in Nekkanti surveyed. Tummurukota shows seasonal regression with turbid water; khakhar bank usage noted. Recommended re-survey after monsoon onset.",
   },
   {
     id: "rep-3",
     patrolId: "P-2026-0114",
     code: "P-2026-0114",
-    title: "S2-B elephant track follow-up",
+    title: "Peddamantanala elephant track follow-up",
     type: "general-duties",
-    division: "d-south",
-    range: "r-s2",
-    beat: "b-s2b",
+    division: "d-markapur",
+    range: "r-korraprolu",
+    beat: "b-korraprolu-peddamantanala",
     leader: "Harsh Vardhan",
     reportDate: hoursAgo(45),
     period: "1530 – 1830",
@@ -796,17 +798,17 @@ export const mockPatrolReports: PatrolReport[] = [
     observations: 4,
     incidents: 1,
     photos: 8,
-    summary: "Herd of ~6 elephants tracked from S2-B fringe to the patch exit. One crop-raid incident near village road averted with advisories. Herd movement continues north-east.",
+    summary: "Herd of ~6 elephants tracked from Peddamantanala fringe to the patch exit. One crop-raid incident near village road averted with advisories. Herd movement continues north-east.",
   },
   {
     id: "rep-4",
     patrolId: "P-2026-0113",
     code: "P-2026-0113",
-    title: "C2 morning route patrol",
+    title: "Chintala morning route patrol",
     type: "general-duties",
-    division: "d-central",
-    range: "r-c2",
-    beat: "b-c2a",
+    division: "d-markapur",
+    range: "r-dornala",
+    beat: "b-dornala-chintala",
     leader: "Raju Verma",
     reportDate: hoursAgo(69),
     period: "0630 – 0830",
@@ -825,9 +827,9 @@ export const mockPatrolReports: PatrolReport[] = [
     code: "P-2026-0115",
     title: "SOS response drill",
     type: "general-duties",
-    division: "d-south",
-    range: "r-s1",
-    beat: "b-s1b",
+    division: "d-markapur",
+    range: "r-gv-palli",
+    beat: "b-gv-palli-palutla",
     leader: "Farhan Ali",
     reportDate: hoursAgo(31),
     period: "— (not executed)",
@@ -838,6 +840,68 @@ export const mockPatrolReports: PatrolReport[] = [
     observations: 0,
     incidents: 0,
     photos: 0,
-    summary: "Exercise called off due to approach road closure near S1-B. Rescheduled for the next patrol cycle.",
+    summary: "Exercise called off due to approach road closure near Palutla. Rescheduled for the next patrol cycle.",
   },
 ];
+
+/* ------------------------------------------------------------------ */
+/* Replay traces — every patrol gets a playable route                  */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Deterministic pseudo-GPS trace for a patrol: an 8-point zig-zag sweep
+ * inside the patrol's beat (SVG viewBox → lon/lat), so the map replay
+ * controls work for every patrol, not just the ones with authored routes.
+ */
+function syntheticRoute(id: string, beatId: string): { lat: number; lng: number }[] {
+  const beat = mapBeatsRaw.find((b) => b.id === beatId || b.name === beatId);
+  const ring = beat
+    ? beat.points
+        .trim()
+        .split(/\s+/)
+        .map((p) => p.split(",").map(Number) as [number, number])
+    : [
+        [180, 220],
+        [180, 500],
+        [720, 500],
+        [720, 220],
+      ];
+  const xs = ring.map((p) => p[0]);
+  const ys = ring.map((p) => p[1]);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  let s = 0;
+  for (let i = 0; i < id.length; i++) s = (s * 31 + id.charCodeAt(i)) >>> 0;
+  const rnd = () => {
+    s = (s * 1103515245 + 12345) >>> 0;
+    return s / 4294967296;
+  };
+  const n = 8;
+  const out: [number, number][] = [];
+  for (let i = 0; i < n; i++) {
+    const t = i / (n - 1);
+    const x = minX + t * (maxX - minX) + (rnd() - 0.5) * (maxX - minX) * 0.16;
+    const sweep = (i % 2 === 0 ? 0.32 : -0.22) * (maxY - minY);
+    const y = (minY + maxY) / 2 + sweep + (rnd() - 0.5) * (maxY - minY) * 0.12;
+    out.push([
+      Math.min(maxX, Math.max(minX, x)),
+      Math.min(maxY, Math.max(minY, y)),
+    ]);
+  }
+  return out.map(([x, y]) => {
+    const [lng, lat] = svgToLngLat(x, y);
+    return { lat, lng };
+  });
+}
+
+/**
+ * Patch authored records: patrols with <2 fixes get a synthetic trace so the
+ * play/pause replay is available on every patrol's pages.
+ */
+export const mockPatrols: Patrol[] = rawMockPatrols.map((p) =>
+  p.route && p.route.length >= 2
+    ? p
+    : { ...p, route: syntheticRoute(p.id, p.beat) }
+);

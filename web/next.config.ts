@@ -1,7 +1,8 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
+  /* sql.js is loaded at runtime by the tile proxy route handler */
+  serverExternalPackages: ["sql.js"],
 };
 
 export default nextConfig;

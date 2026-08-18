@@ -11,7 +11,7 @@
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { authorizations, patrols } from "@/lib/services";
+import { authorizations, gis, patrols } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone } from "@/components/ui";
@@ -20,27 +20,29 @@ import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map";
 import { JurisdictionBanner } from "@/components/jurisdiction";
 import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
-import { ExportDialog, ExportButton } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
 import type { PatrolEvent } from "@/lib/types";
+import { ReportButton } from "@/components/reports/ReportButton";
+import { PatrolReportDialog } from "@/components/reports/dialogs";
 
 export default function PatrolDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
   const auths = useAsyncData(() => authorizations.list());
-  const [exportOpen, setExportOpen] = useState(false);
+  const spatial = useAsyncData(() => gis.spatial());
+  const [reportOpen, setReportOpen] = useState(false);
 
   const jurisdiction = useMemo(
     () => (patrol && auths.data ? resolveJurisdiction(patrol, auths.data) : undefined),
     [patrol, auths.data]
   );
 
-  if (loading || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
+  if (loading || auths.loading || !auths.data || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
   if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the mock records")} />;
 
@@ -60,13 +62,7 @@ export default function PatrolDetailPage() {
         actions={
           <>
             <Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>
-            <button
-              onClick={() => { navigator.clipboard?.writeText(patrol.code); pushToast("success", "Copied", `${patrol.code} copied to clipboard`); }}
-              className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
-            >
-              <Icon name="copy" size={14} /> Copy code
-            </button>
-            <ExportButton />
+            <ReportButton onClick={() => setReportOpen(true)} />
             <Link
               href={`/patrols/${patrol.id}/replay`}
               className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
@@ -81,7 +77,7 @@ export default function PatrolDetailPage() {
         <JurisdictionBanner
           state={jurisdiction.state}
           authorization={auth}
-          homeArea={jurisdiction.homeBeat ? unitName(jurisdiction.homeDivision) + " / " + unitName(jurisdiction.homeRange) + " / " + unitName(jurisdiction.homeBeat) : undefined}
+          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => unitName(id ?? "")).join(" / ") : undefined}
           patrolArea={`${unitName(patrol.division)} / ${unitName(patrol.range)} / ${unitName(patrol.beat)}`}
         />
       </div>
@@ -102,12 +98,17 @@ export default function PatrolDetailPage() {
       <div className="mt-4 grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
-            <CardHeader title="Route & live position" icon="map" subtitle="Mock trace — real GPS feed replaces this in production" />
+            <CardHeader title="Route & live position" icon="map" subtitle="Press play to replay the patrol trace" />
             <div className="p-3">
               <MapWorkspace
                 mode="overview"
                 heightClass="h-[300px]"
                 replayPatrolId={patrol.id}
+                replayPoints={patrol.route}
+                liveBeats={spatial.data.beats}
+                compartments={spatial.data.compartments}
+                boundary={spatial.data.boundary}
+                grids={spatial.data.grids}
                 onSelect={() => undefined}
               />
             </div>
@@ -205,7 +206,7 @@ export default function PatrolDetailPage() {
         </div>
       </div>
 
-      <ExportDialog open={exportOpen} onClose={() => setExportOpen(false)} />
+      <PatrolReportDialog open={reportOpen} onClose={() => setReportOpen(false)} patrol={patrol} jurisdiction={jurisdiction} />
     </div>
   );
 }

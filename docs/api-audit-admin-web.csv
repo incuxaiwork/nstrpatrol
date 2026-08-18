@@ -1,0 +1,49 @@
+Serial,Module,Endpoint,Purpose,Backend source,Remarks
+1,GIS Intelligence,GET /api/tiles/{z}/{x}/{y},Raster MBTiles basemap tiles for MapLibre (web proxy),Web-served (app/api/tiles) src=backend GET /api/gis/assets/NSTR.mbtiles,XYZ->TMS flip; max z=16; 503 if atlas unavailable
+2,Auth & Session,POST /api/auth/login,Admin sign-in returning JWT+user,auth.ts:61,Active (services.auth.login)
+3,Auth & Session,POST /api/auth/logout,End session,auth.ts:104,Active
+4,Auth & Session,GET /api/auth/me,Current user profile,auth.ts:112,Active
+5,Auth & Session,PATCH /api/auth/password,Change own password,auth.ts:125,Active
+6,Admin - Users,POST /api/auth/register,Create user from portal,auth.ts:25,Active (admin create)
+7,Patrol Operations,GET /api/patrols,List patrols,auth patrols.ts:28/55,Query mine/status/forestId
+8,Patrol Operations,GET /api/patrols/:id,Patrol detail + stats,patrols.ts:75,Active
+9,Observations,GET /api/incidents,List observations/incidents,incidents.ts:33/66,Query mine/status/type/from/to
+10,Observations,GET /api/incidents/:id,Observation detail,incidents.ts:87,Active
+11,Observations,POST /api/incidents/:id/verify,Verify observation,incidents.ts:96,Active (set status)
+12,Observations,POST /api/incidents/:id/resolve,Resolve observation,incidents.ts:108,Body resolutionNote
+13,GIS Intelligence,GET /api/gis/beats,Beat polygons GeoJSON,gis.ts:12,auth:false; mock fallback
+14,GIS Intelligence,GET /api/gis/compartments,Compartment polygons GeoJSON,gis.ts:50,auth:false; mock fallback
+15,GIS Intelligence,GET /api/gis/assets,"Map asset catalog (MBTiles),",gis.ts:87,auth:false
+16,GIS Intelligence,GET /api/gis/assets/:resourceKey,"Raw MBTiles/asset download",gis.ts:108,auth:false; tile-proxy atlas source
+17,Admin - Users,GET /api/users,List users,users.ts:20,Query role/q
+18,Admin - Users,POST /api/users/:id/activate,Enable user,users.ts:77,Active
+19,Admin - Users,POST /api/users/:id/deactivate,Disable user,users.ts:72,Active
+20,Auth & Session,POST /api/auth/refresh,Rotate JWT on expiry,auth.ts:86,Internal 401 refresh; not a page action
+21,Admin - Users,PATCH /api/users/:id,Update user profile/role,users.ts:48,Defined, unused
+22,Patrol Operations,GET /api/patrols/:id/points,GPS trace points,patrols.ts:114,Defined; for replay (not wired)
+23,Patrol Operations,POST /api/patrols/:id/start,Start patrol,patrols.ts:143,Mobile-owned stub
+24,Patrol Operations,POST /api/patrols/:id/complete,Complete patrol,patrols.ts:161,Mobile-owned stub
+25,Observations,POST /api/incidents,Create incident,incidents.ts:66,Mobile-owned stub
+26,Observations,POST /api/incidents/:id/reject,Reject incident,incidents.ts:116,Defined, unused
+27,Map / GIS admin,GET /api/map/assets,Map asset catalog (admin),map.ts:446,Defined, unused
+28,Map / GIS admin,GET /api/map/assets/:resourceKey/meta,Asset metadata,map.ts:451,Defined, unused
+29,Analytics / Settings,GET /api/options/:key,Read runtime option,options.ts:16,Not consumed (analytics uses mock)
+30,Analytics / Settings,PUT /api/options/:key,Update runtime option,options.ts:33,Defined, unused
+31,Telemetry,POST /api/telemetry/patrol/:id/aggregates,Aggregate patrol telemetry,telemetry.ts:153,Defined, unused
+32,Sync,GET /api/sync/status,Device sync status,sync.ts:146,Defined, unused
+33,Sync,GET /api/sync/logs,Sync history log,sync.ts:194,Defined, unused
+34,SOS / Emergency,GET /api/sos/contacts,Emergency ranger contacts,sos.ts:51,Defined, unused
+35,Platform - Alerts,GET /api/alerts,"SOS/tamper/coverage alerts",NO backend route found,"Expects since?/limit?; web stub, unused"
+36,Devices,GET /api/devices,List user devices,devices.ts:21,Defined, unused (query userId?)
+37,Forests,GET /api/forests,Forest list,forests.ts:25,Defined, unused
+38,Uploads,GET /api/uploads/:key,Signed/media URL (string),uploads.ts:40,urlFor() link builder only
+39,Platform - Health,GET /api/health,Backend health/db check,health.ts:6,auth:false
+40,Map / GIS admin,GET/POST /api/map/beats[/:id|/import],Beat CRUD + import,map.ts:69-182,Backend-only; not in web client
+41,Map / GIS admin,GET/POST /api/map/compartments[/:id|/import],Compartment CRUD + import,map.ts:217-328,Backend-only
+42,Map / GIS admin,GET/POST /api/map/routes[/:id],Patrol route admin,map.ts:369-428,Backend-only
+43,Map / GIS admin,POST/DELETE /api/map/assets,Asset upload/delete,map.ts:459-511,Backend-only
+44,Forests,GET/POST /api/forests/:id/boundaries|grids[/:id],Forest boundaries & grids admin,forests.ts:57-164,Backend-only
+45,Sync,POST /api/sync/upload; GET /api/sync/changes,Mobile device sync,sync.ts:42/111,Backend-only (mobile)
+46,SOS,POST /api/sos; /:id,SOS create/handle,sos.ts:20/64,Backend-only (mobile)
+47,Uploads,POST /api/uploads; DELETE /api/uploads/:key,Upload management,uploads.ts:16/31,Backend-only
+48,Observations,POST /api/incidents/:id/photo-upload,Incident photo upload,incidents.ts:126,Backend-only (mobile)

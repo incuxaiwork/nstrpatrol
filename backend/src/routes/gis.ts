@@ -81,6 +81,72 @@ gisRouter.get('/compartments', async (_req, res) => {
 const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
+ * GET /api/gis/boundary
+ * Reserved forest boundary polygons as a GeoJSON FeatureCollection.
+ */
+gisRouter.get('/boundary', async (_req, res) => {
+  const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+    SELECT COALESCE(
+      json_build_object(
+        'type', 'FeatureCollection',
+        'features', json_agg(feature)
+      )::text,
+      '{"type":"FeatureCollection","features":[]}'
+    ) AS geojson
+    FROM (
+      SELECT json_build_object(
+        'type', 'Feature',
+        'id', fb.id,
+        'geometry', ST_AsGeoJSON(fb.geom)::json,
+        'properties', json_build_object(
+          'name', COALESCE(fb.name, f.name, ''),
+          'forestId', fb."forestId",
+          'forestCode', COALESCE(f.code, '')
+        )
+      ) AS feature
+      FROM "ForestBoundary" fb
+      LEFT JOIN "Forest" f ON f.id = fb."forestId"
+      WHERE fb.geom IS NOT NULL
+    ) t
+  `;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}');
+});
+
+/**
+ * GET /api/gis/grids
+ * Forest reference grids as a GeoJSON FeatureCollection.
+ */
+gisRouter.get('/grids', async (_req, res) => {
+  const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+    SELECT COALESCE(
+      json_build_object(
+        'type', 'FeatureCollection',
+        'features', json_agg(feature)
+      )::text,
+      '{"type":"FeatureCollection","features":[]}'
+    ) AS geojson
+    FROM (
+      SELECT json_build_object(
+        'type', 'Feature',
+        'id', fg.id,
+        'geometry', ST_AsGeoJSON(fg.geom)::json,
+        'properties', json_build_object(
+          'gridCode', COALESCE(fg."gridCode", ''),
+          'forestId', fg."forestId"
+        )
+      ) AS feature
+      FROM "ForestGrid" fg
+      WHERE fg.geom IS NOT NULL
+    ) t
+  `;
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}');
+});
+
+/**
  * GET /api/gis/assets
  * Metadata for all stored map assets (no blobs).
  */

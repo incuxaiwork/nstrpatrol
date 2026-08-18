@@ -63,7 +63,7 @@ export const mortalityTrend: AnalyticsDataset = {
 };
 
 export const beatCoverage = {
-  labels: ["N1-A", "N1-B", "N1-C", "N2-A", "N2-B", "C1-A", "C1-B", "C1-C", "S1-A", "S1-B"],
+  labels: ["Tummurukota", "Pasuvemula", "Nagulavaram", "Koppunuru", "Kandlgunta", "Zuvuku", "Gottipalli", "Sirigiripadu", "Gangalgunta", "Akkapalem"],
   values: [92, 74, 88, 91, 66, 95, 61, 82, 87, 55],
 };
 
@@ -112,14 +112,15 @@ export const comparativeSeries: AnalyticsDataset = {
 };
 
 export const heatmapPatrol = {
-  divisions: ["North", "Central", "South"],
-  ranges: ["N-1", "N-2", "C-1", "C-2", "S-1", "S-2"],
+  divisions: ["Markapur"],
+  ranges: ["V.P. South", "Y. Palem", "Nekkanti", "G.V. Palli", "Dornala", "Korraprolu", "Markapur"],
   values: [
-    [87, 45],
-    [91, 38],
-    [95, 61, 42],
-    [58, 33],
-    [70, 22],
-    [44, 55, 12],
+    [87],
+    [91],
+    [95],
+    [70],
+    [58],
+    [44],
+    [62],
   ],
 };
