@@ -89,7 +89,9 @@ patrolsRouter.get('/:id', async (req, res) => {
   const stats = await prisma.$queryRaw<{ points: bigint; distanceKm: number; durationSeconds: number }[]>`
     SELECT COUNT(pp.id)::bigint AS points,
       COALESCE(
-        ST_Length(ST_MakeLine(pp.geom ORDER BY pp.timestamp)::geography) / 1000.0, 0
+        CASE WHEN COUNT(pp.id) >= 2 THEN
+          ST_Length(ST_MakeLine(pp.geom ORDER BY pp.timestamp)::geography) / 1000.0
+        ELSE 0 END, 0
       ) AS "distanceKm",
       COALESCE(
         EXTRACT(EPOCH FROM (MAX(pp.timestamp) - MIN(pp.timestamp))), 0
@@ -101,9 +103,9 @@ patrolsRouter.get('/:id', async (req, res) => {
   res.json({
     ...patrol,
     stats: {
-      points: Number(stats[0].points ?? 0n),
-      distanceKm: Math.round((stats[0].distanceKm ?? 0) * 100) / 100,
-      durationSeconds: Math.round(stats[0].durationSeconds ?? 0),
+      points: Number(stats[0]?.points ?? 0n),
+      distanceKm: Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100,
+      durationSeconds: Math.round(stats[0]?.durationSeconds ?? 0),
     },
   });
 });
@@ -167,7 +169,7 @@ patrolsRouter.post('/:id/complete', validateBody(completeSchema), async (req, re
   }
 
   const lastPoint = await prisma.$queryRaw<{ t: Date | null }[]>`
-    SELECT MAX(timestamp)::timestamptz AS t FROM "PatrolPoint" WHERE "patrolId" = ${id}
+    SELECT COALESCE(MAX(timestamp), CURRENT_TIMESTAMP)::timestamptz AS t FROM "PatrolPoint" WHERE "patrolId" = ${id}
   `;
   const endedAt = req.body.endedAt ?? lastPoint[0]?.t ?? new Date();
   const updated = await prisma.patrol.update({
