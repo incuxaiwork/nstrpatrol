@@ -597,7 +597,9 @@ private fun patrolSessionFromBackend(o: org.json.JSONObject): PatrolSessionEntit
     val stats = o.optJSONObject("stats")
     val distanceKm = stats?.optDouble("distanceKm", 0.0) ?: 0.0
     val durationSeconds = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
-    val steps = stats?.optInt("points", 0) ?: 0
+    val pointCount = stats?.optInt("points", 0) ?: 0
+    val totalSteps = stats?.optInt("steps", 0) ?: 0
+    val detectedMethod = o.optString("detectedMethod").ifEmpty { "STILL" }
     val avgSpeed = if (durationSeconds > 0) (distanceKm / (durationSeconds / 3600.0)) else 0.0
     return PatrolSessionEntity(
         patrolId = o.optString("id"),
@@ -605,11 +607,12 @@ private fun patrolSessionFromBackend(o: org.json.JSONObject): PatrolSessionEntit
         endTime = endedMs,
         status = o.optString("status", "COMPLETED"),
         patrolType = o.optString("type").ifEmpty { null },
+        detectedMethod = detectedMethod,
         totalDistanceMeters = distanceKm * 1000,
         moveMinutes = (durationSeconds / 60).toInt(),
-        totalSteps = steps,
-        avgSpeedKmh = avgSpeed,
-        pointCount = steps,
+        totalSteps = totalSteps,
+        avgSpeedKmh = Math.round(avgSpeed * 10.0) / 10.0,
+        pointCount = pointCount,
         syncStatus = "SYNCED"
     )
 }

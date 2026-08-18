@@ -87,25 +87,45 @@ patrolsRouter.get('/:id', async (req, res) => {
   }
 
   const stats = await prisma.$queryRaw<{ points: bigint; distanceKm: number; durationSeconds: number }[]>`
-    SELECT COUNT(pp.id)::bigint AS points,
+    SELECT COUNT(id)::bigint AS points,
       COALESCE(
-        CASE WHEN COUNT(pp.id) >= 2 THEN
-          ST_Length(ST_MakeLine(pp.geom ORDER BY pp.timestamp)::geography) / 1000.0
+        CASE WHEN COUNT(id) >= 2 THEN
+          ST_Length(
+            ST_MakeLine(
+              ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
+              ORDER BY timestamp
+            )
+          ) / 1000.0
         ELSE 0 END, 0
       ) AS "distanceKm",
       COALESCE(
-        EXTRACT(EPOCH FROM (MAX(pp.timestamp) - MIN(pp.timestamp))), 0
+        EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))), 0
       ) AS "durationSeconds"
-    FROM "PatrolPoint" pp
-    WHERE pp."patrolId" = ${id}
+    FROM "PatrolPoint"
+    WHERE "patrolId" = ${id}
   `;
+
+  const stepsAgg = await prisma.stepReading.aggregate({
+    where: { patrolId: id },
+    _sum: { steps: true },
+  });
+  const steps = stepsAgg._sum.steps ?? 0;
+
+  const latestSegment = await prisma.activitySegment.findFirst({
+    where: { patrolId: id },
+    orderBy: { endTime: 'desc' },
+    select: { mode: true },
+  });
+  const detectedMethod = latestSegment?.mode ?? 'STILL';
 
   res.json({
     ...patrol,
+    detectedMethod,
     stats: {
       points: Number(stats[0]?.points ?? 0n),
       distanceKm: Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100,
       durationSeconds: Math.round(stats[0]?.durationSeconds ?? 0),
+      steps,
     },
   });
 });
