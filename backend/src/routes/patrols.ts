@@ -96,9 +96,9 @@ patrolsRouter.get('/:id', async (req, res) => {
           CASE WHEN COUNT(id) >= 2 THEN
             ST_Length(
               ST_MakeLine(
-                ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)::geography
+                ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
                 ORDER BY timestamp
-              )
+              )::geography
             ) / 1000.0
           ELSE 0 END, 0
         ) AS "distanceKm",

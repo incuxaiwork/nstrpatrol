@@ -197,7 +197,7 @@ telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {
     SELECT
       COUNT(*)::bigint AS points,
       COALESCE(
-        (SELECT CASE WHEN COUNT(*) >= 2 THEN ST_Length(ST_MakeLine(geom ORDER BY timestamp)::geography) / 1000.0 ELSE 0 END
+        (SELECT CASE WHEN COUNT(*) >= 2 THEN ST_Length(ST_MakeLine(ST_SetSRID(ST_MakePoint(longitude, latitude), 4326) ORDER BY timestamp)::geography) / 1000.0 ELSE 0 END
          FROM "PatrolPoint" WHERE "patrolId" = ${id}),
         0
       )::float8 AS "distanceKm",
