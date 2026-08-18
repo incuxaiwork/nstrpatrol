@@ -147,12 +147,6 @@ interface TelemetryDao {
     suspend fun upsertPatrolPoints(points: List<PatrolPointEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsertMovementModeReadings(readings: List<MovementModeReadingEntity>)
-
-    @Query("SELECT * FROM movement_mode_readings WHERE patrolId = :patrolId ORDER BY timestamp ASC")
-    suspend fun movementModeReadingsForPatrol(patrolId: String): List<MovementModeReadingEntity>
-
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsertSensorReadings(readings: List<SensorReadingEntity>)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

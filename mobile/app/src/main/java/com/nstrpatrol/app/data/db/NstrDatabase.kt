@@ -14,7 +14,6 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         DailyActivityEntity::class,
         PatrolSessionEntity::class,
         IncidentEntity::class,
-        MovementModeReadingEntity::class,
         ActivitySegmentEntity::class,
         CoverageEventEntity::class,
         IntegrityLogEntity::class

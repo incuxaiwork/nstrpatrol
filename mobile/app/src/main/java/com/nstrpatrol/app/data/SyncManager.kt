@@ -566,6 +566,10 @@ object SyncManager {
             val distanceKm = stats?.optDouble("distanceKm", 0.0) ?: 0.0
             val durationSec = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
             val pointCount = stats?.optInt("points", 0) ?: 0
+            val steps = stats?.optInt("steps", 0) ?: 0
+            val detectedMethod = detail.optString("detectedMethod")
+                .takeIf { it.isNotEmpty() && it != "null" }
+                ?: null
 
             val session = com.nstrpatrol.app.data.db.PatrolSessionEntity(
                 patrolId = id,
@@ -574,8 +578,10 @@ object SyncManager {
                 status = detail.optString("status", "COMPLETED"),
                 patrolType = detail.optString("type").ifEmpty { null },
                 totalDistanceMeters = distanceKm * 1000,
+                totalSteps = steps,
                 moveMinutes = (durationSec / 60).toInt(),
                 pointCount = pointCount,
+                detectedMethod = detectedMethod,
                 syncStatus = "SYNCED"
             )
             dao.upsertPatrolSession(session)
@@ -603,24 +609,32 @@ object SyncManager {
                 Log.d(TAG, "Pulled ${points.size} points for patrol $id")
             }
 
-            // Fetch movement-mode readings
+            // Fetch movement-mode readings. They are stored back into
+            // sensor_readings (type=MOVEMENT_MODE) — the SAME table/format the
+            // recorder writes locally — so the patrol report and processing
+            // functions read them identically on any device.
             val movArr = api.getJsonArray("/api/patrols/$id/movement")
             if (movArr != null && movArr.length() > 0) {
-                val movReadings = mutableListOf<com.nstrpatrol.app.data.db.MovementModeReadingEntity>()
+                val movReadings = mutableListOf<com.nstrpatrol.app.data.db.SensorReadingEntity>()
                 for (j in 0 until movArr.length()) {
                     val m = movArr.optJSONObject(j) ?: continue
+                    val mode = runCatching {
+                        com.nstrpatrol.app.time.MovementMode.valueOf(m.optString("mode", "UNKNOWN"))
+                    }.getOrDefault(com.nstrpatrol.app.time.MovementMode.UNKNOWN)
                     movReadings.add(
-                        com.nstrpatrol.app.data.db.MovementModeReadingEntity(
+                        com.nstrpatrol.app.data.db.SensorReadingEntity(
                             id = "bm-$id-$j",
                             patrolId = id,
                             timestamp = parseIsoMs(m.optString("t")),
-                            mode = m.optString("mode", "UNKNOWN"),
-                            confidence = if (!m.isNull("confidence")) m.optDouble("confidence").toFloat() else null,
-                            speedKmh = if (!m.isNull("speedKmh")) m.optDouble("speedKmh").toFloat() else null
+                            type = "MOVEMENT_MODE",
+                            value = mode.code.toFloat(),
+                            x = if (!m.isNull("confidence")) m.optDouble("confidence").toFloat() else null,
+                            y = if (!m.isNull("speedKmh")) m.optDouble("speedKmh").toFloat() else null,
+                            syncStatus = "SYNCED"
                         )
                     )
                 }
-                dao.upsertMovementModeReadings(movReadings)
+                dao.upsertSensorReadings(movReadings)
                 Log.d(TAG, "Pulled ${movReadings.size} movement-mode readings for patrol $id")
             }
 
