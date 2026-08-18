@@ -25,7 +25,7 @@ import org.json.JSONObject
 object SyncManager {
 
     private const val TAG = "SyncManager"
-    private const val CHUNK_SIZE = 500
+    private const val CHUNK_SIZE = 250
 
     data class SyncSummary(
         val syncedItems: Int,
@@ -278,9 +278,8 @@ object SyncManager {
                 }
             }
 
-            // Send all batches in a single request (backend supports up to 20)
-            // Split into groups of 18 to stay under the backend's 20-batch limit
-            val batchesPerRequest = 18
+            // Split into groups of 3 to keep request payload sizes under 100 KB
+            val batchesPerRequest = 3
             val requestGroups = allBatches.chunked(batchesPerRequest)
             Log.d(TAG, "Patrol $patrolId: ${patrolReadings.size} readings, ${allBatches.size} batches, ${requestGroups.size} request(s)")
 
