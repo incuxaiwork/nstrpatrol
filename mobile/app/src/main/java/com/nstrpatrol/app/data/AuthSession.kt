@@ -106,7 +106,7 @@ class AuthSession(context: Context) {
             .putString("user", userJson)
             .apply()
         client.setAccessToken(accessToken)
-        registerDevice()
+        deviceScope.launch { registerDevice() }
         user
     }
 
