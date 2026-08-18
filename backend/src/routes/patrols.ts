@@ -19,6 +19,17 @@ const patrolCreateSchema = z.object({
   name: z.string().trim().max(160).nullish(),
   description: z.string().trim().max(500).nullish(),
   type: z.enum(['WALK', 'BICYCLE', 'VEHICLE', 'STATIONARY']),
+  startedAt: z.coerce.date().nullish(),
+  endedAt: z.coerce.date().nullish(),
+  patrolMethod: z.string().trim().max(80).nullish(),
+  teamLeader: z.string().trim().max(80).nullish(),
+  beat: z.string().trim().max(160).nullish(),
+  armedStatus: z.string().trim().max(80).nullish(),
+  memberCount: z.number().int().nonnegative().nullish(),
+  caloriesEstimate: z.number().finite().nullish(),
+  heartPointsEstimate: z.number().finite().nullish(),
+  avgSpeedKmh: z.number().finite().nullish(),
+  detectedMethod: z.string().trim().max(80).nullish(),
 });
 
 // Rangers start patrols on their own initiative. The creating user is the
@@ -39,7 +50,17 @@ patrolsRouter.post('/', validateBody(patrolCreateSchema), async (req, res) => {
       description: body.description ?? null,
       type: body.type,
       status: 'ACTIVE',
-      startedAt: new Date(),
+      startedAt: body.startedAt ?? new Date(),
+      endedAt: body.endedAt ?? null,
+      patrolMethod: body.patrolMethod ?? null,
+      teamLeader: body.teamLeader ?? null,
+      beat: body.beat ?? null,
+      armedStatus: body.armedStatus ?? null,
+      memberCount: body.memberCount ?? 0,
+      caloriesEstimate: body.caloriesEstimate ?? null,
+      heartPointsEstimate: body.heartPointsEstimate ?? null,
+      avgSpeedKmh: body.avgSpeedKmh ?? null,
+      detectedMethod: body.detectedMethod ?? null,
       syncStatus: 'SYNCED',
     },
   });
@@ -127,7 +148,9 @@ patrolsRouter.get('/:id', async (req, res) => {
     orderBy: { endTime: 'desc' },
     select: { mode: true },
   });
-  const detectedMethod = latestSegment?.mode ?? 'STILL';
+  // Prefer the stored value pushed from the device; fall back to the latest
+  // activity segment so old data still reports something sensible.
+  const detectedMethod = patrol.detectedMethod ?? latestSegment?.mode ?? 'STILL';
 
   res.json({
     ...patrol,
@@ -153,7 +176,15 @@ patrolsRouter.get('/:id/points', async (req, res) => {
   const pts = await prisma.patrolPoint.findMany({
     where: { patrolId: id },
     orderBy: { timestamp: 'asc' },
-    select: { latitude: true, longitude: true, altitude: true, speed: true, timestamp: true },
+    select: {
+      latitude: true,
+      longitude: true,
+      altitude: true,
+      speed: true,
+      bearing: true,
+      accuracy: true,
+      timestamp: true,
+    },
   });
   res.json(
     pts.map((p) => ({
@@ -161,6 +192,8 @@ patrolsRouter.get('/:id/points', async (req, res) => {
       lng: p.longitude,
       altitude: p.altitude,
       speed: p.speed,
+      bearing: p.bearing,
+      accuracy: p.accuracy,
       t: p.timestamp,
     }))
   );

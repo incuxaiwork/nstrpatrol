@@ -50,26 +50,27 @@ syncRouter.post('/upload', validateBody(uploadSchema), async (req, res) => {
       if (batch.entity === 'incidents') {
         const parsed = z.array(incidentCreateSchema).max(200).parse(batch.records);
         const created = await Promise.all(
-          parsed.map((r) =>
-            prisma.incident.create({
-              data: {
-                userId: req.user!.id,
-                patrolId: r.patrolId ?? null,
-                type: r.type,
-                title: r.title,
-                description: r.description ?? null,
-                severity: r.severity,
-                details: (r.details as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
-                latitude: r.latitude ?? null,
-                longitude: r.longitude ?? null,
-                accuracy: r.accuracy ?? null,
-                photos: r.photos,
-                occurredAt: r.occurredAt,
-                reportedAt: new Date(),
-                syncStatus: 'SYNCED',
-              },
-            }),
-          ),
+          parsed.map((r) => {
+            const data = {
+              userId: req.user!.id,
+              patrolId: r.patrolId ?? null,
+              type: r.type,
+              title: r.title,
+              description: r.description ?? null,
+              severity: r.severity,
+              details: (r.details as unknown as Prisma.InputJsonValue) ?? Prisma.JsonNull,
+              latitude: r.latitude ?? null,
+              longitude: r.longitude ?? null,
+              accuracy: r.accuracy ?? null,
+              photos: r.photos,
+              occurredAt: r.occurredAt,
+              reportedAt: r.reportedAt ?? new Date(),
+              syncStatus: 'SYNCED' as const,
+            };
+            return r.id
+              ? prisma.incident.upsert({ where: { id: r.id }, create: data, update: {} })
+              : prisma.incident.create({ data });
+          }),
         );
         results.push({ entity: 'incidents', inserted: created.length });
         total += created.length;

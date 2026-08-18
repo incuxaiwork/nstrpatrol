@@ -123,6 +123,17 @@ object SyncManager {
                 put("id", session.patrolId)
                 put("type", mapPatrolType(session.patrolType))
                 put("name", buildPatrolName(session))
+                put("startedAt", session.startTime)
+                session.endTime?.let { put("endedAt", it) }
+                session.patrolMethod?.let { put("patrolMethod", it) }
+                session.teamLeader?.let { put("teamLeader", it) }
+                session.beat?.let { put("beat", it) }
+                session.armedStatus?.let { put("armedStatus", it) }
+                put("memberCount", session.memberCount)
+                put("caloriesEstimate", session.caloriesEstimate)
+                put("heartPointsEstimate", session.heartPointsEstimate)
+                put("avgSpeedKmh", session.avgSpeedKmh)
+                session.detectedMethod?.let { put("detectedMethod", it) }
             }
             // Idempotent: create first; if that fails (e.g. the patrol already
             // exists on the server from a prior attempt) fall back to completing
@@ -135,7 +146,10 @@ object SyncManager {
                 dao.updateSessionSyncStatus(session.patrolId, "SYNCED")
                 ok(1)
                 if (session.status == "COMPLETED") {
-                    runCatching { withNetworkRetry { api.completePatrol(session.patrolId) } }
+                    val completeBody = JSONObject().apply {
+                        session.endTime?.let { put("endedAt", it) }
+                    }
+                    runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBody) } }
                 }
             } else {
                 // Both create and complete failed — mark as SYNCED locally
@@ -366,6 +380,7 @@ object SyncManager {
             val records = JSONArray()
             for (inc in chunk) {
                 records.put(JSONObject().apply {
+                    put("id", inc.id)
                     put("type", inc.type)
                     put("title", inc.title)
                     inc.description?.let { put("description", it) }
@@ -376,6 +391,7 @@ object SyncManager {
                     inc.accuracy?.let { put("accuracy", it.toDouble()) }
                     put("photos", org.json.JSONArray(inc.photos ?: "[]"))
                     put("occurredAt", inc.occurredAt)
+                    put("reportedAt", inc.reportedAt)
                     inc.patrolId?.let { put("patrolId", it) }
                 })
             }
@@ -577,9 +593,17 @@ object SyncManager {
                 endTime = endedMs,
                 status = detail.optString("status", "COMPLETED"),
                 patrolType = detail.optString("type").ifEmpty { null },
+                patrolMethod = detail.optString("patrolMethod").takeIf { it.isNotEmpty() && it != "null" },
+                beat = detail.optString("beat").takeIf { it.isNotEmpty() && it != "null" },
+                teamLeader = detail.optString("teamLeader").takeIf { it.isNotEmpty() && it != "null" },
+                armedStatus = detail.optString("armedStatus").takeIf { it.isNotEmpty() && it != "null" },
+                memberCount = detail.optInt("memberCount", 0),
                 totalDistanceMeters = distanceKm * 1000,
                 totalSteps = steps,
                 moveMinutes = (durationSec / 60).toInt(),
+                caloriesEstimate = if (!detail.isNull("caloriesEstimate")) detail.optDouble("caloriesEstimate") else 0.0,
+                heartPointsEstimate = if (!detail.isNull("heartPointsEstimate")) detail.optDouble("heartPointsEstimate") else 0.0,
+                avgSpeedKmh = if (!detail.isNull("avgSpeedKmh")) detail.optDouble("avgSpeedKmh") else 0.0,
                 pointCount = pointCount,
                 detectedMethod = detectedMethod,
                 syncStatus = "SYNCED"
@@ -600,6 +624,8 @@ object SyncManager {
                             longitude = p.optDouble("lng", 0.0),
                             altitude = if (!p.isNull("altitude")) p.optDouble("altitude") else null,
                             speed = if (!p.isNull("speed")) p.optDouble("speed").toFloat() else null,
+                            bearing = if (!p.isNull("bearing")) p.optDouble("bearing").toFloat() else null,
+                            accuracy = if (!p.isNull("accuracy")) p.optDouble("accuracy").toFloat() else null,
                             timestamp = parseIsoMs(p.optString("t")),
                             syncStatus = "SYNCED"
                         )

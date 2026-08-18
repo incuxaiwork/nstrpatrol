@@ -17,6 +17,7 @@ const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
   req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 export const incidentCreateSchema = z.object({
+  id: z.string().min(1).max(50).nullish(),
   patrolId: z.string().min(1).max(50).nullish(),
   type: z.enum(['HUMAN_IMPACT', 'ANIMAL_MORTALITY', 'SIGHTING', 'WATER_SOURCE', 'QUICK_CAPTURE', 'GENERAL']),
   title: z.string().trim().min(1).max(200),
@@ -28,30 +29,36 @@ export const incidentCreateSchema = z.object({
   accuracy: z.number().finite().nonnegative().nullish(),
   photos: z.array(z.string().min(1)).default([]),
   occurredAt: z.coerce.date(),
+  reportedAt: z.coerce.date().nullish(),
 });
 
 incidentsRouter.post('/', validateBody(incidentCreateSchema), async (req, res) => {
   const body = req.body;
   const patrolId = body.patrolId ?? null;
+  const data = {
+    userId: req.user!.id,
+    patrolId,
+    type: body.type,
+    title: body.title,
+    description: body.description ?? null,
+    severity: body.severity,
+    details: body.details ?? Prisma.JsonNull,
+    latitude: body.latitude ?? null,
+    longitude: body.longitude ?? null,
+    accuracy: body.accuracy ?? null,
+    photos: body.photos,
+    occurredAt: body.occurredAt,
+    reportedAt: body.reportedAt ?? new Date(),
+    syncStatus: 'SYNCED' as const,
+  };
 
-  const incident = await prisma.incident.create({
-    data: {
-      userId: req.user!.id,
-      patrolId,
-      type: body.type,
-      title: body.title,
-      description: body.description ?? null,
-      severity: body.severity,
-      details: body.details ?? Prisma.JsonNull,
-      latitude: body.latitude ?? null,
-      longitude: body.longitude ?? null,
-      accuracy: body.accuracy ?? null,
-      photos: body.photos,
-      occurredAt: body.occurredAt,
-      reportedAt: new Date(),
-      syncStatus: 'SYNCED',
-    },
-  });
+  const incident = body.id
+    ? await prisma.incident.upsert({
+        where: { id: body.id },
+        create: data,
+        update: {},
+      })
+    : await prisma.incident.create({ data });
   res.status(201).json(incident);
 });
 
