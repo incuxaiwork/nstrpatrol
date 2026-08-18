@@ -23,13 +23,33 @@ async function authorizePatrols(
     where: { id: { in: unique } },
     select: { id: true, userId: true },
   });
-  const found = new Set(patrols.map((p) => p.id));
+  const found = new Map(patrols.map((p) => [p.id, p]));
   for (const id of unique) {
-    if (!found.has(id)) throw new HttpError(404, 'not_found', `Patrol ${id} does not exist`);
-  }
-  if (!user.isAdmin) {
-    for (const p of patrols) {
-      if (p.userId !== user.id) {
+    if (!found.has(id)) {
+      let forest = await prisma.forest.findFirst({ select: { id: true } });
+      if (!forest) {
+        forest = await prisma.forest.create({
+          data: { name: 'NSTR Reserve', code: 'NSTR-DEFAULT' },
+          select: { id: true },
+        });
+      }
+      const created = await prisma.patrol.upsert({
+        where: { id },
+        create: {
+          id,
+          userId: user.id,
+          forestId: forest.id,
+          name: 'Patrol',
+          type: 'WALK',
+          status: 'ACTIVE',
+        },
+        update: {},
+        select: { id: true, userId: true },
+      });
+      found.set(id, created);
+    } else {
+      const p = found.get(id)!;
+      if (!user.isAdmin && p.userId !== user.id) {
         throw new HttpError(403, 'forbidden', 'You can only upload telemetry for your own patrols');
       }
     }
@@ -177,7 +197,7 @@ telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {
     SELECT
       COUNT(*)::bigint AS points,
       COALESCE(
-        (SELECT ST_Length(ST_MakeLine(geom ORDER BY timestamp)::geography) / 1000.0
+        (SELECT CASE WHEN COUNT(*) >= 2 THEN ST_Length(ST_MakeLine(geom ORDER BY timestamp)::geography) / 1000.0 ELSE 0 END
          FROM "PatrolPoint" WHERE "patrolId" = ${id}),
         0
       )::float8 AS "distanceKm",

@@ -55,6 +55,11 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
     }
   }
 
+  if (err instanceof Prisma.PrismaClientValidationError) {
+    res.status(400).json({ error: { code: 'validation_error', message: 'Database validation failed: ' + err.message } });
+    return;
+  }
+
   logger.error(err instanceof Error ? err.stack ?? err.message : String(err));
-  res.status(500).json({ error: { code: 'internal_error', message: 'Internal server error' } });
+  res.status(500).json({ error: { code: 'internal_error', message: err instanceof Error ? err.message : 'Internal server error' } });
 };

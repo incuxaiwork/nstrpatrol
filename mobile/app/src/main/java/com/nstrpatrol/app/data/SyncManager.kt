@@ -179,14 +179,47 @@ object SyncManager {
                     withNetworkRetry { api.postJson("/api/sync/upload", body) }
                     Log.d(TAG, "Points chunk ${idx + 1}/${chunks.size} uploaded (${chunk.size} records)")
                 }.onFailure { e ->
-                    // If patrol doesn't exist on server, skip all points for it
-                    if (e.message?.contains("not_found") == true || e.message?.contains("Patrol") == true) {
-                        Log.w(TAG, "Patrol $patrolId not found, skipping ${rows.size} points")
-                        dao.markPointsSynced(patrolId)
-                        ok(rows.size)
-                        return
+                    Log.w(TAG, "Points upload failed for patrol $patrolId: ${e.message}. Attempting patrol auto-create fallback...")
+                    val createdShell = runCatching {
+                        api.createPatrol(JSONObject().apply {
+                            put("id", patrolId)
+                            put("type", "WALK")
+                            put("name", "Patrol")
+                        })
+                        true
+                    }.getOrDefault(false)
+
+                    if (createdShell) {
+                        val records = JSONArray()
+                        for (p in chunk) {
+                            records.put(JSONObject().apply {
+                                put("patrolId", p.patrolId)
+                                put("timestamp", p.timestamp)
+                                put("latitude", p.latitude)
+                                put("longitude", p.longitude)
+                                p.altitude?.let { put("altitude", it) }
+                                p.speed?.let { put("speed", it.toDouble()) }
+                                p.bearing?.let { put("bearing", it.toDouble()) }
+                                p.accuracy?.let { put("accuracy", it.toDouble()) }
+                            })
+                        }
+                        val body = JSONObject().apply {
+                            put("patrolId", patrolId)
+                            put("batches", JSONArray().put(JSONObject().apply {
+                                put("entity", "points")
+                                put("records", records)
+                            }))
+                        }
+                        val retrySuccess = runCatching { api.postJson("/api/sync/upload", body); true }.getOrDefault(false)
+                        if (retrySuccess) {
+                            Log.d(TAG, "Points chunk ${idx + 1}/${chunks.size} retry uploaded after patrol auto-create")
+                            return@onFailure
+                        }
                     }
-                    fail(chunk.size, e); return
+
+                    // Keep items PENDING so no offline data is lost — fail the item batch for retry on next network connection
+                    fail(chunk.size, e)
+                    return
                 }
             }
             dao.markPointsSynced(patrolId)
@@ -263,8 +296,39 @@ object SyncManager {
                     withNetworkRetry { api.postJson("/api/sync/upload", body) }
                     totalUploaded += group.sumOf { it.getJSONArray("records").length() }
                     Log.d(TAG, "Readings group ${groupIdx + 1}/${requestGroups.size} uploaded ($totalUploaded/${patrolReadings.size})")
-                }.onFailure {
-                    fail(patrolReadings.size, it)
+                }.onFailure { err ->
+                    Log.w(TAG, "Readings upload failed for patrol $patrolId: ${err.message}. Attempting patrol auto-create fallback...")
+                    // Attempt to auto-create missing patrol shell on server
+                    val createdShell = runCatching {
+                        api.createPatrol(JSONObject().apply {
+                            put("id", patrolId)
+                            put("type", "WALK")
+                            put("name", "Patrol")
+                        })
+                        true
+                    }.getOrDefault(false)
+
+                    if (createdShell) {
+                        val retrySuccess = runCatching {
+                            val body = JSONObject().apply {
+                                put("patrolId", patrolId)
+                                put("batches", JSONArray().apply {
+                                    group.forEach { put(it) }
+                                })
+                            }
+                            api.postJson("/api/sync/upload", body)
+                            true
+                        }.getOrDefault(false)
+
+                        if (retrySuccess) {
+                            totalUploaded += group.sumOf { it.getJSONArray("records").length() }
+                            Log.d(TAG, "Readings group ${groupIdx + 1}/${requestGroups.size} retry uploaded after patrol auto-create")
+                            return@onFailure
+                        }
+                    }
+
+                    // Keep readings PENDING in Room DB so no offline sensor telemetry is lost
+                    fail(patrolReadings.size, err)
                     return
                 }
             }
