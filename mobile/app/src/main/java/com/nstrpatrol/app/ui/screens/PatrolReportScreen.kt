@@ -305,9 +305,7 @@ fun PatrolReportScreen(
                 DetailRow("Method", s?.patrolMethod ?: "—")
                 DetailRow("Detected movement", s?.detectedMethod ?: "—")
                 DetailRow("Beat", s?.beat ?: "—")
-                DetailRow("Team leader", s?.teamLeader ?: "—")
                 DetailRow("Armed status", s?.armedStatus ?: "—")
-                DetailRow("Members", "${s?.memberCount ?: 0}")
             }
 
             if (s?.startTime != null) {

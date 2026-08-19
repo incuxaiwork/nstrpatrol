@@ -96,13 +96,9 @@
     <string name="patrol_start_patrol_method_ph">Select Patrol Method</string>
     <string name="patrol_start_member_name_ph">Select Member Name</string>
     <string name="patrol_start_arm_type_ph">Select Arm Type</string>
-    <string name="patrol_start_total_members">Total Members Added</string>
     <string name="patrol_start_patrol_type">Patrol Type</string>
     <string name="patrol_start_patrol_method">Patrol Method</string>
     <string name="patrol_start_select_beat">Select Beat</string>
-    <string name="patrol_start_member_name">Member Name</string>
-    <string name="patrol_start_designation">Designation</string>
-    <string name="patrol_start_team_leader">Select Team Leader</string>
     <string name="patrol_start_armed_status">Armed Status</string>
     <string name="patrol_start_arm_used">Arm Used</string>
 

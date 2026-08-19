@@ -69,13 +69,9 @@
     <string name="patrol_start_patrol_method_ph">টহলের পদ্ধতি নির্বাচন করুন</string>
     <string name="patrol_start_member_name_ph">সদস্যের নাম নির্বাচন করুন</string>
     <string name="patrol_start_arm_type_ph">অস্ত্রের ধরন নির্বাচন করুন</string>
-    <string name="patrol_start_total_members">মোট সদস্য যোগ করা হয়েছে</string>
     <string name="patrol_start_patrol_type">টহলের ধরন</string>
     <string name="patrol_start_patrol_method">টহলের পদ্ধতি</string>
     <string name="patrol_start_select_beat">বিট নির্বাচন করুন</string>
-    <string name="patrol_start_member_name">সদস্যের নাম</string>
-    <string name="patrol_start_designation">পদবি</string>
-    <string name="patrol_start_team_leader">টিম লিডার নির্বাচন করুন</string>
     <string name="patrol_start_armed_status">সশস্ত্র অবস্থা</string>
     <string name="patrol_start_arm_used">ব্যবহৃত অস্ত্র</string>
     <string name="reports_title">রিপোর্ট</string>

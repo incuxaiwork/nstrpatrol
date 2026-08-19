@@ -126,10 +126,8 @@ object SyncManager {
                 put("startedAt", session.startTime)
                 session.endTime?.let { put("endedAt", it) }
                 session.patrolMethod?.let { put("patrolMethod", it) }
-                session.teamLeader?.let { put("teamLeader", it) }
                 session.beat?.let { put("beat", it) }
                 session.armedStatus?.let { put("armedStatus", it) }
-                put("memberCount", session.memberCount)
                 put("caloriesEstimate", session.caloriesEstimate)
                 put("heartPointsEstimate", session.heartPointsEstimate)
                 put("avgSpeedKmh", session.avgSpeedKmh)
@@ -595,9 +593,7 @@ object SyncManager {
                 patrolType = detail.optString("type").ifEmpty { null },
                 patrolMethod = detail.optString("patrolMethod").takeIf { it.isNotEmpty() && it != "null" },
                 beat = detail.optString("beat").takeIf { it.isNotEmpty() && it != "null" },
-                teamLeader = detail.optString("teamLeader").takeIf { it.isNotEmpty() && it != "null" },
                 armedStatus = detail.optString("armedStatus").takeIf { it.isNotEmpty() && it != "null" },
-                memberCount = detail.optInt("memberCount", 0),
                 totalDistanceMeters = distanceKm * 1000,
                 totalSteps = steps,
                 moveMinutes = (durationSec / 60).toInt(),
