@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.db.IncidentStatus
 import com.nstrpatrol.app.data.db.IncidentEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -54,8 +55,6 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
-import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 
 /**
@@ -100,8 +99,7 @@ fun IncidentDetailScreen(
         val gpsText = if (incident!!.latitude != null && incident!!.longitude != null)
             String.format(Locale.US, "%.4f° N, %.4f° E", incident!!.latitude, incident!!.longitude)
         else null
-        val timeText = SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US)
-            .format(Date(incident!!.occurredAt))
+        val timeText = IndiaTime.panel(incident!!.occurredAt)
 
         Spacer(Modifier.height(12.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

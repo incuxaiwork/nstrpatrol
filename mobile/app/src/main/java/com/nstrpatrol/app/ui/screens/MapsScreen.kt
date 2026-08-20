@@ -95,6 +95,8 @@ import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.withContext
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
@@ -186,17 +188,27 @@ fun MapsScreen(
     var moveMinutes by remember { mutableStateOf(0) }
 
     LaunchedEffect(isRunning, tick) {
-        val pid = patrolTimer.patrolId
-        if (pid != null && isRunning) {
+        // While a patrol is live, load its points; otherwise (e.g. the app was
+        // restarted mid-patrol, so the in-memory timer is lost, or the last
+        // patrol has ended) fall back to the most recent local session so the
+        // travelled path is still visible on the map.
+        val pid = if (isRunning) {
+            patrolTimer.patrolId
+        } else {
+            dao.allPatrolSessions().firstOrNull()?.firstOrNull()?.patrolId
+        }
+        if (pid != null) {
             patrolPoints = dao.patrolPointsOrdered(pid)
             totalDistance = computeDistance(patrolPoints)
-            avgSpeed = if (patrolPoints.size >= 2) {
-                val first = patrolPoints.first().timestamp
-                val last = patrolPoints.last().timestamp
-                val dur = (last - first) / 3_600_000.0
-                if (dur > 0) (totalDistance / 1000) / dur else 0.0
-            } else 0.0
-            moveMinutes = dao.activeMovementSamplesForPatrol(pid) * 5 / 60
+            if (isRunning) {
+                avgSpeed = if (patrolPoints.size >= 2) {
+                    val first = patrolPoints.first().timestamp
+                    val last = patrolPoints.last().timestamp
+                    val dur = (last - first) / 3_600_000.0
+                    if (dur > 0) (totalDistance / 1000) / dur else 0.0
+                } else 0.0
+                moveMinutes = dao.activeMovementSamplesForPatrol(pid) * 5 / 60
+            }
         }
     }
 

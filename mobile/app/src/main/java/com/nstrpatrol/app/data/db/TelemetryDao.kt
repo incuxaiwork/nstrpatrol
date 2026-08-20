@@ -236,6 +236,16 @@ interface TelemetryDao {
     @Query("UPDATE patrol_sessions SET status = :status WHERE patrolId = :patrolId")
     suspend fun updatePatrolStatus(patrolId: String, status: String)
 
+    /** Finalizes an ACTIVE session whose in-memory patrol timer is gone (e.g.
+     *  after an app restart), so it stops showing as a live patrol and its
+     *  recorded points can sync as a completed patrol. */
+    @Query(
+        "UPDATE patrol_sessions SET status = 'COMPLETED', endTime = :endTime, " +
+        "pointCount = (SELECT COUNT(*) FROM patrol_points WHERE patrolId = :patrolId) " +
+        "WHERE patrolId = :patrolId AND status = 'ACTIVE'"
+    )
+    suspend fun finalizeStaleActivePatrol(patrolId: String, endTime: Long)
+
     @Query("SELECT * FROM patrol_sessions WHERE syncStatus = 'PENDING'")
     suspend fun sessionsToSync(): List<PatrolSessionEntity>
 

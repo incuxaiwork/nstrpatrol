@@ -355,7 +355,10 @@ class TelemetryRecorder(
             if (mode != MovementMode.UNKNOWN && best.confidence >= AppConfig.AR_MIN_CONFIDENCE) {
                 return MovementInfo(
                     mode = mode,
-                    confidence = best.confidence.toFloat(),
+                    // GMS DetectedActivity confidence is 0..100; normalize to
+                    // 0..1 so every consumer (recorder, upload, report) and the
+                    // backend schema agree on the range.
+                    confidence = (best.confidence.toFloat() / 100f).coerceIn(0f, 1f),
                     source = ModeSource.GMS_ACTIVITY_RECOGNITION,
                     speedKmh = speedKmh,
                     stepCadence = cadence

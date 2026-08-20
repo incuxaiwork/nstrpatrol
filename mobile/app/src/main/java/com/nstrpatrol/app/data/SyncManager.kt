@@ -2,6 +2,7 @@ package com.nstrpatrol.app.data
 
 import android.util.Log
 import com.nstrpatrol.app.data.db.TelemetryDao
+import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.SensorReadingEntity
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
@@ -177,16 +178,7 @@ object SyncManager {
                 runCatching {
                     val records = JSONArray()
                     for (p in chunk) {
-                        records.put(JSONObject().apply {
-                            put("patrolId", p.patrolId)
-                            put("timestamp", p.timestamp)
-                            put("latitude", p.latitude)
-                            put("longitude", p.longitude)
-                            p.altitude?.let { put("altitude", it) }
-                            p.speed?.let { put("speed", it.toDouble()) }
-                            p.bearing?.let { put("bearing", it.toDouble()) }
-                            p.accuracy?.let { put("accuracy", it.toDouble()) }
-                        })
+                        records.put(pointRecord(p))
                     }
                     val body = JSONObject().apply {
                         put("patrolId", patrolId)
@@ -211,16 +203,7 @@ object SyncManager {
                     if (createdShell) {
                         val records = JSONArray()
                         for (p in chunk) {
-                            records.put(JSONObject().apply {
-                                put("patrolId", p.patrolId)
-                                put("timestamp", p.timestamp)
-                                put("latitude", p.latitude)
-                                put("longitude", p.longitude)
-                                p.altitude?.let { put("altitude", it) }
-                                p.speed?.let { put("speed", it.toDouble()) }
-                                p.bearing?.let { put("bearing", it.toDouble()) }
-                                p.accuracy?.let { put("accuracy", it.toDouble()) }
-                            })
+                            records.put(pointRecord(p))
                         }
                         val body = JSONObject().apply {
                             put("patrolId", patrolId)
@@ -285,8 +268,8 @@ object SyncManager {
                                 "movement-mode" -> {
                                     val modeCode = r.value?.toInt() ?: 0
                                     put("mode", MovementMode.fromCode(modeCode).name)
-                                    r.x?.let { put("confidence", it.toDouble()) }
-                                    r.y?.let { put("speedKmh", it.toDouble()) }
+                                    r.x?.let { put("confidence", it.coerceIn(0f, 1f).toDouble()) }
+                                    r.y?.takeIf { it > 0f }?.let { put("speedKmh", it.toDouble()) }
                                 }
                                 else -> {
                                     r.x?.let { put("x", it.toDouble()) }
@@ -903,6 +886,20 @@ object SyncManager {
         "VEHICLE", "Motor Cycle", "Four Wheeler", "Boat", "Aerial" -> "VEHICLE"
         "STATIONARY" -> "STATIONARY"
         else -> "WALK"
+    }
+
+    /** Builds an upload record for a patrol point, dropping fields whose raw
+     *  sensor values would be rejected by the backend (negative speed/accuracy,
+     *  bearing out of 0..360) so one noisy fix never fails a whole batch. */
+    private fun pointRecord(p: PatrolPointEntity): JSONObject = JSONObject().apply {
+        put("patrolId", p.patrolId)
+        put("timestamp", p.timestamp)
+        put("latitude", p.latitude)
+        put("longitude", p.longitude)
+        p.altitude?.let { put("altitude", it) }
+        p.speed?.let { s -> if (s >= 0f && s.isFinite()) put("speed", s.toDouble()) }
+        p.bearing?.let { b -> if (b in 0f..360f) put("bearing", b.toDouble()) }
+        p.accuracy?.let { a -> if (a >= 0f && a.isFinite()) put("accuracy", a.toDouble()) }
     }
 
     private fun buildPatrolName(session: com.nstrpatrol.app.data.db.PatrolSessionEntity): String {

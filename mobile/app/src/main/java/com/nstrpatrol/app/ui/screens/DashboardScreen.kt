@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.AuthUser
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.db.DailyActivityEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -58,9 +59,7 @@ import com.nstrpatrol.app.ui.theme.PaleForest
 import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
+import kotlinx.coroutines.delay
 
 @Composable
 fun DashboardScreen(
@@ -85,7 +84,7 @@ fun DashboardScreen(
         }
     }
     val satTimeText = timeState.satelliteUtcMillis?.let {
-        SimpleDateFormat("EEE, dd MMM yyyy · HH:mm:ss z", Locale.US).format(Date(it))
+        IndiaTime.format("EEE, dd MMM yyyy · HH:mm:ss z", it)
     }
     tick
     val durationText = if (patrolTimer.running.value) patrolTimer.elapsedFormatted() else "—"

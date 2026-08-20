@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.AppConfig
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.db.MovementSample
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
@@ -92,7 +93,6 @@ import org.maplibre.android.style.sources.RasterSource
 import org.maplibre.android.style.sources.TileSet
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
-import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 
@@ -158,7 +158,6 @@ fun PatrolReportScreen(
         expectedCategory != null &&
         detectedCategory != expectedCategory
     val detectedLabel = s?.detectedMethod ?: "Unknown"
-    val dateFormat = remember { SimpleDateFormat("dd MMM yyyy, HH:mm", Locale.US) }
 
     // Single embedded tile server shared by the inline and fullscreen maps so
     // opening fullscreen doesn't try to re-bind the same port.
@@ -320,9 +319,9 @@ fun PatrolReportScreen(
                         .background(Surface)
                         .padding(14.dp)
                 ) {
-                    DetailRow("Start time", dateFormat.format(Date(s.startTime)))
+                    DetailRow("Start time", IndiaTime.full(s.startTime))
                     if (s.endTime != null) {
-                        DetailRow("End time", dateFormat.format(Date(s.endTime)))
+                        DetailRow("End time", IndiaTime.full(s.endTime))
                     }
                     DetailRow("Sync status", s.syncStatus)
                 }
@@ -503,8 +502,7 @@ private fun buildMovementSegments(
     return result
 }
 
-private fun formatTime(millis: Long): String =
-    SimpleDateFormat("HH:mm:ss", Locale.US).format(Date(millis))
+private fun formatTime(millis: Long): String = IndiaTime.clock(millis)
 
 private fun formatMoveDuration(millis: Long): String {
     val totalSec = millis / 1000

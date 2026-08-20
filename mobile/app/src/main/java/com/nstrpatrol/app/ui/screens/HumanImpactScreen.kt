@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.data.capturedLocationText
 import com.nstrpatrol.app.data.submitIncident
@@ -33,9 +34,6 @@ import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.components.SelectField
 import com.nstrpatrol.app.ui.components.SeverityControl
 import com.nstrpatrol.app.ui.navigation.BottomTab
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun HumanImpactScreen(
@@ -54,9 +52,9 @@ fun HumanImpactScreen(
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "human_impact"
-    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
     val capturedGps = remember { capturedLocationText(context) }
-    val capturedTime = remember { SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US).format(Date()) }
+    val capturedTime = IndiaTime.panel(System.currentTimeMillis())
 
     val titles = mapOf(
         "impact" to "Human Impact Type",
@@ -84,7 +82,11 @@ fun HumanImpactScreen(
                 actionText = "Take photo",
                 hint = "Open camera to capture the impact",
                 photoPaths = photoPaths,
-                onClick = { onOpenCamera(photoSlot) }
+                onClick = { onOpenCamera(photoSlot) },
+                onRemovePhoto = { path ->
+                    PhotoStore.removePath(photoSlot, path)
+                    photoPaths = PhotoStore.paths(photoSlot)
+                }
             )
 
             Spacer(Modifier.height(16.dp))
