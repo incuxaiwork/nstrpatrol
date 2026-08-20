@@ -129,6 +129,7 @@ object SyncManager {
                 session.patrolMethod?.let { put("patrolMethod", it) }
                 session.beat?.let { put("beat", it) }
                 session.armedStatus?.let { put("armedStatus", it) }
+                put("faceVerified", session.faceVerified)
                 put("caloriesEstimate", session.caloriesEstimate)
                 put("heartPointsEstimate", session.heartPointsEstimate)
                 put("avgSpeedKmh", session.avgSpeedKmh)

@@ -95,6 +95,7 @@ model Patrol {
   heartPointsEstimate   Float?
   avgSpeedKmh           Float?
   detectedMethod        String?
+  faceVerified          Boolean                @default(false)
   accelerometerReadings AccelerometerReading[]
   activitySegments      ActivitySegment[]
   barometerReadings     BarometerReading[]

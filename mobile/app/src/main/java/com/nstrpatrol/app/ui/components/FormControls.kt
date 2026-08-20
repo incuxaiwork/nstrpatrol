@@ -129,30 +129,32 @@ fun SelectField(
     value: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    isError: Boolean = false
+    isError: Boolean = false,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(44.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Surface)
+            .background(if (enabled) Surface else SurfaceVariant)
             .border(1.dp, if (isError) ErrorRed else OutlineSoft, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = value ?: placeholder,
             modifier = Modifier.weight(1f),
-            color = if (value != null) TextPrimary else if (isError) ErrorRed else TextSecondary,
+            color = if (!enabled) TextSecondary.copy(alpha = 0.45f)
+            else if (value != null) TextPrimary else if (isError) ErrorRed else TextSecondary,
             fontSize = 14.sp,
             fontWeight = FontWeight.Normal
         )
         Icon(
             imageVector = Icons.Filled.ArrowDropDown,
             contentDescription = "Select",
-            tint = TextSecondary
+            tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
         )
     }
 }
