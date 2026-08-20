@@ -35,6 +35,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.SyncController
 import com.nstrpatrol.app.data.SyncController.SyncState
 import com.nstrpatrol.app.data.db.IncidentEntity
@@ -51,9 +52,6 @@ import com.nstrpatrol.app.ui.theme.Surface
 import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import com.nstrpatrol.app.ui.theme.WarningAmber
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -173,7 +171,7 @@ fun LogsScreen(
 
         val items = buildList {
             if (timeState.tamperDetected) {
-                val stamp = SimpleDateFormat("HH:mm", Locale.US).format(Date())
+                val stamp = IndiaTime.format("HH:mm", System.currentTimeMillis())
                 add(
                     LogItem(
                         title = if (timeState.gnssTimeAvailable)
@@ -194,7 +192,7 @@ fun LogsScreen(
                 add(
                     LogItem(
                         title = "${categoryLabel(incidentCategory(inc.type))}: ${inc.title}",
-                        time = SimpleDateFormat("dd MMM, HH:mm", Locale.US).format(Date(inc.occurredAt)),
+                        time = IndiaTime.card(inc.occurredAt),
                         level = level
                     )
                 )

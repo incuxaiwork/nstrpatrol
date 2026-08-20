@@ -38,6 +38,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.db.IncidentStatus
 import com.nstrpatrol.app.data.db.IncidentEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
@@ -61,9 +62,6 @@ import com.nstrpatrol.app.ui.theme.TextPrimary
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 /**
  * Report category chooser. Per the Penpot flow this page is only the category
@@ -239,8 +237,7 @@ fun statusOf(status: String): IncidentStatus = when (status.uppercase()) {
     else -> IncidentStatus.SUBMITTED
 }
 
-private fun formatIncidentDate(millis: Long): String =
-    SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US).format(Date(millis))
+private fun formatIncidentDate(millis: Long): String = IndiaTime.panel(millis)
 
 private fun incidentStatusStyle(status: IncidentStatus): Pair<Color, Color> = when (status) {
     IncidentStatus.SUBMITTED -> IncidentSubmitted to ChipSubmitted

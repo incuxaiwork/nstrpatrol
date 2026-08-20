@@ -15,15 +15,13 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.data.capturedLocationText
 import com.nstrpatrol.app.data.submitIncident
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.AutoCapturedPanel
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.FormSheet
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -62,7 +60,7 @@ fun WaterSourceScreen(
     val photoSlot = "water_source"
     var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
     val capturedGps = remember { capturedLocationText(context) }
-    val capturedTime = remember { SimpleDateFormat("dd MMM yyyy · hh:mm a", Locale.US).format(Date()) }
+    val capturedTime = IndiaTime.panel(System.currentTimeMillis())
 
     val titles = mapOf(
         "source_type" to "Water Source Type",
