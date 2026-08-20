@@ -1,7 +1,17 @@
--- AlterTable
--- Drift repair: the deployment database recorded 20260818201823_patrol_session_fields
--- as applied but never received its "memberCount" and "teamLeader" columns
--- (every other column from that migration exists). Restore the missing columns
--- to match the Prisma schema exactly. Both columns are additive and nullable-safe.
-ALTER TABLE "Patrol" ADD COLUMN "memberCount" INTEGER NOT NULL DEFAULT 0,
-ADD COLUMN "teamLeader" TEXT;
+-- No-op
+-- 20260819120000_drop_patrol_session_team_fields (shipped upstream in the
+-- "remove team leader, member count" feature) intentionally drops
+-- "memberCount" and "teamLeader" from "Patrol" while the frontend/mobile v8
+-- also stopped sending them. This migration originally re-added those columns
+-- to repair drift between the schema and the deployment database. That repair
+-- has been superseded: the correct convergence is to REMOVE the fields.
+--
+-- Fresh databases applying the full history must NOT re-add the columns, so
+-- this migration is a no-op. For live databases that already applied the
+-- original ADD (this file's previous content:
+-- ALTER TABLE "Patrol" ADD COLUMN "memberCount" INTEGER NOT NULL DEFAULT 0,
+-- ADD COLUMN "teamLeader" TEXT;),
+-- the columns are dropped via the upstream 20260819120000 migration on the
+-- next deploy, or via the documented hand-run `prisma db execute` for the
+-- currently-deployed database.
+SELECT 1;
