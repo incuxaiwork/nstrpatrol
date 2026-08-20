@@ -1,8 +1,10 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../db/prisma';
 import { requireAdmin, requireAuth } from '../middleware/auth';
 import { validateBody } from '../middleware/validate';
+import { incidentScopeFilter, isDivisionWide, patrolScopeFilter } from '../lib/scope';
 
 export const sosRouter = Router();
 export const alertsRouter = Router();
@@ -16,6 +18,15 @@ const sosSchema = z.object({
   accuracy: z.number().finite().nonnegative().nullish(),
   message: z.string().trim().max(500).nullish(),
 });
+
+const CADER_CONTACTS = ['FRO', 'DyRO', 'DFO', 'DyDFO'] as const;
+
+function contactsQuery() {
+  return prisma.user.findMany({
+    where: { isActive: true, OR: [{ role: 'ADMIN' }, { cader: { in: [...CADER_CONTACTS] } }] },
+    select: { id: true, fullName: true, phone: true, role: true, cader: true },
+  });
+}
 
 sosRouter.post('/', validateBody(sosSchema), async (req, res) => {
   const body = req.body;
@@ -39,20 +50,14 @@ sosRouter.post('/', validateBody(sosSchema), async (req, res) => {
     },
   });
 
-  const contacts = await prisma.user.findMany({
-    where: { isActive: true, OR: [{ role: 'ADMIN' }, { cader: { in: ['FRO', 'DyRO'] } }] },
-    select: { id: true, fullName: true, phone: true, role: true, cader: true },
-  });
+  const contacts = await contactsQuery();
 
   // Push notification wiring is pending (see implementation_status.md §10).
   res.status(201).json({ incident, emergencyContacts: contacts, pushSent: false });
 });
 
 sosRouter.get('/contacts', async (req, res) => {
-  const contacts = await prisma.user.findMany({
-    where: { isActive: true, OR: [{ role: 'ADMIN' }, { cader: { in: ['FRO', 'DyRO'] } }] },
-    select: { id: true, fullName: true, phone: true, role: true, cader: true },
-  });
+  const contacts = await contactsQuery();
   res.json(contacts);
 });
 
@@ -66,13 +71,25 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
   const since = parsed.success ? parsed.data.since : undefined;
   const take = parsed.success ? parsed.data.limit ?? 50 : 50;
 
+  const incidentWhere: Prisma.IncidentWhereInput = {
+    severity: 'HIGH',
+    status: { in: ['SUBMITTED', 'VERIFIED'] },
+    ...(since ? { occurredAt: { gte: since } } : {}),
+  };
+  if (!isDivisionWide(req.user!)) {
+    const scopeFilter = await incidentScopeFilter(req.user!);
+    if (scopeFilter) incidentWhere.AND = [scopeFilter];
+  }
+
+  const patrolWhere: Prisma.PatrolWhereInput = since ? { updatedAt: { gte: since } } : {};
+  if (!isDivisionWide(req.user!)) {
+    const scopeFilter = await patrolScopeFilter(req.user!);
+    if (scopeFilter) patrolWhere.AND = [scopeFilter];
+  }
+
   const [sosIncidents, tamperLogs, coverageEvents] = await Promise.all([
     prisma.incident.findMany({
-      where: {
-        severity: 'HIGH',
-        status: { in: ['SUBMITTED', 'VERIFIED'] },
-        ...(since ? { occurredAt: { gte: since } } : {}),
-      },
+      where: incidentWhere,
       orderBy: { occurredAt: 'desc' },
       take,
       include: { user: { select: { id: true, fullName: true, phone: true, cader: true } } },
@@ -81,6 +98,7 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
       where: {
         tamperDetected: true,
         ...(since ? { timestamp: { gte: since } } : {}),
+        ...(isDivisionWide(req.user!) ? {} : { patrol: patrolWhere as never }),
       },
       orderBy: { timestamp: 'desc' },
       take,
@@ -90,6 +108,7 @@ alertsRouter.get('/', requireAdmin, async (req, res) => {
       where: {
         type: { in: ['MOCK_LOCATION', 'SPEED_MISMATCH', 'JUMP', 'OUTSIDE_BEAT'] },
         ...(since ? { timestamp: { gte: since } } : {}),
+        ...(isDivisionWide(req.user!) ? {} : { patrol: patrolWhere as never }),
       },
       orderBy: { timestamp: 'desc' },
       take,

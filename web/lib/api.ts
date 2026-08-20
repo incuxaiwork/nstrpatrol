@@ -110,8 +110,52 @@ async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
     method: opts.method ?? "GET",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
+    // GETs may be served from the HTTP cache (GIS layers declare max-age);
+    // mutations stay no-store.
+    cache: (opts.method ?? "GET") === "GET" ? "default" : "no-store",
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* GET cache + single-flight dedupe                                    */
+/* ------------------------------------------------------------------ */
+
+const ttlCache = new Map<string, { at: number; value: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+const DEFAULT_TTL_MS = 30_000;
+
+function cacheKey(method: string, url: string): string {
+  return `${method} ${url}`;
+}
+
+/** Drops cached GET responses (called automatically after mutations). */
+export function invalidateCache(): void {
+  ttlCache.clear();
+}
+
+/** Cached, deduped GET. Concurrent identical GETs share one request. */
+async function cachedGet<T>(method: string, url: string, ttlMs: number, run: () => Promise<T>): Promise<T> {
+  const key = cacheKey(method, url);
+
+  const hit = ttlCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
+
+  const pending = inflight.get(key);
+  if (pending) return pending as Promise<T>;
+
+  const promise = run().then(
+    (value) => {
+      inflight.delete(key);
+      ttlCache.set(key, { at: Date.now(), value });
+      return value;
+    },
+    (err: unknown) => {
+      inflight.delete(key);
+      throw err;
+    }
+  );
+  inflight.set(key, promise);
+  return promise;
 }
 
 async function parseBody(res: Response): Promise<unknown> {
@@ -125,40 +169,55 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 export async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  let res = await rawRequest(path, opts);
+  const method = opts.method ?? "GET";
+  const url = new URL(`${API_BASE}${path}`);
 
-  // One-shot refresh-and-retry on session expiry.
-  if (res.status === 401 && refreshToken && opts.auth !== false) {
-    try {
-      const refreshed = await rawRequest("/api/auth/refresh", {
-        method: "POST",
-        body: { refreshToken },
-      });
-      if (refreshed.ok) {
-        const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
-        setTokens(data.accessToken, data.refreshToken);
-        res = await rawRequest(path, opts);
-      } else {
+  const run = async (): Promise<T> => {
+    let res = await rawRequest(path, opts);
+
+    // One-shot refresh-and-retry on session expiry.
+    if (res.status === 401 && refreshToken && opts.auth !== false) {
+      try {
+        const refreshed = await rawRequest("/api/auth/refresh", {
+          method: "POST",
+          body: { refreshToken },
+        });
+        if (refreshed.ok) {
+          const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
+          setTokens(data.accessToken, data.refreshToken);
+          res = await rawRequest(path, opts);
+        } else {
+          clearTokens();
+        }
+      } catch {
         clearTokens();
       }
-    } catch {
-      clearTokens();
     }
+
+    if (!res.ok) {
+      let code = "http_error";
+      let message = `Request failed (${res.status})`;
+      try {
+        const payload = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (payload?.error) {
+          code = payload.error.code ?? code;
+          message = payload.error.message ?? message;
+        }
+      } catch { /* non-JSON error body */ }
+      throw new ApiError(res.status, code, message);
+    }
+    return (await parseBody(res)) as T;
+  };
+
+  // Mutations bust the cache so fresh data is always read next navigation.
+  if (method !== "GET") {
+    const value = await run();
+    invalidateCache();
+    return value;
   }
 
-  if (!res.ok) {
-    let code = "http_error";
-    let message = `Request failed (${res.status})`;
-    try {
-      const payload = (await res.json()) as { error?: { code?: string; message?: string } };
-      if (payload?.error) {
-        code = payload.error.code ?? code;
-        message = payload.error.message ?? message;
-      }
-    } catch { /* non-JSON error body */ }
-    throw new ApiError(res.status, code, message);
-  }
-  return (await parseBody(res)) as T;
+  // GETs are cached (TTL) and deduped while in flight.
+  return cachedGet<T>(method, url.toString(), DEFAULT_TTL_MS, run);
 }
 
 /* ------------------------------------------------------------------ */

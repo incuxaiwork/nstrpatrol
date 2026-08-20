@@ -90,7 +90,8 @@ import type { ApiMapAsset, ApiIncident, ApiPatrol } from "@/lib/api";
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
-const delay = (ms = 300) => new Promise<void>((r) => setTimeout(r, ms));
+/* Mock paths resolve on the next microtask — no artificial latency. */
+const delay = (_ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, _ms));
 
 /**
  * Strict remote call: NO mock fallback. Any failure (network, 401, business
@@ -597,6 +598,8 @@ export const gis = {
     compartments: CompartmentPolygon[];
     boundary: BoundaryPolygon[];
     grids: GridPolygon[];
+    /** Real lon/lat extent every layer shares (projection anchor). */
+    extent: GeoExtent | null;
   }> => {
     const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
       api.gis.beats(),
@@ -610,6 +613,7 @@ export const gis = {
       compartments: compartmentsFromGeoJson(compFc, extent),
       boundary: boundariesFromGeoJson(boundaryFc, extent),
       grids: gridsFromGeoJson(gridFc, extent),
+      extent,
     };
   },
   beats: async (): Promise<BeatPolygon[]> => (await gis.spatial()).beats,
@@ -619,6 +623,8 @@ export const gis = {
   boundary: async (): Promise<BoundaryPolygon[]> => (await gis.spatial()).boundary,
   /** Reference grid cells (GeoJSON → SVG polygons). */
   grids: async (): Promise<GridPolygon[]> => (await gis.spatial()).grids,
+  /** Real lon/lat extent the shared GIS projection is anchored to. */
+  extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => api.gis.assets(),
   /** Incident markers projected into the shared SVG space — real records. */

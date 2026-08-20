@@ -18,6 +18,10 @@ export const userSelect = {
   phone: true,
   isActive: true,
   isAdmin: true,
+  divisionId: true,
+  subDivisionId: true,
+  rangeId: true,
+  beatId: true,
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;

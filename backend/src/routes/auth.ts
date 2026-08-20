@@ -18,7 +18,7 @@ const registerSchema = z.object({
   password: passwordSchema,
   fullName: z.string().trim().min(1).max(120),
   role: z.enum(['ADMIN', 'RANGER']).default('RANGER'),
-  cader: z.enum(['FRO', 'DyRO', 'FSO', 'FBO', 'ABO']).default('FBO'),
+  cader: z.enum(['DFO', 'DyDFO', 'FRO', 'DyRO', 'FSO', 'FBO', 'ABO']).default('FBO'),
   phone: z.string().trim().max(30).nullish(),
 });
 

@@ -13,7 +13,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { MapWorkspace } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
 import { Dialog } from "@/components/overlays";
 import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";

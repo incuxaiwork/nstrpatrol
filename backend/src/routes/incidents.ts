@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import type { Request } from 'express';
 import multer from 'multer';
 import { z } from 'zod';
 import { Prisma } from '@prisma/client';
@@ -8,13 +9,11 @@ import { validateBody, validateQuery } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { param } from '../lib/http';
 import { storeBuffer } from '../services/storage';
+import { applyIncidentWhere, incidentVisibleTo } from '../lib/scope';
 
 export const incidentsRouter = Router();
 
 incidentsRouter.use(requireAuth);
-
-const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
-  req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 export const incidentCreateSchema = z.object({
   id: z.string().min(1).max(50).nullish(),
@@ -72,16 +71,16 @@ const incidentListQuery = z.object({
 
 incidentsRouter.get('/', validateQuery(incidentListQuery), async (req, res) => {
   const q = req.query as z.infer<typeof incidentListQuery>;
-  const where: Record<string, unknown> = {};
-  if (q.mine === 'true' || !isAdmin(req)) where.userId = req.user!.id;
-  if (q.status) where.status = q.status;
-  if (q.type) where.type = q.type;
+  const base: Record<string, unknown> = {};
+  if (q.status) base.status = q.status;
+  if (q.type) base.type = q.type;
   if (q.from || q.to) {
-    where.occurredAt = {
+    base.occurredAt = {
       ...(q.from ? { gte: q.from } : {}),
       ...(q.to ? { lte: q.to } : {}),
     };
   }
+  const where = await applyIncidentWhere(req.user!, base as never, { mine: q.mine === 'true' });
 
   const incidents = await prisma.incident.findMany({
     where,
@@ -94,13 +93,22 @@ incidentsRouter.get('/', validateQuery(incidentListQuery), async (req, res) => {
 incidentsRouter.get('/:id', async (req, res) => {
   const incident = await prisma.incident.findUnique({ where: { id: param(req, 'id') } });
   if (!incident) throw new HttpError(404, 'not_found', 'Incident not found');
-  if (!isAdmin(req) && incident.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own incidents');
+  if (!(await incidentVisibleTo(req.user!, incident))) {
+    throw new HttpError(403, 'forbidden', 'You can only view incidents within your scope');
   }
   res.json(incident);
 });
 
+async function assertIncidentInScope(req: Request, id: string): Promise<void> {
+  const incident = await prisma.incident.findUnique({ where: { id } });
+  if (!incident) throw new HttpError(404, 'not_found', 'Incident not found');
+  if (!(await incidentVisibleTo(req.user!, incident))) {
+    throw new HttpError(403, 'forbidden', 'You can only manage incidents within your scope');
+  }
+}
+
 incidentsRouter.post('/:id/verify', requireAdmin, async (req, res) => {
+  await assertIncidentInScope(req, param(req, 'id'));
   const updated = await prisma.incident.update({
     where: { id: param(req, 'id') },
     data: { status: 'VERIFIED', verifiedById: req.user!.id, verifiedAt: new Date() },
@@ -113,6 +121,7 @@ const resolveSchema = z.object({
 });
 
 incidentsRouter.post('/:id/resolve', requireAdmin, validateBody(resolveSchema), async (req, res) => {
+  await assertIncidentInScope(req, param(req, 'id'));
   const updated = await prisma.incident.update({
     where: { id: param(req, 'id') },
     data: { status: 'RESOLVED', resolutionNote: req.body.resolutionNote ?? null },
@@ -121,6 +130,7 @@ incidentsRouter.post('/:id/resolve', requireAdmin, validateBody(resolveSchema), 
 });
 
 incidentsRouter.post('/:id/reject', requireAdmin, validateBody(resolveSchema), async (req, res) => {
+  await assertIncidentInScope(req, param(req, 'id'));
   const updated = await prisma.incident.update({
     where: { id: param(req, 'id') },
     data: { status: 'REJECTED', resolutionNote: req.body.resolutionNote ?? null },
@@ -133,8 +143,8 @@ const photo = multer({ storage: multer.memoryStorage(), limits: { fileSize: 15 *
 incidentsRouter.post('/:id/photo-upload', photo.single('file'), async (req, res) => {
   const incident = await prisma.incident.findUnique({ where: { id: param(req, 'id') } });
   if (!incident) throw new HttpError(404, 'not_found', 'Incident not found');
-  if (!isAdmin(req) && incident.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only add photos to your own incidents');
+  if (!(await incidentVisibleTo(req.user!, incident))) {
+    throw new HttpError(403, 'forbidden', 'You can only add photos to incidents within your scope');
   }
   if (!req.file) throw new HttpError(400, 'validation_error', 'file field is required');
 

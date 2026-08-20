@@ -16,7 +16,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { StatRow } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
-import { MapWorkspace } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";

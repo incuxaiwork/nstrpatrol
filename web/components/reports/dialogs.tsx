@@ -14,7 +14,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { jurisdictionLabel as jurisdictionLabelOf, resolveJurisdiction } from "@/lib/jurisdiction";
 import { Badge, Field, Select } from "@/components/ui";
 import { DataTable, StatRow, Timeline } from "@/components/data";
-import { MapWorkspace } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
 import { LoadingState } from "@/components/ui/loading";
 import { ReportDialog } from "@/components/reports/ReportDialog";
 import { ReportButton } from "@/components/reports/ReportButton";

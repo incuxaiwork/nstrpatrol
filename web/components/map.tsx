@@ -24,20 +24,31 @@ import {
   Map as MapLibreMap,
   NavigationControl,
   LngLatBounds,
+  setWorkerUrl,
   type MapMouseEvent,
   type ExpressionSpecification,
   type FilterSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+
+// Next/Turbopack rewrites `import.meta.url` so maplibre-gl v6's
+// defaultWorkerUrl() cannot resolve a worker chunk URL and instead spawns a
+// dead `new Worker("")` whose messages are silently dropped — the entire map
+// data pipeline then never completes. Serve the worker bundle from /public.
+if (typeof window !== "undefined") {
+  setWorkerUrl(new URL("/maplibre-gl-worker.mjs", window.location.href).href);
+}
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
-import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel } from "@/lib/forest-context";
+import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
 import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
+import type { TaggedGrid } from "@/lib/grid-regions";
 import { unitName } from "@/lib/mock/hierarchy";
 import { categoryMeta } from "@/lib/mock/observations";
 import type { Observation, Ranger } from "@/lib/types";
 import {
+  analysisGridsToFeatures,
   beatsToFeatures,
   boundariesToFeatures,
   compartmentLabelsToFeatures,
@@ -71,7 +82,18 @@ export interface MapProps {
   liveBeats?: BeatPolygon[];
   compartments?: CompartmentPolygon[];
   boundary?: BoundaryPolygon[];
+  /** Reference backend ForestGrid cells (survey grid, ~3.3 km). */
   grids?: GridPolygon[];
+  /** Attribute-registered analysis-grid cells (frontend-generated, configurable size). */
+  analysisGrids?: TaggedGrid[];
+  /** Active analysis-grid cell size (drives label + tooltip). */
+  gridSize?: GridSizeKey;
+  /** Analysis-grid cells currently selected (deterministic cell ids). */
+  selectedGridIds?: ReadonlySet<string>;
+  /** A grid cell was clicked (toggle handled by the parent). */
+  onGridClick?(id: string): void;
+  /** Hover entry/exit on an analysis-grid cell. */
+  onGridHover?(id: string | null): void;
   markers?: GisMarker[];
   routes?: GisRoute[];
   heat?: HeatBlock[];
@@ -115,6 +137,7 @@ export interface ForestLayerState {
   beats: boolean;
   ranges: boolean;
   compartments: boolean;
+  analysisGrid: boolean;
   grids: boolean;
   routes: boolean;
   rangers: boolean;
@@ -131,6 +154,7 @@ export const DEFAULT_LAYER_STATE: ForestLayerState = {
   beats: true,
   ranges: true,
   compartments: true,
+  analysisGrid: true,
   grids: false,
   routes: true,
   rangers: true,
@@ -140,21 +164,24 @@ export const DEFAULT_LAYER_STATE: ForestLayerState = {
   heat: false,
 };
 
-const LAYER_ROWS: { key: keyof ForestLayerState; title: string; subtitle: string }[] = [
-  { key: "basemap", title: "MBTiles Basemap", subtitle: "Offline raster atlas (NSTR.mbtiles)" },
-  { key: "satellite", title: "Satellite Imagery", subtitle: "Esri World Imagery (online)" },
-  { key: "boundary", title: "Reserve Boundary", subtitle: "Reserve outline & name label" },
-  { key: "beats", title: "Forest Beat Boundaries", subtitle: "44 Markapur Division beats" },
-  { key: "ranges", title: "Ranges", subtitle: "Range division outlines & labels" },
-  { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
-  { key: "grids", title: `${gridSizeLabel(DEFAULT_GRID_SIZE)} Grid`, subtitle: "Survey grid overlay (backend cells)" },
-  { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
-  { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
-  { key: "markers", title: "Sightings & Incidents", subtitle: "Observation, incident & SOS points" },
-  { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-  { key: "coverage", title: "Coverage Tint", subtitle: "Orange tint by patrol coverage" },
-  { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
-];
+function layerRows(gridSize: GridSizeKey): { key: keyof ForestLayerState; title: string; subtitle: string }[] {
+  return [
+    { key: "basemap", title: "MBTiles Basemap", subtitle: "Offline raster atlas (NSTR.mbtiles)" },
+    { key: "satellite", title: "Satellite Imagery", subtitle: "Esri World Imagery (online)" },
+    { key: "boundary", title: "Reserve Boundary", subtitle: "Reserve outline & name label" },
+    { key: "beats", title: "Forest Beat Boundaries", subtitle: "44 Markapur Division beats" },
+    { key: "ranges", title: "Ranges", subtitle: "Range division outlines & labels" },
+    { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
+    { key: "analysisGrid", title: `${gridSizeLabel(gridSize)} Analysis Grid`, subtitle: "Configurable cells over the forest area" },
+    { key: "grids", title: "Reference Grid", subtitle: "Backend ForestGrid survey cells" },
+    { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
+    { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
+    { key: "markers", title: "Sightings & Incidents", subtitle: "Observation, incident & SOS points" },
+    { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
+    { key: "coverage", title: "Coverage Tint", subtitle: "Orange tint by patrol coverage" },
+    { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
+  ];
+}
 
 /* ------------------------------------------------------------------ */
 /* Layer stack                                                         */
@@ -187,6 +214,7 @@ const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {  basemap: ["gl
   beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
+  analysisGrid: ["gl-agrid-fill", "gl-agrid-line", "gl-agrid-label", "gl-agrid-sel-fill", "gl-agrid-sel-line"],
   grids: ["gl-grids-fill", "gl-grids-line", "gl-grids-coverage", "gl-grids-coverage-line"],
   routes: ["gl-routes", "gl-replay-trail", "gl-replay-head"],
   rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
@@ -215,6 +243,11 @@ const REGION_FILTERED_LAYERS = [
   "gl-grids-line",
   "gl-grids-coverage",
   "gl-grids-coverage-line",
+  "gl-agrid-fill",
+  "gl-agrid-line",
+  "gl-agrid-label",
+  "gl-agrid-sel-fill",
+  "gl-agrid-sel-line",
 ];
 
 function buildLayers(m: MapLibreMap) {
@@ -245,6 +278,7 @@ function buildLayers(m: MapLibreMap) {
     "compartment-labels",
     "boundary",
     "grids",
+    "analysis-grid",
   ]) {
     m.addSource(id, { type: "geojson", data: emptyFc() });
   }
@@ -515,6 +549,46 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
+  // 8b. Analysis grid — frontend-generated metric cells (configurable size).
+  //     Placed beneath patrol routes / markers so operational data always
+  //     stays on top. Selection is a data-driven highlight on the same cells.
+  m.addLayer({
+    id: "gl-agrid-fill",
+    type: "fill",
+    source: "analysis-grid",
+    paint: {
+      "fill-color": "#8a8f98",
+      "fill-opacity": 0.07,
+    },
+  });
+  m.addLayer({
+    id: "gl-agrid-line",
+    type: "line",
+    source: "analysis-grid",
+    minzoom: 4.5,
+    paint: {
+      "line-color": "#8a8f98",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 0.6, 14, 1.2],
+      "line-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.25, 12, 0.5],
+    },
+  });
+  m.addLayer({
+    id: "gl-agrid-label",
+    type: "symbol",
+    source: "analysis-grid",
+    minzoom: 12.5,
+    layout: {
+      "text-field": ["get", "gridCode"],
+      "text-size": 9,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": "#5b636e",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 1.5,
+    },
+  });
+
   // 9. Patrol routes + playback track.
   m.addLayer({
     id: "gl-routes",
@@ -594,6 +668,23 @@ function buildLayers(m: MapLibreMap) {
     layout: { "text-field": "SOS", "text-size": 10 },
     paint: { "text-color": "#fff", "text-halo-color": "#B3261E", "text-halo-width": 2 },
   });
+
+  // 11. Analysis-grid selection highlight — above routes/markers so the
+  //     choice reads clearly; painted only on selected cells.
+  m.addLayer({
+    id: "gl-agrid-sel-fill",
+    type: "fill",
+    source: "analysis-grid",
+    filter: ["==", ["get", "selected"], true],
+    paint: { "fill-color": "#FF8F00", "fill-opacity": 0.26 },
+  });
+  m.addLayer({
+    id: "gl-agrid-sel-line",
+    type: "line",
+    source: "analysis-grid",
+    filter: ["==", ["get", "selected"], true],
+    paint: { "line-color": "#E65100", "line-width": 2, "line-opacity": 0.9 },
+  });
 }
 
 function setSourceData(m: MapLibreMap, id: string, data: GeoJSON.FeatureCollection) {
@@ -618,6 +709,11 @@ export function MapWorkspace({
   compartments,
   boundary,
   grids,
+  analysisGrids,
+  gridSize = DEFAULT_GRID_SIZE,
+  selectedGridIds,
+  onGridClick,
+  onGridHover,
   markers,
   routes,
   heat,
@@ -638,6 +734,9 @@ export function MapWorkspace({
   const [replayOn, setReplayOn] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
   const [progress, setProgress] = useState(0);
+
+  /** Cursor-positioned tooltip for the hovered analysis-grid cell. */
+  const [gridTooltip, setGridTooltip] = useState<{ x: number; y: number; code: string } | null>(null);
 
   const beats = useMemo(() => liveBeats ?? [], [liveBeats]);
   const comps = useMemo(() => compartments ?? [], [compartments]);
@@ -729,6 +828,10 @@ export function MapWorkspace({
   const compartmentLabelsFc = useMemo(() => compartmentLabelsToFeatures(comps), [comps]);
   const boundaryFc = useMemo(() => boundariesToFeatures(boundary ?? []), [boundary]);
   const gridsFc = useMemo(() => gridsToFeatures(grids ?? []), [grids]);
+  const analysisGridsFc = useMemo(
+    () => analysisGridsToFeatures(analysisGrids ?? [], selectedGridIds),
+    [analysisGrids, selectedGridIds]
+  );
 
   useEffect(() => {
     if (!ready) return;
@@ -743,6 +846,7 @@ export function MapWorkspace({
     setSourceData(m, "compartment-labels", compartmentLabelsFc);
     setSourceData(m, "boundary", boundaryFc);
     setSourceData(m, "grids", gridsFc);
+    setSourceData(m, "analysis-grid", analysisGridsFc);
 
     if (!didFit.current && beatsFc.features.length > 0) {
       didFit.current = true;
@@ -757,7 +861,7 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc]);
+  }, [ready, beatsFc, markersFc, routesFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc]);
 
   // Layer checkbox visibility.
   useEffect(() => {
@@ -783,21 +887,50 @@ export function MapWorkspace({
     }
   }, [ready, regionFilter]);
 
-  // Feature pick + hover cursor.
+  // Feature pick + hover cursor (incl. analysis-grid click/hover).
   useEffect(() => {
     if (!ready) return;
     const m = mapRef.current!;
     const clickable = [...CLICKABLE];
+    const gridLayers = ["gl-agrid-fill"];
+    let hoveredGridId: string | null = null;
+    const clearGridHover = () => {
+      if (hoveredGridId !== null) {
+        hoveredGridId = null;
+        setGridTooltip(null);
+        onGridHover?.(null);
+      }
+    };
     const onMove = (e: MapMouseEvent) => {
+      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
+      if (gridHit) {
+        const id = String(gridHit.properties?.id ?? "");
+        const code = String(gridHit.properties?.gridCode ?? id);
+        hoveredGridId = id || null;
+        setGridTooltip({ x: e.point.x, y: e.point.y, code });
+        onGridHover?.(hoveredGridId);
+        m.getCanvas().style.cursor = "pointer";
+        return;
+      }
+      clearGridHover();
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable });
       m.getCanvas().style.cursor = hit.length > 0 ? "pointer" : "";
     };
     const onClick = (e: MapMouseEvent) => {
+      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
+      if (gridHit) {
+        const id = String(gridHit.properties?.id ?? "");
+        if (id) onGridClick?.(id);
+        return;
+      }
+      setGridTooltip(null);
+      onGridHover?.(null);
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable })[0];
       const id = hit?.properties?.id;
       onSelect?.(typeof id === "string" ? id : null);
     };
     const onLeave = () => {
+      clearGridHover();
       m.getCanvas().style.cursor = "";
     };
     const canvas = m.getCanvas();
@@ -809,7 +942,7 @@ export function MapWorkspace({
       m.off("click", onClick);
       canvas.removeEventListener("pointerleave", onLeave);
     };
-  }, [ready, onSelect]);
+  }, [ready, onSelect, onGridClick, onGridHover]);
 
   // Replay model (real GIS route or synthesized from real lat/lng points).
   const replayRoute = useMemo<ReplayModel | undefined>(() => {
@@ -884,7 +1017,11 @@ export function MapWorkspace({
           <Icon name="map" size={14} className="shrink-0 text-forest-700" />
           <span className="truncate">
             NSTR Forest — operational view · {FOREST_CONTEXT.divisionName}
-            {grids && grids.length > 0 ? ` · ${grids.length} grid cells` : ""}
+            {analysisGrids && analysisGrids.length > 0
+              ? ` · ${analysisGrids.length} ${gridSizeLabel(gridSize)} grid cells`
+              : grids && grids.length > 0
+                ? ` · ${grids.length} reference cells`
+                : ""}
           </span>
         </div>
         <button
@@ -917,7 +1054,7 @@ export function MapWorkspace({
               </div>
             </div>
             <div className="space-y-0.5">
-              {LAYER_ROWS.map((row) => (
+              {layerRows(gridSize).map((row) => (
                 <LayerRow
                   key={row.key}
                   title={row.title}
@@ -986,7 +1123,9 @@ export function MapWorkspace({
               <LegendRow color="#FF8F00" isPoint label="SOS / alert" />
               <LegendRow color="#B3261E" dashed label="Zero patrol zone" />
               <LegendRow color="#FF8F00" dashed label="Authorization area" />
-              <LegendRow color="#8a8f98" label="Survey grid" />
+              <LegendRow color="#8a8f98" label="Reference grid (backend)" />
+              <LegendRow color="#5b7684" label="Analysis grid" />
+              <LegendRow color="#E65100" label="Analysis grid — selected" />
               <LegendRow color="#2E7D32" label="Grid covered (API)" />
               <LegendRow color="#B3261E" label="Grid uncovered (API)" />
               <LegendRow color="#5b7684" isRaster label="Satellite / offline basemap" />
@@ -996,6 +1135,17 @@ export function MapWorkspace({
 
         {/* feature detail popup */}
         {detailCard && <div className="absolute bottom-3 right-3 z-10 max-w-72">{detailCard}</div>}
+
+        {/* analysis-grid hover tooltip */}
+        {gridTooltip && (
+          <div
+            className="pointer-events-none absolute z-20 max-w-52 rounded-md border border-line bg-white/95 px-2.5 py-1.5 text-[11px] shadow-pop"
+            style={{ left: gridTooltip.x + 14, top: gridTooltip.y + 14 }}
+          >
+            <p className="font-mono font-medium text-ink">{gridTooltip.code}</p>
+            <p className="text-ink-soft">{gridSizeLabel(gridSize)} grid cell</p>
+          </div>
+        )}
 
         {/* replay controls — only when a patrol is selected */}
         {replayRoute && layerState.routes && (

@@ -5,13 +5,11 @@ import { requireAuth } from '../middleware/auth';
 import { validateBody, validateQuery } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { param } from '../lib/http';
+import { applyPatrolWhere, patrolVisibleTo } from '../lib/scope';
 
 export const patrolsRouter = Router();
 
 patrolsRouter.use(requireAuth);
-
-const isAdmin = (req: { user?: { role: string; isAdmin: boolean } }) =>
-  req.user!.role === 'ADMIN' || req.user!.isAdmin;
 
 const patrolCreateSchema = z.object({
   id: z.string().min(1).max(50).optional(),
@@ -75,12 +73,10 @@ const patrolListQuery = z.object({
 
 patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
   const q = req.query as z.infer<typeof patrolListQuery>;
-  const where: Record<string, unknown> = {};
-  if (q.forestId) where.forestId = q.forestId;
-  if (q.status) where.status = q.status;
-  if (q.mine === 'true' || !isAdmin(req)) {
-    where.userId = req.user!.id;
-  }
+  const base: Record<string, unknown> = {};
+  if (q.forestId) base.forestId = q.forestId;
+  if (q.status) base.status = q.status;
+  const where = await applyPatrolWhere(req.user!, base as never, { mine: q.mine === 'true' });
 
   const patrols = await prisma.patrol.findMany({
     where,
@@ -103,8 +99,8 @@ patrolsRouter.get('/:id', async (req, res) => {
     },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   let pointCount = 0;
@@ -166,11 +162,11 @@ patrolsRouter.get('/:id/points', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const pts = await prisma.patrolPoint.findMany({
@@ -204,11 +200,11 @@ patrolsRouter.get('/:id/movement', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const readings = await prisma.movementModeReading.findMany({
@@ -232,11 +228,11 @@ patrolsRouter.get('/:id/sensors', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const [accel, gyro, mag, baro, steps] = await Promise.all([
@@ -291,11 +287,11 @@ patrolsRouter.get('/:id/incidents', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const incidents = await prisma.incident.findMany({
@@ -332,11 +328,11 @@ patrolsRouter.get('/:id/segments', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const segments = await prisma.activitySegment.findMany({
@@ -359,11 +355,11 @@ patrolsRouter.get('/:id/coverage', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const events = await prisma.coverageEvent.findMany({
@@ -386,11 +382,11 @@ patrolsRouter.get('/:id/integrity', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
     where: { id },
-    select: { id: true, userId: true },
+    select: { id: true, userId: true, beat: true },
   });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only view your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
   }
 
   const logs = await prisma.timeIntegrityLog.findMany({
@@ -421,10 +417,10 @@ const startSchema = z.object({ startedAt: z.coerce.date().optional() });
 
 patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => {
   const id = param(req, 'id');
-  const patrol = await prisma.patrol.findUnique({ where: { id } });
+  const patrol = await prisma.patrol.findUnique({ where: { id }, select: { id: true, userId: true, beat: true } });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only manage your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only manage patrols within your scope');
   }
 
   const startedAt = req.body.startedAt ?? new Date();
@@ -439,10 +435,10 @@ const completeSchema = z.object({ endedAt: z.coerce.date().optional() });
 
 patrolsRouter.post('/:id/complete', validateBody(completeSchema), async (req, res) => {
   const id = param(req, 'id');
-  const patrol = await prisma.patrol.findUnique({ where: { id } });
+  const patrol = await prisma.patrol.findUnique({ where: { id }, select: { id: true, userId: true, beat: true } });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
-  if (!isAdmin(req) && patrol.userId !== req.user!.id) {
-    throw new HttpError(403, 'forbidden', 'You can only manage your own patrols');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only manage patrols within your scope');
   }
 
   const lastPoint = await prisma.$queryRaw<{ t: Date | null }[]>`

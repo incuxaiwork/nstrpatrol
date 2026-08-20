@@ -17,7 +17,7 @@ import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone } from "@/components/ui";
 import { StatRow, Timeline } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
-import { MapWorkspace } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
 import { JurisdictionBanner } from "@/components/jurisdiction";
 import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";

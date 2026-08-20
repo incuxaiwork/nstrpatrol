@@ -20,6 +20,13 @@ model User {
   updatedAt         DateTime   @updatedAt
   cader             Cader
   isAdmin           Boolean    @default(false)
+  // Organizational scope (nullable until assignments are finalized):
+  // DFO → divisionId, DyDFO → subDivisionId, FRO → rangeId,
+  // FBO/ABO → beatId, DyFRO/FSO → unset (operational area not fixed yet).
+  divisionId        String?
+  subDivisionId     String?
+  rangeId           String?
+  beatId            String?
   devices           Device[]
   incidents         Incident[]
   verifiedIncidents Incident[] @relation("VerifiedBy")
@@ -376,6 +383,27 @@ model AppOption {
   updatedAt DateTime @updatedAt
 }
 
+/// Organizational reference: a sub-division (e.g. Dornal(a)) grouping ranges.
+model SubDivision {
+  id     String  @id @default(cuid())
+  code   String  @unique
+  name   String
+  ranges Range[]
+}
+
+/// Organizational reference: a forest range (e.g. Dornal Range). Linked to a
+/// SubDivision where one exists; ranges directly under the division have a
+/// null subDivisionId. Beat.rangeName (free text from GIS import) resolves
+/// to this table by name.
+model Range {
+  id            String       @id @default(cuid())
+  name          String       @unique
+  subDivisionId String?
+  subDivision   SubDivision? @relation(fields: [subDivisionId], references: [id])
+
+  @@index([subDivisionId])
+}
+
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model spatial_ref_sys {
   srid      Int     @id
@@ -451,6 +479,8 @@ enum CoverageType {
 }
 
 enum Cader {
+  DFO
+  DyDFO
   FRO
   DyRO
   FSO

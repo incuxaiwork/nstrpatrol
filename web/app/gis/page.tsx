@@ -12,7 +12,8 @@ import { useAsyncData } from "@/lib/use-async";
 import { api } from "@/lib/api";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
-import { MapWorkspace, MapSidebarFacts, type GridRegionFilter } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
+import { MapSidebarFacts, type GridRegionFilter } from "@/components/map";
 import { RegionFilter } from "@/components/gis-region-filter";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
@@ -20,8 +21,9 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { stamp, exportRows } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { RegionReportDialog } from "@/components/reports/dialogs";
-import { FOREST_CONTEXT } from "@/lib/forest-context";
-import { tagBeats, tagCompartments, tagGrids } from "@/lib/grid-regions";
+import { FOREST_CONTEXT, GRID_SIZES, DEFAULT_GRID_SIZE, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
+import { tagBeats, tagCompartments, tagGrids, type TaggedGrid } from "@/lib/grid-regions";
+import { buildAnalysisGrid } from "@/lib/gis/grid";
 import type { GisMarker, GisRoute } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
@@ -113,6 +115,10 @@ export default function GisPage() {
   const [reportOpen, setReportOpen] = useState(false);
   // Range → Beat → Compartment filter (division is the fixed context).
   const [regionFilter, setRegionFilter] = useState<GridRegionFilter>({});
+  // Analysis grid state — configurable size + deterministic cell selection.
+  const [analysisGridSize, setAnalysisGridSize] = useState<GridSizeKey>(DEFAULT_GRID_SIZE);
+  const [selectedGridIds, setSelectedGridIds] = useState<ReadonlySet<string>>(new Set());
+  const [hoveredGridId, setHoveredGridId] = useState<string | null>(null);
 
   const markersData = useAsyncData(() => gis.markers());
   const routesData = useAsyncData(() => gis.routes());
@@ -122,6 +128,7 @@ export default function GisPage() {
   const compartmentsData = useAsyncData(() => gis.compartments());
   const boundaryData = useAsyncData(() => gis.boundary());
   const gridsData = useAsyncData(() => gis.grids());
+  const extentData = useAsyncData(() => gis.extent());
   // Real hierarchy register for the region filters (independent of the map).
   const unitsData = useAsyncData(() => hierarchyService.units());
 
@@ -137,6 +144,18 @@ export default function GisPage() {
   const taggedGrids = useMemo(
     () => tagGrids(gridsData.data ?? [], taggedBeats, taggedCompartments),
     [gridsData.data, taggedBeats, taggedCompartments]
+  );
+
+  // Analysis grid — generated from the REAL beat/boundary geometry at the
+  // selected metric size (see lib/gis/grid.ts). Re-generated only when its
+  // true inputs change (size / beats / boundary), never on pan/zoom/hover.
+  const analysisCells = useMemo(
+    () => buildAnalysisGrid({ beats: taggedBeats, boundary: boundaryData.data ?? [], extent: extentData.data ?? null, sizeKey: analysisGridSize }),
+    [taggedBeats, boundaryData.data, extentData.data, analysisGridSize]
+  );
+  const taggedAnalysisGrids = useMemo<TaggedGrid[]>(
+    () => tagGrids(analysisCells.cells, taggedBeats, taggedCompartments),
+    [analysisCells, taggedBeats, taggedCompartments]
   );
 
   // Name lookups for the grid popup (real register only — never fabricated).
@@ -158,12 +177,13 @@ export default function GisPage() {
     };
   }, [unitsData.data]);
 
-  if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data)
+  if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data || extentData.loading || !extentData.data)
     return <SkeletonRows rows={8} />;
   if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
   if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
   if (boundaryData.error) return <ErrorState message={boundaryData.error.message} onRetry={boundaryData.reload} />;
   if (gridsData.error) return <ErrorState message={gridsData.error.message} onRetry={gridsData.reload} />;
+  if (extentData.error) return <ErrorState message={extentData.error.message} onRetry={extentData.reload} />;
 
   const beats = beatsData.data;
   const compartments = compartmentsData.data;
@@ -213,6 +233,42 @@ export default function GisPage() {
     ]);
   };
 
+  const toggleGrid = (id: string) => {
+    setSelectedGridIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const clearGridSelection = () => setSelectedGridIds(new Set());
+
+  const deselectAllGrids = () => setSelectedGridIds(new Set());
+
+  // Selects every cell not excluded by the active Range → Beat → Compartment
+  // filter (i.e. what the map actually shows).
+  const selectAllVisibleGrids = () => {
+    const ids = taggedAnalysisGrids
+      .filter((g) => {
+        if (regionFilter.rangeId && g.rangeId !== regionFilter.rangeId) return false;
+        if (regionFilter.beatId && g.beatId !== regionFilter.beatId) return false;
+        if (regionFilter.compId && (g.compId ?? null) !== regionFilter.compId) return false;
+        return true;
+      })
+      .map((g) => g.id);
+    setSelectedGridIds(new Set(ids));
+  };
+
+  const changeGridSize = (size: GridSizeKey) => {
+    setAnalysisGridSize(size);
+    // Grid topology changed (deterministic ids are size-scoped) — selection
+    // cannot be carried over, so it is cleared explicitly.
+    setSelectedGridIds(new Set());
+  };
+
+  const hoveredGrid = hoveredGridId ? taggedAnalysisGrids.find((g) => g.id === hoveredGridId) : undefined;
+
   return (
     <div>
       <PageHeader
@@ -247,6 +303,11 @@ export default function GisPage() {
               compartments={taggedCompartments}
               boundary={boundary}
               grids={taggedGrids}
+              analysisGrids={taggedAnalysisGrids}
+              gridSize={analysisGridSize}
+              selectedGridIds={selectedGridIds}
+              onGridClick={toggleGrid}
+              onGridHover={setHoveredGridId}
               markers={markers}
               routes={routes}
               heat={heat}
@@ -272,6 +333,85 @@ export default function GisPage() {
                 value={regionFilter}
                 onChange={setRegionFilter}
               />
+            </div>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader
+              title="Analysis Grid"
+              icon="grid"
+              subtitle={`${gridSizeLabel(analysisGridSize)} cells generated over the real forest geometry (frontend GIS state — not persisted)`}
+            />
+            <div className="space-y-3 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <label htmlFor="analysis-grid-size" className="text-xs font-medium text-ink">
+                  Grid Size
+                </label>
+                <select
+                  id="analysis-grid-size"
+                  value={analysisGridSize}
+                  onChange={(e) => changeGridSize(e.target.value as GridSizeKey)}
+                  className="rounded border border-line bg-white px-2 py-1 text-xs font-medium text-ink"
+                  aria-label="Analysis grid size"
+                >
+                  {GRID_SIZES.map((g) => (
+                    <option key={g.key} value={g.key}>{g.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center justify-between gap-2 border-t border-line pt-2.5">
+                <p className="text-sm font-semibold text-ink">
+                  Selected: <span className="font-mono">{selectedGridIds.size}</span>
+                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <button
+                    onClick={selectAllVisibleGrids}
+                    className="inline-flex h-7 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50"
+                  >
+                    Select All Visible
+                  </button>
+                  <button
+                    onClick={deselectAllGrids}
+                    className="inline-flex h-7 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50"
+                  >
+                    Deselect All
+                  </button>
+                  <button
+                    onClick={clearGridSelection}
+                    disabled={selectedGridIds.size === 0}
+                    className="inline-flex h-7 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Clear Selection
+                  </button>
+                </div>
+              </div>
+
+              {analysisCells.meta.count > 0 && (
+                <p className="flex items-center gap-2 text-xs text-ink-soft">
+                  <Badge tone="neutral">{analysisCells.meta.count} cells</Badge>
+                  <span>deterministic ids — click a cell to toggle its selection.</span>
+                </p>
+              )}
+
+              {hoveredGrid && (
+                <div className="rounded-field border border-line bg-surface px-3 py-2 text-xs">
+                  <p className="font-mono text-ink">{hoveredGrid.gridCode}</p>
+                  <dl className="mt-1.5 space-y-1">
+                    <InfoRow label="Size" value={gridSizeLabel((hoveredGrid as { sizeKey?: GridSizeKey }).sizeKey ?? analysisGridSize)} />
+                    <InfoRow label="Range" value={hoveredGrid.rangeId ? unitNames.rangeName(hoveredGrid.rangeId) ?? "Not available" : "Not available"} />
+                    <InfoRow label="Beat" value={hoveredGrid.beatId ? unitNames.beatName(hoveredGrid.beatId) ?? "Not available" : "Not available"} />
+                    <InfoRow label="Compartment" value={hoveredGrid.compId ? unitNames.compNo(hoveredGrid.compId) ?? "Not available" : "Not available"} />
+                    <InfoRow label="Selection" value={selectedGridIds.has(hoveredGrid.id) ? "Selected — click to deselect" : "Not selected — click to select"} />
+                  </dl>
+                </div>
+              )}
+
+              <p className="flex items-start gap-2 rounded-field border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-[#8a4b00]">
+                <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
+                Coverage unavailable — the backend does not expose per-grid patrol coverage.
+                This grid supports visualization, sizing and selection only.
+              </p>
             </div>
           </Card>
 

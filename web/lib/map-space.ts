@@ -8,6 +8,7 @@
 
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
+import type { TaggedGrid } from "@/lib/grid-regions";
 
 /** SVG viewBox shared by the mock renderers (see lib/backend-adapters.ts). */
 export const SVG_MAP_SPACE = {
@@ -160,6 +161,37 @@ export function markersToFeatures(markers: GisMarker[]): GeoFeatureCollection {
         tone: m.tone ?? null,
       }),
       geometry: { type: "Point", coordinates: svgToLngLat(m.x, m.y) },
+    })),
+  };
+}
+
+/**
+ * Analysis-grid cells (frontend-generated, metric). Selected state is baked
+ * into the features so MapLibre styles it with plain data-driven expressions
+ * (the same convention the beat layers already use). Region fields are the
+ * client-side spatial attribution from lib/grid-regions.ts — undefined when a
+ * cell's centroid is not contained by any real polygon, never invented.
+ */
+export function analysisGridsToFeatures(
+  cells: TaggedGrid[],
+  selectedIds?: ReadonlySet<string>
+): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: cells.map((g) => ({
+      type: "Feature",
+      id: g.id,
+      properties: flatProps({
+        id: g.id,
+        gridCode: g.gridCode,
+        rangeId: g.rangeId ?? null,
+        beatId: g.beatId ?? null,
+        compId: g.compId ?? null,
+        selected: selectedIds?.has(g.id) === true,
+        row: (g as { row?: number }).row ?? null,
+        col: (g as { col?: number }).col ?? null,
+      }),
+      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
     })),
   };
 }

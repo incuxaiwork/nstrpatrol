@@ -6,6 +6,7 @@ import { validateBody } from '../middleware/validate';
 import { param } from '../lib/http';
 import { queryString } from '../lib/http';
 import { HttpError } from '../middleware/error';
+import { isDivisionWide, userScopeFilter } from '../lib/scope';
 
 export const devicesRouter = Router();
 
@@ -42,9 +43,34 @@ devicesRouter.post('/', validateBody(registerSchema), async (req, res) => {
 
 devicesRouter.get('/', async (req, res) => {
   const isAdmin = req.user!.role === 'ADMIN' || req.user!.isAdmin;
-  const userId = isAdmin ? (queryString(req, 'userId')) : req.user!.id;
+  if (!isAdmin) {
+    const devices = await prisma.device.findMany({
+      where: { userId: req.user!.id },
+      orderBy: { lastSeenAt: 'desc' },
+    });
+    res.json(devices);
+    return;
+  }
+  if (isDivisionWide(req.user!)) {
+    const userId = queryString(req, 'userId');
+    const devices = await prisma.device.findMany({
+      where: userId ? { userId } : undefined,
+      orderBy: { lastSeenAt: 'desc' },
+    });
+    res.json(devices);
+    return;
+  }
+  // Scoped admin (e.g. DyDFO): devices of users inside their scope only.
+  const scopeFilter = (await userScopeFilter(req.user!)) ?? {};
+  const scopedUsers = await prisma.user.findMany({ where: scopeFilter, select: { id: true } });
+  const scopedIds = scopedUsers.map((u) => u.id);
+  const requested = queryString(req, 'userId');
+  if (requested && !scopedIds.includes(requested)) {
+    res.json([]);
+    return;
+  }
   const devices = await prisma.device.findMany({
-    where: userId ? { userId } : undefined,
+    where: requested ? { userId: requested } : scopedIds.length > 0 ? { userId: { in: scopedIds } } : { userId: '__none__' },
     orderBy: { lastSeenAt: 'desc' },
   });
   res.json(devices);
