@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         CoverageEventEntity::class,
         IntegrityLogEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class NstrDatabase : RoomDatabase() {
@@ -93,6 +93,38 @@ abstract class NstrDatabase : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE patrol_sessions RENAME TO patrol_sessions_old")
+                db.execSQL("""
+                    CREATE TABLE IF NOT EXISTS patrol_sessions (
+                        patrolId TEXT NOT NULL PRIMARY KEY,
+                        startTime INTEGER NOT NULL,
+                        endTime INTEGER,
+                        status TEXT NOT NULL,
+                        patrolType TEXT,
+                        patrolMethod TEXT,
+                        beat TEXT,
+                        detectedMethod TEXT,
+                        armedStatus TEXT,
+                        totalDistanceMeters REAL NOT NULL,
+                        totalSteps INTEGER NOT NULL,
+                        moveMinutes INTEGER NOT NULL,
+                        caloriesEstimate REAL NOT NULL,
+                        heartPointsEstimate REAL NOT NULL,
+                        avgSpeedKmh REAL NOT NULL,
+                        pointCount INTEGER NOT NULL,
+                        syncStatus TEXT NOT NULL
+                    )
+                """.trimIndent())
+                db.execSQL("""
+                    INSERT INTO patrol_sessions (patrolId, startTime, endTime, status, patrolType, patrolMethod, beat, detectedMethod, armedStatus, totalDistanceMeters, totalSteps, moveMinutes, caloriesEstimate, heartPointsEstimate, avgSpeedKmh, pointCount, syncStatus)
+                    SELECT patrolId, startTime, endTime, status, patrolType, patrolMethod, beat, detectedMethod, armedStatus, totalDistanceMeters, totalSteps, moveMinutes, caloriesEstimate, heartPointsEstimate, avgSpeedKmh, pointCount, syncStatus FROM patrol_sessions_old
+                """.trimIndent())
+                db.execSQL("DROP TABLE patrol_sessions_old")
+            }
+        }
+
         @Volatile
         private var instance: NstrDatabase? = null
 
@@ -103,7 +135,7 @@ abstract class NstrDatabase : RoomDatabase() {
                     NstrDatabase::class.java,
                     NAME
                 )
-                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                    .addMigrations(MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigration()
                     .build()
                     .also { instance = it }

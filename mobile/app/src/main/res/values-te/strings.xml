@@ -69,13 +69,9 @@
     <string name="patrol_start_patrol_method_ph">గస్తీ పద్ధతి ఎంచుకోండి</string>
     <string name="patrol_start_member_name_ph">సభ్యుని పేరు ఎంచుకోండి</string>
     <string name="patrol_start_arm_type_ph">ఆయుధ రకం ఎంచుకోండి</string>
-    <string name="patrol_start_total_members">మొత్తం సభ్యులు జోడించబడ్డారు</string>
     <string name="patrol_start_patrol_type">గస్తీ రకం</string>
     <string name="patrol_start_patrol_method">గస్తీ పద్ధతి</string>
     <string name="patrol_start_select_beat">బీట్ ఎంచుకోండి</string>
-    <string name="patrol_start_member_name">సభ్యుని పేరు</string>
-    <string name="patrol_start_designation">హోదా</string>
-    <string name="patrol_start_team_leader">టీమ్ లీడర్‌ని ఎంచుకోండి</string>
     <string name="patrol_start_armed_status">ఆయుధ స్థితి</string>
     <string name="patrol_start_arm_used">ఉపయోగించిన ఆయుధం</string>
     <string name="reports_title">నివేదికలు</string>

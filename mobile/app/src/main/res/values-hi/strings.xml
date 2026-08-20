@@ -69,13 +69,9 @@
     <string name="patrol_start_patrol_method_ph">गश्त विधि चुनें</string>
     <string name="patrol_start_member_name_ph">सदस्य का नाम चुनें</string>
     <string name="patrol_start_arm_type_ph">हथियार प्रकार चुनें</string>
-    <string name="patrol_start_total_members">कुल सदस्य जोड़े गए</string>
     <string name="patrol_start_patrol_type">गश्त प्रकार</string>
     <string name="patrol_start_patrol_method">गश्त विधि</string>
     <string name="patrol_start_select_beat">बीट चुनें</string>
-    <string name="patrol_start_member_name">सदस्य का नाम</string>
-    <string name="patrol_start_designation">पद</string>
-    <string name="patrol_start_team_leader">टीम लीडर चुनें</string>
     <string name="patrol_start_armed_status">सशस्त्र स्थिति</string>
     <string name="patrol_start_arm_used">उपयोग किया गया हथियार</string>
     <string name="reports_title">रिपोर्ट</string>

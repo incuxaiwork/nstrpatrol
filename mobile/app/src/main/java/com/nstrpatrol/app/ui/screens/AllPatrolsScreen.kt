@@ -134,7 +134,7 @@ fun AllPatrolsScreen(
 
     val localPending = sessions.filter { it.syncStatus == "PENDING" }
     val allEntries: List<DisplayPatrol> =
-        localPending.map { DisplayPatrol(it.patrolId, it.patrolType ?: it.beat ?: "Patrol", it.status, it.teamLeader, formatMillis(it.startTime), DisplaySource.Local) } +
+        localPending.map { DisplayPatrol(it.patrolId, it.patrolType ?: it.beat ?: "Patrol", it.status, null, formatMillis(it.startTime), DisplaySource.Local) } +
             backendEntries.map { DisplayPatrol(it.id, it.patrol.name, it.patrol.status, it.patrol.ranger, it.patrol.whenText, DisplaySource.Backend) }
 
     val filtered = when (selectedFilter) {
@@ -348,7 +348,7 @@ private fun SessionPatrolCard(
         Spacer(Modifier.height(6.dp))
         Row {
             Text(
-                text = session.teamLeader ?: "—",
+                text = "—",
                 color = TextSecondary,
                 fontSize = 13.sp,
                 modifier = Modifier.weight(1f)

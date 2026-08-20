@@ -96,10 +96,8 @@ model Patrol {
   updatedAt             DateTime               @updatedAt
   userId                String
   patrolMethod          String?
-  teamLeader            String?
   beat                  String?
   armedStatus           String?
-  memberCount           Int                    @default(0)
   caloriesEstimate      Float?
   heartPointsEstimate   Float?
   avgSpeedKmh           Float?

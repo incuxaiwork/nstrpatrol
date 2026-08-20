@@ -2,28 +2,19 @@ package com.nstrpatrol.app.ui.screens
 
 import com.nstrpatrol.app.R
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -41,13 +32,9 @@ import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.components.SelectField
 import com.nstrpatrol.app.ui.components.SegmentedControl
-import com.nstrpatrol.app.ui.components.Stepper
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.ErrorRed
-import com.nstrpatrol.app.ui.theme.OutlineCard
-import com.nstrpatrol.app.ui.theme.SurfaceMuted
 import com.nstrpatrol.app.ui.theme.TextPrimary
-import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
 @Composable
@@ -64,11 +51,8 @@ fun PatrolStartScreen(
     var patrolType by remember { mutableStateOf<String?>(null) }
     var patrolMethod by remember { mutableStateOf<String?>(null) }
     var beat by remember { mutableStateOf<String?>(null) }
-    var memberName by remember { mutableStateOf<String?>(null) }
-    var teamLeader by remember { mutableStateOf<String?>(null) }
     var armed by remember { mutableStateOf("Armed") }
     var armUsed by remember { mutableStateOf<String?>(null) }
-    var memberCount by remember { mutableIntStateOf(0) }
     var openSheet by remember { mutableStateOf<String?>(null) }
     var showErrors by remember { mutableStateOf(false) }
     val photoSlot = "patrol_start"
@@ -134,48 +118,6 @@ fun PatrolStartScreen(
             }
 
             Spacer(Modifier.height(12.dp))
-            FieldLabel(text = stringResource(R.string.patrol_start_member_name))
-            Spacer(Modifier.height(4.dp))
-            SelectField(
-                placeholder = stringResource(R.string.patrol_start_member_name_ph),
-                value = memberName,
-                onClick = { openSheet = "member" }
-            )
-
-            Spacer(Modifier.height(12.dp))
-            FieldLabel(text = stringResource(R.string.patrol_start_designation))
-            Spacer(Modifier.height(4.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
-                    .background(SurfaceMuted)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "—",
-                    color = TextSecondary,
-                    fontSize = 14.sp
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-            FieldLabel(text = stringResource(R.string.patrol_start_team_leader), required = true)
-            Spacer(Modifier.height(4.dp))
-            SelectField(
-                placeholder = stringResource(R.string.patrol_start_team_leader),
-                value = teamLeader,
-                isError = showErrors && teamLeader == null,
-                onClick = { openSheet = "team_leader" }
-            )
-            if (showErrors && teamLeader == null) {
-                Text(stringResource(R.string.common_required), color = ErrorRed, fontSize = 11.sp)
-            }
-
-            Spacer(Modifier.height(12.dp))
             FieldLabel(text = stringResource(R.string.patrol_start_armed_status))
             Spacer(Modifier.height(4.dp))
             SegmentedControl(
@@ -196,34 +138,10 @@ fun PatrolStartScreen(
                 onClick = { openSheet = "arm" }
             )
 
-            Spacer(Modifier.height(12.dp))
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(androidx.compose.ui.graphics.Color.White)
-                    .padding(horizontal = 14.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = stringResource(R.string.patrol_start_total_members),
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.weight(1f)
-                )
-                Stepper(
-                    value = memberCount,
-                    onMinus = { if (memberCount > 0) memberCount-- },
-                    onPlus = { memberCount++ }
-                )
-            }
-
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = stringResource(R.string.action_save_details), onClick = {
                 showErrors = true
-                if (patrolType == null || patrolMethod == null || beat == null || teamLeader == null) {
+                if (patrolType == null || patrolMethod == null || beat == null) {
                     return@PrimaryButton
                 }
                 onStartPatrol()
@@ -240,9 +158,7 @@ fun PatrolStartScreen(
                             patrolType = patrolType,
                             patrolMethod = patrolMethod,
                             beat = beat,
-                            teamLeader = teamLeader,
                             armedStatus = armed,
-                            memberCount = memberCount,
                             syncStatus = "PENDING"
                         )
                     )
@@ -267,32 +183,24 @@ fun PatrolStartScreen(
                 "patrol_type" -> stringResource(R.string.patrol_start_patrol_type)
                 "patrol_method" -> stringResource(R.string.patrol_start_patrol_method)
                 "beat" -> stringResource(R.string.patrol_start_select_beat)
-                "member" -> stringResource(R.string.patrol_start_member_name)
-                "team_leader" -> stringResource(R.string.patrol_start_team_leader)
                 else -> stringResource(R.string.patrol_start_arm_used)
             }
             val options = when (sheet) {
                 "patrol_type" -> Options.patrolTypes
                 "patrol_method" -> Options.patrolMethods
                 "beat" -> Options.beats
-                "member" -> Options.memberNames
-                "team_leader" -> Options.teamLeaders
                 else -> Options.armTypes
             }
             val selected = when (sheet) {
                 "patrol_type" -> patrolType
                 "patrol_method" -> patrolMethod
                 "beat" -> beat
-                "member" -> memberName
-                "team_leader" -> teamLeader
                 else -> armUsed
             }
             val onSelected: (String) -> Unit = when (sheet) {
                 "patrol_type" -> { v -> patrolType = v }
                 "patrol_method" -> { v -> patrolMethod = v }
                 "beat" -> { v -> beat = v }
-                "member" -> { v -> memberName = v }
-                "team_leader" -> { v -> teamLeader = v }
                 else -> { v -> armUsed = v }
             }
             OptionSheet(

@@ -17,8 +17,6 @@ object Options {
         "Kalanuthala", "Kalzuvvalapadu", "Magutur", "Nagulavaram", "Peddarikatla",
         "Podili", "Potlapadu"
     )
-    val teamLeaders = listOf("B. Thapa", "K. Venkatesh", "P. Gurung", "R. Sharma", "S. Tamang")
-    val memberNames = emptyList<String>()
     val armTypes = listOf("Axe", "Bow and Arrow", "Fire Crackers", "Gun", "Knife", "Sticks")
 
     val humanImpactTypes = listOf(
