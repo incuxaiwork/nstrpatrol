@@ -63,6 +63,7 @@ import {
   replayFeatures,
   routeToTimed,
   routesToFeatures,
+  type GridCoverageInfo,
   type TimedPoint,
 } from "@/lib/map-space";
 
@@ -84,6 +85,12 @@ export interface MapProps {
   boundary?: BoundaryPolygon[];
   /** Reference backend ForestGrid cells (survey grid, ~3.3 km). */
   grids?: GridPolygon[];
+  /**
+   * Authoritative coverage per ForestGrid id (from GET /api/coverage/grids,
+   * joined by grid id). Feeds the patrolled/unpatrolled data-driven styling
+   * on the reference grid. Cells without a record keep the neutral style.
+   */
+  coverageById?: Record<string, GridCoverageInfo> | null;
   /** Attribute-registered analysis-grid cells (frontend-generated, configurable size). */
   analysisGrids?: TaggedGrid[];
   /** Active analysis-grid cell size (drives label + tooltip). */
@@ -155,12 +162,12 @@ export const DEFAULT_LAYER_STATE: ForestLayerState = {
   ranges: true,
   compartments: true,
   analysisGrid: true,
-  grids: false,
+  grids: true,
   routes: true,
   rangers: true,
   markers: true,
   zeropatrol: true,
-  coverage: false,
+  coverage: true,
   heat: false,
 };
 
@@ -173,12 +180,12 @@ function layerRows(gridSize: GridSizeKey): { key: keyof ForestLayerState; title:
     { key: "ranges", title: "Ranges", subtitle: "Range division outlines & labels" },
     { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
     { key: "analysisGrid", title: `${gridSizeLabel(gridSize)} Analysis Grid`, subtitle: "Configurable cells over the forest area" },
-    { key: "grids", title: "Reference Grid", subtitle: "Backend ForestGrid survey cells" },
+    { key: "grids", title: "Reference Grid", subtitle: "Backend ForestGrid survey cells (~3.3 km)" },
     { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
     { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
     { key: "markers", title: "Sightings & Incidents", subtitle: "Observation, incident & SOS points" },
     { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-    { key: "coverage", title: "Coverage Tint", subtitle: "Orange tint by patrol coverage" },
+    { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled on the reference grid" },
     { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
   ];
 }
@@ -211,16 +218,16 @@ const CLICKABLE = [
 const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {  basemap: ["gl-basemap"],
   satellite: ["gl-satellite"],
   boundary: ["gl-boundary-fill", "gl-boundary-line", "gl-boundary-label"],
-  beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label"],
+  beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-beats-coverage"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
   analysisGrid: ["gl-agrid-fill", "gl-agrid-line", "gl-agrid-label", "gl-agrid-sel-fill", "gl-agrid-sel-line"],
-  grids: ["gl-grids-fill", "gl-grids-line", "gl-grids-coverage", "gl-grids-coverage-line"],
+  grids: ["gl-grids-fill", "gl-grids-line"],
   routes: ["gl-routes", "gl-replay-trail", "gl-replay-head"],
   rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
   markers: ["gl-markers-obs", "gl-markers-sos", "gl-markers-sos-label"],
   zeropatrol: ["gl-beats-zero-dash"],
-  coverage: ["gl-beats-coverage"],
+  coverage: ["gl-grids-coverage", "gl-grids-coverage-line"],
   heat: ["gl-heat"],
 };
 
@@ -311,9 +318,10 @@ function buildLayers(m: MapLibreMap) {
       "line-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.2, 10, 0.45, 14, 0.75],
     },
   });
-  // Per-cell coverage tint — data-driven layer that renders NOTHING until a
-  // backend coverage aggregation API populates coverageStatus (currently
-  // null for every cell → explicit "no data" state, never fabricated).
+  // Per-cell coverage tint — data-driven fill fed by the authoritative
+  // coverage API (joined by ForestGrid id). coverageStatus ∈ covered /
+  // uncovered; a cell without a coverage record stays neutral (no data).
+  // Colors re-use the established GIS palette (see legend rows below).
   m.addLayer({
     id: "gl-grids-coverage",
     type: "fill",
@@ -709,6 +717,7 @@ export function MapWorkspace({
   compartments,
   boundary,
   grids,
+  coverageById,
   analysisGrids,
   gridSize = DEFAULT_GRID_SIZE,
   selectedGridIds,
@@ -827,7 +836,7 @@ export function MapWorkspace({
   const compartmentsFc = useMemo(() => compartmentsToFeatures(comps), [comps]);
   const compartmentLabelsFc = useMemo(() => compartmentLabelsToFeatures(comps), [comps]);
   const boundaryFc = useMemo(() => boundariesToFeatures(boundary ?? []), [boundary]);
-  const gridsFc = useMemo(() => gridsToFeatures(grids ?? []), [grids]);
+  const gridsFc = useMemo(() => gridsToFeatures(grids ?? [], coverageById), [grids, coverageById]);
   const analysisGridsFc = useMemo(
     () => analysisGridsToFeatures(analysisGrids ?? [], selectedGridIds),
     [analysisGrids, selectedGridIds]
@@ -1126,8 +1135,8 @@ export function MapWorkspace({
               <LegendRow color="#8a8f98" label="Reference grid (backend)" />
               <LegendRow color="#5b7684" label="Analysis grid" />
               <LegendRow color="#E65100" label="Analysis grid — selected" />
-              <LegendRow color="#2E7D32" label="Grid covered (API)" />
-              <LegendRow color="#B3261E" label="Grid uncovered (API)" />
+              <LegendRow color="#2E7D32" label="Patrol coverage — patrolled" />
+              <LegendRow color="#B3261E" label="Patrol coverage — unpatrolled" />
               <LegendRow color="#5b7684" isRaster label="Satellite / offline basemap" />
             </div>
           )}

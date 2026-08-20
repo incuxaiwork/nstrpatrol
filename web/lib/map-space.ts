@@ -121,28 +121,45 @@ export function boundariesToFeatures(boundaries: BoundaryPolygon[]): GeoFeatureC
 }
 
 /**
- * Reference grid cells. Coverage fields are explicitly null until a backend
- * coverage aggregation API exists — the layer and popup render "no data"
- * states from these placeholders, never fabricated coverage.
+ * Coverage record for one ForestGrid cell — joined to the layer feature by
+ * the authoritative grid id (backend coverage cells[].id ≡ GIS feature id).
  */
-export function gridsToFeatures(grids: GridPolygon[]): GeoFeatureCollection {
+export interface GridCoverageInfo {
+  covered: boolean;
+  pointCount: number;
+  lastPatrolledAt: string | null;
+}
+
+/**
+ * Reference grid cells. Coverage fields are populated by joining the
+ * authoritative coverage API response (GET /api/coverage/grids) onto the
+ * layer features by ForestGrid id (never by index / label / position). Cells
+ * without a coverage record stay coverageStatus: null → "no data" styling.
+ */
+export function gridsToFeatures(
+  grids: GridPolygon[],
+  coverageById?: Record<string, GridCoverageInfo> | null
+): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
-    features: grids.map((g) => ({
-      type: "Feature",
-      id: g.id,
-      properties: flatProps({
+    features: grids.map((g) => {
+      const cov = coverageById?.[g.id];
+      return {
+        type: "Feature",
         id: g.id,
-        gridCode: g.gridCode,
-        rangeId: g.rangeId ?? null,
-        beatId: g.beatId ?? null,
-        compId: g.compId ?? null,
-        coverageStatus: null,
-        lastPatrolAt: null,
-        patrolCount: null,
-      }),
-      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
-    })),
+        properties: flatProps({
+          id: g.id,
+          gridCode: g.gridCode,
+          rangeId: g.rangeId ?? null,
+          beatId: g.beatId ?? null,
+          compId: g.compId ?? null,
+          coverageStatus: cov ? (cov.covered ? "covered" : "uncovered") : null,
+          lastPatrolAt: cov?.lastPatrolledAt ?? null,
+          patrolCount: cov?.pointCount ?? null,
+        }),
+        geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
+      };
+    }),
   };
 }
 

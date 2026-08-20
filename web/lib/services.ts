@@ -86,7 +86,7 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiMapAsset, ApiIncident, ApiPatrol } from "@/lib/api";
+import type { ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
@@ -671,6 +671,18 @@ export const gis = {
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.
   heat: async (): Promise<HeatBlock[]> => [],
+  /**
+   * Authoritative patrol coverage (GET /api/coverage/grids). Backend-scoped;
+   * no mock fallback — failures surface honestly. The API accepts real
+   * backend range/beat/forest ids. Beat ids ARE resolvable (GIS beat features
+   * carry the backend Beat primary key, OBJECTID_1 ≡ Beat.id — the GIS page
+   * translates its derived hierarchy id to a valid beatId before calling).
+   * Range ids have no portal catalog (Range PKs are never exposed), so range
+   * filters keep the request division-scoped and the map applies them
+   * visually.
+   */
+  coverage: async (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}): Promise<ApiGridCoverage> =>
+    remoteOnly(async () => api.coverage.grids(query)),
 };
 
 /* ------------------------------------------------------------------ */
@@ -837,6 +849,28 @@ export const analytics = {
       reviewPct: Math.round(((count("requires-review") + count("pending-review")) / total) * 100),
     };
   },
+};
+
+/* ------------------------------------------------------------------ */
+/* Work Analytics (strict remote — server-side aggregations only)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Work Analytics bindings. Every method calls the real /api/analytics/*
+ * endpoints through the same request layer as every other page — there is
+ * NO mock fallback, NO client-side fabrication of metrics. Sections with no
+ * backend rows surface as empty states (see the page).
+ */
+export const workAnalytics = {
+  /** Patrol volume / distance / duration / steps / mode samples in window. */
+  patrols: (window: { from?: string; to?: string }) =>
+    remoteOnly(() => api.analytics.patrols(window)),
+  /** Incident volume grouped by type / severity / status in window. */
+  incidents: (filter: { from?: string; to?: string; type?: string; severity?: string; status?: string }) =>
+    remoteOnly(() => api.analytics.incidents(filter)),
+  /** Telemetry health: floating patrols, pending sync, integrity, coverage events. */
+  health: (window: { from?: string; to?: string }) =>
+    remoteOnly(() => api.analytics.health(window)),
 };
 
 /* ------------------------------------------------------------------ */

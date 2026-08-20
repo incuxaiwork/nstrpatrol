@@ -171,6 +171,11 @@ async function parseBody(res: Response): Promise<unknown> {
 export async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
   const method = opts.method ?? "GET";
   const url = new URL(`${API_BASE}${path}`);
+  if (opts.query) {
+    for (const [k, v] of Object.entries(opts.query)) {
+      if (v !== undefined) url.searchParams.set(k, String(v));
+    }
+  }
 
   const run = async (): Promise<T> => {
     let res = await rawRequest(path, opts);
@@ -389,6 +394,117 @@ export interface ApiTelemetryAggregate {
 }
 
 /* ------------------------------------------------------------------ */
+/* Work Analytics (GET /api/analytics/* — server-side aggregations)    */
+/* ------------------------------------------------------------------ */
+
+/** The user scope an analytics response was computed under (mirrors scope.ts). */
+export interface ApiAnalyticsScope {
+  kind: "DIVISION" | "SUB_DIVISION" | "RANGE" | "BEAT" | "OPERATIONAL";
+  divisionId?: string;
+  subDivisionId?: string;
+  rangeId?: string;
+  beatId?: string;
+}
+
+export interface ApiPatrolAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    count: number;
+    countByStatus: Record<string, number>;
+    patrolDays: number;
+    clockDurationSeconds: number;
+    completedCount: number;
+    gpsTrackedDistanceKm: number;
+    gpsTrackedDurationSeconds: number;
+    pointCount: number;
+    patrolsWithPoints: number;
+    steps: number;
+    patrolsWithStepReadings: number;
+    modeSamples: Record<string, number>;
+  };
+  byDay: { day: string; count: number }[];
+  byUser: { userId: string; fullName: string; count: number; distanceKm: number; points: number }[];
+}
+
+export interface ApiIncidentAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    total: number;
+    withLocation: number;
+    byType: Record<string, number>;
+    bySeverity: Record<string, number>;
+    byStatus: Record<string, number>;
+    byDay: { day: string; count: number }[];
+  };
+}
+
+export interface ApiHealthAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    totalPatrols: number;
+    patrolsWithPoints: number;
+    patrolsWithoutPoints: number;
+    pointCount: number;
+    pending: Record<string, number>;
+    syncByDay: { day: string; total: number; failed: number }[];
+    syncFailureRate: number;
+    lastSyncAt: string | null;
+    lastSyncStatus: string | null;
+    integrity: { logs: number; tamperTrue: number; divergenceOver60: number };
+    coverageEventsByType: Record<string, number>;
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Grid coverage (GET /api/coverage/grids — authoritative ForestGrid)  */
+/* ------------------------------------------------------------------ */
+
+export interface ApiGridCoverageCell {
+  /** ForestGrid primary key — the authoritative join key (matches the GIS
+   *  layer feature id from GET /api/gis/grids). */
+  id: string;
+  gridCode: string;
+  forestId: string;
+  forestCode: string | null;
+  covered: boolean;
+  pointCount: number;
+  lastPatrolledAt: string | null;
+}
+
+export interface ApiGridCoverageSummary {
+  totalCells: number;
+  patrolledCells: number;
+  unpatrolledCells: number;
+  /** Server-round1 decimal (e.g. 0.2 = 0.2%). Display as returned. */
+  coveragePercent: number;
+  pointCount: number;
+}
+
+export interface ApiGridCoverage {
+  generatedAt: string;
+  scope: {
+    kind: string;
+    subDivisionId: string | null;
+    rangeId: string | null;
+    beatId: string | null;
+  };
+  summary: ApiGridCoverageSummary;
+  cells: ApiGridCoverageCell[];
+}
+
+/* ------------------------------------------------------------------ */
 /* Endpoint groups (mirror backend/src/routes)                         */
 /* ------------------------------------------------------------------ */
 
@@ -501,6 +617,20 @@ export const forests = {
   list: () => request<ApiForest[]>("/api/forests"),
 };
 
+export const coverage = {
+  grids: (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
+    request<ApiGridCoverage>("/api/coverage/grids", { query }),
+};
+
+export const analytics = {
+  patrols: (query: { from?: string; to?: string } = {}) =>
+    request<ApiPatrolAnalytics>("/api/analytics/patrols", { query }),
+  incidents: (query: { from?: string; to?: string; type?: string; severity?: string; status?: string } = {}) =>
+    request<ApiIncidentAnalytics>("/api/analytics/incidents", { query }),
+  health: (query: { from?: string; to?: string } = {}) =>
+    request<ApiHealthAnalytics>("/api/analytics/health", { query }),
+};
+
 export const uploads = {
   urlFor: (key: string) => `${API_BASE}/api/uploads/${encodeURIComponent(key)}`,
 };
@@ -510,5 +640,5 @@ export const health = {
 };
 
 /** Aggregate client mirroring the backend router tree (for discoverability + tooling). */
-export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, uploads, health };
+export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, health };
 export default api;

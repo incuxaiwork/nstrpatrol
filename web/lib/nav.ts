@@ -63,6 +63,7 @@ export const navModules: NavItem[] = [
       { label: "Beat Analytics", href: "/analytics/beats" },
       { label: "Range Analytics", href: "/analytics/ranges" },
       { label: "Division Analytics", href: "/analytics/divisions" },
+      { label: "Work Analytics", href: "/work-analytics" },
     ],
   },
   {
