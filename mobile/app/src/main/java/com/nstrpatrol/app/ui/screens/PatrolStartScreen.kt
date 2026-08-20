@@ -56,7 +56,7 @@ fun PatrolStartScreen(
     var openSheet by remember { mutableStateOf<String?>(null) }
     var showErrors by remember { mutableStateOf(false) }
     val photoSlot = "patrol_start"
-    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
     Box {
         NstrScaffold(
             title = stringResource(R.string.patrol_start_title),
@@ -72,7 +72,11 @@ fun PatrolStartScreen(
                 actionText = stringResource(R.string.patrol_photo_action),
                 hint = stringResource(R.string.patrol_photo_hint),
                 photoPaths = photoPaths,
-                onClick = { onOpenCamera(photoSlot) }
+                onClick = { onOpenCamera(photoSlot) },
+                onRemovePhoto = { path ->
+                    PhotoStore.removePath(photoSlot, path)
+                    photoPaths = PhotoStore.paths(photoSlot)
+                }
             )
 
             Spacer(Modifier.height(16.dp))

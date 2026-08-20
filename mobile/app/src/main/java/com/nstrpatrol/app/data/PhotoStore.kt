@@ -16,10 +16,15 @@ object PhotoStore {
     fun init(capturesDir: File) {
         root = capturesDir
         if (!capturesDir.exists()) capturesDir.mkdirs()
-        // Re-hydrate existing captures into the map keyed by filename (slot_epoch.jpg).
+        // Re-hydrate existing captures into the map. Files are named "<slot>_<epoch>.jpg";
+        // match the known slot prefixes (longest first) so multi-word slot names like
+        // "human_impact" rehydrate into the right key.
+        val slots = listOf(
+            "animal_mortality", "human_impact", "patrol_start", "quick_capture", "water_source", "sighting"
+        )
         capturesDir.listFiles()?.forEach { file ->
-            val slot: String = file.name.substringBefore('_')
-            if (slot.isNotEmpty()) {
+            val slot: String? = slots.firstOrNull { file.name.startsWith("${it}_") }
+            if (slot != null) {
                 store.getOrPut(slot) { mutableListOf() }.add(file.absolutePath)
             }
         }
@@ -51,4 +56,14 @@ object PhotoStore {
     }
 
     fun remove(slot: String) = clear(slot)
+
+    /** Remove a single photo at [path] from [slot]; deletes the underlying file. */
+    fun removePath(slot: String, path: String): Boolean {
+        val list = store[slot] ?: return false
+        if (list.remove(path)) {
+            File(path).delete()
+            return true
+        }
+        return false
+    }
 }

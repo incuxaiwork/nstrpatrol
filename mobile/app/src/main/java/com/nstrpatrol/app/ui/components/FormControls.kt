@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -163,7 +164,8 @@ fun PhotoPlaceholder(
     hint: String,
     modifier: Modifier = Modifier,
     photoPaths: List<String> = emptyList(),
-    onClick: () -> Unit = {}
+    onClick: () -> Unit = {},
+    onRemovePhoto: (String) -> Unit = {}
 ) {
     val photos = photoPaths.filter { File(it).exists() }
     if (photos.isNotEmpty()) {
@@ -206,6 +208,21 @@ fun PhotoPlaceholder(
                             color = Color.White,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(4.dp)
+                            .size(20.dp)
+                            .background(Color(0xCC111111), CircleShape)
+                            .clickable { onRemovePhoto(path) }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Close,
+                            contentDescription = "Remove photo",
+                            tint = Color.White,
+                            modifier = Modifier.size(14.dp).align(Alignment.Center)
                         )
                     }
                 }

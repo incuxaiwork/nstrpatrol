@@ -43,7 +43,7 @@ fun QuickCaptureScreen(
     var remarks by remember { mutableStateOf("") }
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "quick_capture"
-    val photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
 
     Box {
         NstrScaffold(
@@ -58,7 +58,11 @@ fun QuickCaptureScreen(
                 actionText = "Take photo",
                 hint = "Capture a photo of the sign",
                 photoPaths = photoPaths,
-                onClick = { onOpenCamera(photoSlot) }
+                onClick = { onOpenCamera(photoSlot) },
+                onRemovePhoto = { path ->
+                    PhotoStore.removePath(photoSlot, path)
+                    photoPaths = PhotoStore.paths(photoSlot)
+                }
             )
 
             Spacer(Modifier.height(16.dp))
