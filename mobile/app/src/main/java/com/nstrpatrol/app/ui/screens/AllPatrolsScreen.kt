@@ -113,7 +113,14 @@ fun AllPatrolsScreen(
         }
     }
 
-    LaunchedEffect(Unit) { refreshBackend() }
+    LaunchedEffect(Unit) {
+        // Offline-first: a device with local patrol data must not hit the
+        // backend on every visit to this screen. Only a brand-new device
+        // (no local sessions at all) seeds its list from the server here;
+        // the manual Refresh / Pull-from-Cloud buttons cover everything else.
+        val hasLocalData = withContext(Dispatchers.IO) { dao.countSessions() > 0 }
+        if (!hasLocalData) refreshBackend()
+    }
 
     fun pullFromCloud() {
         scope.launch {

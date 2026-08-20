@@ -7,8 +7,10 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.nstrpatrol.app.MainActivity
@@ -41,8 +43,27 @@ class PatrolForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIFICATION_ID, buildNotification())
-        return START_STICKY
+        // The manifest declares foregroundServiceType="location", so on Android
+        // 10+ the OS requires the type to be passed explicitly. Omitting it makes
+        // Android 14/15 throw SecurityException, crashing the app at patrol start.
+        // When the permission is missing (first run, then revoked) we stop
+        // gracefully instead of taking the whole process down.
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    buildNotification(),
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, buildNotification())
+            }
+            START_STICKY
+        } catch (e: SecurityException) {
+            Log.w(TAG, "Could not start location FGS: ${e.message}")
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
     private fun buildNotification(): Notification {
@@ -63,6 +84,7 @@ class PatrolForegroundService : Service() {
     }
 
     companion object {
+        private const val TAG = "PatrolFgService"
         private const val CHANNEL_ID = "nstr_patrol_active"
         private const val NOTIFICATION_ID = 1001
 

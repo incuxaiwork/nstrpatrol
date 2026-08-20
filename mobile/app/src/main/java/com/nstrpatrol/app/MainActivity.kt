@@ -85,6 +85,7 @@ import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -174,6 +175,17 @@ fun NstrApp() {
     LaunchedEffect(Unit) {
         NetworkStatus.attach(context.applicationContext)
         SyncScheduler.schedule(context.applicationContext)
+        // Recover orphaned ACTIVE sessions: the in-memory patrol timer is lost
+        // when the process is killed (force-stop, crash, reboot), so any session
+        // still ACTIVE in Room at startup can no longer be "in progress" — stop it
+        // showing as a live patrol and let its recorded points sync as completed.
+        withContext(Dispatchers.IO) {
+            val dao = database.telemetryDao()
+            dao.patrolSessionsByStatus("ACTIVE").first().forEach { s ->
+                val lastTs = dao.patrolPointsOrdered(s.patrolId).lastOrNull()?.timestamp
+                dao.finalizeStaleActivePatrol(s.patrolId, lastTs ?: s.startTime)
+            }
+        }
     }
 
     /** Stops a patrol, persists final stats locally, and syncs to the backend.
@@ -228,16 +240,14 @@ fun NstrApp() {
     val notificationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { }
-    LaunchedEffect(patrolTimer.running.value) {
-        if (patrolTimer.running.value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-            !telemetryRecorder.hasActivityRecognitionPermission()
-        ) {
-            activityRecognitionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
-        }
-    }
+    // The FGS is declared with foregroundServiceType="location". On Android
+    // 14/15 that start throws SecurityException unless ACCESS_FINE_LOCATION is
+    // runtime-granted first, so a patrol start requires it before we fire the
+    // service — otherwise a fresh install would crash the app at patrol start.
+    var pendingPatrolAfterLocationGrant by rememberSaveable { mutableStateOf(false) }
 
-    /** Starts a patrol: timer + keep-alive foreground service + notifications. */
-    fun startPatrolNow() {
+    /** Kicks off the actual patrol once location permission is available. */
+    fun beginPatrol() {
         patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
         PatrolForegroundService.start(context)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -248,6 +258,39 @@ fun NstrApp() {
         ) {
             notificationLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+    }
+
+    val locationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (pendingPatrolAfterLocationGrant) {
+            pendingPatrolAfterLocationGrant = false
+            if (granted) beginPatrol()
+        }
+    }
+    LaunchedEffect(patrolTimer.running.value) {
+        if (patrolTimer.running.value && Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            !telemetryRecorder.hasActivityRecognitionPermission()
+        ) {
+            activityRecognitionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
+        }
+    }
+
+    /** Starts a patrol: timer + keep-alive foreground service + notifications. */
+    fun startPatrolNow() {
+        // The app tracks exactly one active patrol at a time; a second start
+        // would fork a stray ACTIVE session that never gets completed.
+        if (patrolTimer.isRunning()) return
+        if (ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPatrolAfterLocationGrant = true
+            locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+        beginPatrol()
     }
 
     if (BuildConfig.DEBUG) {
@@ -287,6 +330,19 @@ fun NstrApp() {
             if (shouldSync) {
                 SyncController.sync(database.telemetryDao(), api)
             }
+        }
+    }
+
+    // While a patrol is running, push its growing PENDING data to the backend
+    // on a rolling cadence. Connectivity toggles / the 30-min WorkManager are
+    // too rare on a multi-hour patrol, so without this the backend stays hours
+    // out of date (and the "sync queue" looks stuck).
+    LaunchedEffect(patrolTimer.running.value) {
+        while (patrolTimer.running.value) {
+            if (NetworkStatus.online.value && settings.syncMode.value == SettingsStore.MODE_AUTO) {
+                SyncController.sync(database.telemetryDao(), api)
+            }
+            delay(3 * 60 * 1000L)
         }
     }
 
