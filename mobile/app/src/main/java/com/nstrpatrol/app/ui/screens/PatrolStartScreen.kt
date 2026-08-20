@@ -32,6 +32,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.nstrpatrol.app.data.Options
+import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
@@ -66,7 +67,9 @@ fun PatrolStartScreen(
     onOpenCamera: (String) -> Unit = {},
     patrolTimer: PatrolTimer,
     dao: TelemetryDao,
-    api: com.nstrpatrol.app.data.map.BackendApiClient
+    api: com.nstrpatrol.app.data.map.BackendApiClient,
+    auth: AuthSession? = null,
+    onRequireFaceSetup: () -> Unit = {}
 ) {
     var patrolType by remember { mutableStateOf<String?>(null) }
     var patrolMethod by remember { mutableStateOf<String?>(null) }
@@ -85,6 +88,14 @@ fun PatrolStartScreen(
     // Detect whether this device can prove identity via its built-in biometrics
     // (preferring the enrolled face when present). Used to gate patrol start.
     val context = LocalContext.current
+
+    // This officer must finish one-time face setup on this handset before patrolling.
+    LaunchedEffect(Unit) {
+        if (auth != null && !auth.faceSetupDoneLocally()) {
+            onRequireFaceSetup()
+        }
+    }
+
     LaunchedEffect(Unit) {
         val allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK or
             BiometricManager.Authenticators.DEVICE_CREDENTIAL

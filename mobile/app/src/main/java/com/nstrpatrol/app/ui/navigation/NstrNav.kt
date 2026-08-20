@@ -23,6 +23,7 @@ sealed class Route(val route: String) {
     data object QuickCapture : Route("quick_capture")
     data object Sos : Route("sos")
     data object GpsDiagnostics : Route("gps_diagnostics")
+    data object FaceSetup : Route("face_setup")
 
     /** Read-only view of an already-reported incident opened from the Reports page. */
     data class IncidentDetail(val incidentId: String) : Route("incident_detail")
@@ -62,6 +63,7 @@ sealed class Route(val route: String) {
                 "quick_capture" -> QuickCapture
                 "sos" -> Sos
                 "gps_diagnostics" -> GpsDiagnostics
+                "face_setup" -> FaceSetup
                 "incident_detail" -> if (parts.size == 2) IncidentDetail(parts[1]) else null
                 "camera" -> if (parts.size == 2) Camera(parts[1]) else null
                 "patrol_report" -> if (parts.size == 2) PatrolReport(parts[1]) else null

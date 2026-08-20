@@ -20,7 +20,7 @@ object PhotoStore {
         // match the known slot prefixes (longest first) so multi-word slot names like
         // "human_impact" rehydrate into the right key.
         val slots = listOf(
-            "animal_mortality", "human_impact", "patrol_start", "quick_capture", "water_source", "sighting"
+            "animal_mortality", "human_impact", "patrol_start", "quick_capture", "water_source", "sighting", "face_reference"
         )
         capturesDir.listFiles()?.forEach { file ->
             val slot: String? = slots.firstOrNull { file.name.startsWith("${it}_") }

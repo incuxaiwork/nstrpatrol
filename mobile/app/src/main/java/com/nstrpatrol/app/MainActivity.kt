@@ -65,6 +65,7 @@ import com.nstrpatrol.app.ui.screens.AllPatrolsScreen
 import com.nstrpatrol.app.ui.screens.AnimalMortalityScreen
 import com.nstrpatrol.app.ui.screens.CameraScreen
 import com.nstrpatrol.app.ui.screens.DashboardScreen
+import com.nstrpatrol.app.ui.screens.FaceSetupScreen
 import com.nstrpatrol.app.ui.screens.GpsDiagnosticsScreen
 import com.nstrpatrol.app.ui.screens.HumanImpactScreen
 import com.nstrpatrol.app.ui.screens.IncidentDetailScreen
@@ -389,17 +390,35 @@ fun NstrApp() {
             .safeDrawingPadding()
     ) {
         when (nav.current) {
-        Route.Login -> LoginScreen(
-            onLogin = { email, password ->
-                try {
-                    auth.login(email, password)
-                    sessionStore.saveRoute(Route.Dashboard.key)
-                    null
-                } catch (e: Exception) {
-                    e.message ?: "Login failed"
+        Route.Login -> {
+            var needsSetup by remember { mutableStateOf(false) }
+            LoginScreen(
+                onLogin = { email, password ->
+                    try {
+                        auth.login(email, password)
+                        needsSetup = auth.needsFaceSetup()
+                        sessionStore.saveRoute(
+                            if (needsSetup) Route.FaceSetup.key else Route.Dashboard.key
+                        )
+                        null
+                    } catch (e: Exception) {
+                        e.message ?: "Login failed"
+                    }
+                },
+                onSuccess = {
+                    nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
                 }
+            )
+        }
+
+        Route.FaceSetup -> FaceSetupScreen(
+            onDone = {
+                sessionStore.saveRoute(Route.Dashboard.key)
+                nav.resetTo(Route.Dashboard)
             },
-            onSuccess = { nav.resetTo(Route.Dashboard) }
+            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
+            auth = auth,
+            api = api
         )
 
         Route.Dashboard -> DashboardScreen(
@@ -475,7 +494,9 @@ fun NstrApp() {
             onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
             patrolTimer = patrolTimer,
             dao = database.telemetryDao(),
-            api = api
+            api = api,
+            auth = auth,
+            onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
         )
 
         Route.HumanImpact -> HumanImpactScreen(

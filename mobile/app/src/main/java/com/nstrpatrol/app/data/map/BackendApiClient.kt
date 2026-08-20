@@ -113,6 +113,27 @@ class BackendApiClient {
     /** Reports an incident on the backend. */
     fun createIncident(body: JSONObject): JSONObject = postJson("/api/incidents", body)
 
+    /** Uploads a photo as multipart/form-data. Returns the backend's {key, ...}. */
+    fun uploadMultipart(path: String, fieldName: String, file: File, mimeType: String = "image/jpeg"): JSONObject {
+        val res = requestMultipart(path, fieldName, file, mimeType)
+            ?: throw ApiException(0, "network", "Cannot reach the server")
+        if (res.first in 200..299) {
+            return res.second?.let { runCatching { JSONObject(it) }.getOrNull() } ?: JSONObject()
+        }
+        throw ApiException(res.first, null, res.second?.take(500))
+    }
+
+    /** Marks this handset as face-verified for the signed-in officer. */
+    fun verifyDeviceFace(deviceId: String, photoKey: String?, mode: String): JSONObject =
+        postJson("/api/devices/verify", JSONObject().apply {
+            put("deviceId", deviceId)
+            if (photoKey != null) put("photoKey", photoKey)
+            put("mode", mode)
+        })
+
+    /** Lists the signed-in user's registered devices (includes verification state). */
+    fun myDevices(): JSONArray = getJsonArray("/api/devices") ?: JSONArray()
+
     /** Fetches a patrol's recorded points for route rendering (server-only patrols). */
     fun getPatrolPoints(patrolId: String): List<PatrolPointEntity> {
         val arr = getJsonArray("/api/patrols/$patrolId/points") ?: return emptyList()
@@ -215,6 +236,43 @@ class BackendApiClient {
                 }
             } catch (e: Exception) {
                 Log.w("BackendApiClient", "$method $path via $baseUrl failed: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    /** Multipart POST upload (single file part) used for photo uploads. */
+    private fun requestMultipart(
+        path: String,
+        fieldName: String,
+        file: File,
+        mimeType: String
+    ): Pair<Int, String?>? {
+        val boundary = "NstrPatrolBoundary" + System.currentTimeMillis()
+        for (baseUrl in getCandidateBaseUrls()) {
+            try {
+                val conn = openUrl("$baseUrl$path", "POST")
+                try {
+                    accessToken?.let { conn.setRequestProperty("Authorization", "Bearer $it") }
+                    conn.doOutput = true
+                    conn.setRequestProperty("Content-Type", "multipart/form-data; boundary=$boundary")
+                    conn.outputStream.use { out ->
+                        out.write(
+                            "--$boundary\r\nContent-Disposition: form-data; name=\"$fieldName\"; filename=\"${file.name}\"\r\nContent-Type: $mimeType\r\n\r\n".toByteArray()
+                        )
+                        file.inputStream().use { it.copyTo(out) }
+                        out.write("\r\n--$boundary--\r\n".toByteArray())
+                    }
+                    val code = conn.responseCode
+                    val stream = if (code in 200..299) conn.inputStream else conn.errorStream
+                    val text = stream?.bufferedReader()?.use { it.readText() }
+                    activeBaseUrl = baseUrl
+                    return Pair(code, text)
+                } finally {
+                    conn.disconnect()
+                }
+            } catch (e: Exception) {
+                Log.w("BackendApiClient", "multipart $path via $baseUrl failed: ${e.message}")
             }
         }
         return null

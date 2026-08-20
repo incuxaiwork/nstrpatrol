@@ -50,6 +50,35 @@ devicesRouter.get('/', async (req, res) => {
   res.json(devices);
 });
 
+const verifySchema = z.object({
+  deviceId: z.string().trim().min(1).max(255),
+  photoKey: z.string().trim().max(255).nullish(),
+  mode: z.enum(['FACE_BIOMETRIC', 'PHOTO_ONLY']).default('FACE_BIOMETRIC'),
+});
+
+// Records that the officer verified their identity on this handset using the
+// device's built-in face recognition (or the photo-only fallback). The device
+// must be owned by the signed-in user; verification is stored so reinstall or
+// device handoffs can be audited and re-verified.
+devicesRouter.post('/verify', validateBody(verifySchema), async (req, res) => {
+  const { deviceId, photoKey, mode } = req.body;
+  const existing = await prisma.device.findUnique({ where: { deviceId } });
+  if (!existing || existing.userId !== req.user!.id) {
+    throw new HttpError(403, 'forbidden', 'This device is not registered to your account');
+  }
+  const device = await prisma.device.update({
+    where: { deviceId },
+    data: {
+      faceVerifiedAt: new Date(),
+      facePhotoKey: photoKey ?? existing.facePhotoKey,
+      verificationMode: mode,
+      verifiedByUserId: req.user!.id,
+      lastSeenAt: new Date(),
+    },
+  });
+  res.json(device);
+});
+
 const updateSchema = z.object({
   pushToken: z.string().trim().max(512).nullish(),
   deviceName: z.string().trim().min(1).max(120).optional(),
