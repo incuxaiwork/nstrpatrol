@@ -100,7 +100,7 @@ class AuthSession(context: Context) {
         val refreshToken = res.optString("refreshToken")
         val user = AuthUser.fromJson(res.optJSONObject("user"))
             ?: throw ApiException(0, "bad_response", "Unexpected server response")
-        val userJson = res.optJSONObject("user").toString()
+        val userJson = res.optJSONObject("user")?.toString().orEmpty()
         prefs.edit()
             .putString("accessToken", accessToken)
             .putString("refreshToken", refreshToken)

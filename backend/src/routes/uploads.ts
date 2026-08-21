@@ -1,13 +1,25 @@
 import { Router } from 'express';
 import multer from 'multer';
-import { z } from 'zod';
 import { requireAuth } from '../middleware/auth';
-import { validateParams } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
-import { param } from '../lib/http';
 import { deleteStored, readStored, storeBuffer } from '../services/storage';
 
 export const uploadsRouter = Router();
+
+// Public image getter (allows loading photos directly by S3 key)
+uploadsRouter.get('/*key', async (req, res, next) => {
+  try {
+    const rawKey = (req.params as any).key || req.path.replace(/^\//, '');
+    if (!rawKey) throw new HttpError(400, 'invalid_key', 'File key required');
+    const data = await readStored(rawKey);
+    if (!data) throw new HttpError(404, 'not_found', 'File not found');
+    res.setHeader('Content-Type', guessContentType(rawKey));
+    res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    res.send(data);
+  } catch (e) {
+    next(e);
+  }
+});
 
 uploadsRouter.use(requireAuth);
 
@@ -26,22 +38,15 @@ uploadsRouter.post('/', upload.single('file'), async (req, res) => {
   });
 });
 
-const keySchema = z.object({ key: z.string().regex(/^[0-9]{8}\/[a-f0-9]{16}\.[a-z0-9]{1,12}$/i) });
-
-uploadsRouter.get('/:key', validateParams(keySchema), async (req, res) => {
-  const key = param(req, 'key');
-  const data = await readStored(key);
-  if (!data) throw new HttpError(404, 'not_found', 'File not found');
-  res.setHeader('Content-Type', guessContentType(key));
-  res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
-  res.send(data);
-});
-
-uploadsRouter.delete('/:key', requireAuth, validateParams(keySchema), async (req, res) => {
-  const key = param(req, 'key');
-  const removed = await deleteStored(key);
-  if (!removed) throw new HttpError(404, 'not_found', 'File not found');
-  res.status(204).end();
+uploadsRouter.delete('/*key', async (req, res, next) => {
+  try {
+    const rawKey = (req.params as any).key || req.path.replace(/^\//, '');
+    const removed = await deleteStored(rawKey);
+    if (!removed) throw new HttpError(404, 'not_found', 'File not found');
+    res.status(204).end();
+  } catch (e) {
+    next(e);
+  }
 });
 
 function guessContentType(key: string): string {
@@ -56,8 +61,6 @@ function guessContentType(key: string): string {
       return 'image/webp';
     case 'gif':
       return 'image/gif';
-    case 'mp4':
-      return 'video/mp4';
     default:
       return 'application/octet-stream';
   }

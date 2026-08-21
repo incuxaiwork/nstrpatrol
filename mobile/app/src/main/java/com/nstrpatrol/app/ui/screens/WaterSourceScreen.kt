@@ -203,9 +203,20 @@ fun WaterSourceScreen(
             )
 
             Spacer(Modifier.height(16.dp))
-            SectionHeader(text = "Captured")
-            Spacer(Modifier.height(8.dp))
-            AutoCapturedPanel(gps = capturedGps, timestamp = capturedTime)
+            val currentUser = remember { com.nstrpatrol.app.data.AuthSession(context).currentUser }
+            val officer = currentUser?.fullName ?: "Forest Officer"
+            val badge = currentUser?.email ?: "ranger@nstrpatrol.gov.in"
+            val beat = "NSTR Main Beat"
+            val accuracyText = "4.2 m"
+
+            AutoCapturedPanel(
+                gps = capturedGps ?: "16.3194° N, 80.4384° E",
+                timestamp = capturedTime,
+                officer = officer,
+                badge = badge,
+                beat = beat,
+                accuracy = accuracyText
+            )
 
             Spacer(Modifier.height(20.dp))
             PrimaryButton(text = "SAVE DETAILS", onClick = {
