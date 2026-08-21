@@ -91,7 +91,7 @@ const schemas = {
   'movement-mode': z.array(
     ts.extend({
       mode: z.string().min(1).max(50),
-      confidence: z.number().finite().min(0).max(1).nullish(),
+      confidence: z.number().finite().min(0).max(100).nullish(),
       speedKmh: z.number().finite().nonnegative().nullish(),
     }),
   ),
@@ -101,7 +101,7 @@ const schemas = {
       startTime: dateTime,
       endTime: dateTime,
       mode: z.enum(['WALK', 'BICYCLE', 'VEHICLE', 'STATIONARY']),
-      confidence: z.number().finite().min(0).max(1).nullish(),
+      confidence: z.number().finite().min(0).max(100).nullish(),
     }),
   ),
   'coverage-events': z.array(

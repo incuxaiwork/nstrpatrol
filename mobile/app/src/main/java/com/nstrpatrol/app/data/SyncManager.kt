@@ -80,6 +80,7 @@ object SyncManager {
         syncPatrols(dao, api, ok, fail)
         syncPoints(dao, api, ok, fail)
         syncReadings(dao, api, ok, fail)
+        runCatching { dao.resetLocalPathIncidentsToPending() }
         syncIncidents(dao, api, ok, fail)
         syncActivitySegments(dao, api, ok, fail)
         syncCoverageEvents(dao, api, ok, fail)
@@ -129,6 +130,7 @@ object SyncManager {
                 session.patrolMethod?.let { put("patrolMethod", it) }
                 session.beat?.let { put("beat", it) }
                 session.armedStatus?.let { put("armedStatus", it) }
+                put("faceVerified", session.faceVerified)
                 put("caloriesEstimate", session.caloriesEstimate)
                 put("heartPointsEstimate", session.heartPointsEstimate)
                 put("avgSpeedKmh", session.avgSpeedKmh)
@@ -353,42 +355,86 @@ object SyncManager {
     ) {
         val incidents = dao.pendingIncidents()
         if (incidents.isEmpty()) return
-        Log.d(TAG, "Syncing ${incidents.size} incidents")
+        Log.d(TAG, "Syncing ${incidents.size} incidents to S3 + backend")
 
-        // Chunk incidents into groups of 50 (incidents are larger)
-        val chunks = incidents.chunked(50)
-        for ((idx, chunk) in chunks.withIndex()) {
-            val records = JSONArray()
-            for (inc in chunk) {
-                records.put(JSONObject().apply {
-                    put("id", inc.id)
-                    put("type", inc.type)
-                    put("title", inc.title)
-                    inc.description?.let { put("description", it) }
-                    put("severity", inc.severity)
-                    put("details", org.json.JSONObject(inc.detailsJson ?: "{}"))
-                    inc.latitude?.let { put("latitude", it) }
-                    inc.longitude?.let { put("longitude", it) }
-                    inc.accuracy?.let { put("accuracy", it.toDouble()) }
-                    put("photos", org.json.JSONArray(inc.photos ?: "[]"))
-                    put("occurredAt", inc.occurredAt)
-                    put("reportedAt", inc.reportedAt)
-                    inc.patrolId?.let { put("patrolId", it) }
-                })
+        for (inc in incidents) {
+            val photoArray = JSONArray()
+            val rawPhotos = inc.photos ?: "[]"
+            val photoList = if (rawPhotos.trim().startsWith("[")) {
+                runCatching {
+                    val arr = JSONArray(rawPhotos)
+                    (0 until arr.length()).mapNotNull { arr.optString(it).ifEmpty { null } }
+                }.getOrDefault(emptyList())
+            } else {
+                rawPhotos.split(",").map { it.trim() }.filter { it.isNotEmpty() }
             }
+
+            var uploadError: Throwable? = null
+            for (p in photoList) {
+                val file = java.io.File(p)
+                if (file.exists()) {
+                    val s3Key = runCatching {
+                        val res = api.uploadMultipart("/api/uploads", "file", file)
+                        res.optString("key").ifEmpty { null }
+                    }.onFailure { err ->
+                        Log.e(TAG, "Failed to upload photo $p to S3: ${err.message}", err)
+                        uploadError = err
+                    }.getOrNull()
+
+                    if (s3Key != null) {
+                        Log.i(TAG, "Uploaded photo $p -> S3 Key: $s3Key")
+                        // Preserve local photo file under S3 filename so ranger phone retains instant local access
+                        runCatching {
+                            val filename = s3Key.split("/").last()
+                            val localTarget = java.io.File(PhotoStore.dir(), filename)
+                            if (!localTarget.exists()) {
+                                file.copyTo(localTarget, overwrite = true)
+                            }
+                        }
+                        photoArray.put(s3Key)
+                    } else {
+                        photoArray.put(p)
+                    }
+                } else {
+                    photoArray.put(p)
+                }
+            }
+
+            if (uploadError != null) {
+                fail(1, uploadError)
+                continue
+            }
+
+            val updatedPhotosJson = photoArray.toString()
+            val record = JSONObject().apply {
+                put("id", inc.id)
+                put("type", inc.type)
+                put("title", inc.title)
+                inc.description?.let { put("description", it) }
+                put("severity", inc.severity)
+                put("details", org.json.JSONObject(inc.detailsJson ?: "{}"))
+                inc.latitude?.let { put("latitude", it) }
+                inc.longitude?.let { put("longitude", it) }
+                inc.accuracy?.let { put("accuracy", it.toDouble()) }
+                put("photos", photoArray)
+                put("occurredAt", inc.occurredAt)
+                put("reportedAt", inc.reportedAt)
+                inc.patrolId?.let { put("patrolId", it) }
+            }
+
             runCatching {
                 val body = JSONObject().apply {
                     put("batches", JSONArray().put(JSONObject().apply {
                         put("entity", "incidents")
-                        put("records", records)
+                        put("records", JSONArray().put(record))
                     }))
                 }
                 withNetworkRetry { api.postJson("/api/sync/upload", body) }
-                Log.d(TAG, "Incidents chunk ${idx + 1}/${chunks.size} uploaded (${chunk.size} records)")
-            }.onFailure { fail(chunk.size, it); return }
+                dao.updateIncidentPhotosAndSyncStatus(inc.id, updatedPhotosJson, "SYNCED")
+                Log.i(TAG, "Incident ${inc.id} synced with ${photoArray.length()} S3 photo key(s)")
+                ok(1)
+            }.onFailure { fail(1, it) }
         }
-        dao.markIncidentsSynced()
-        ok(incidents.size)
     }
 
     private suspend fun syncActivitySegments(

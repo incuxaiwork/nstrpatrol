@@ -16,18 +16,8 @@ object PhotoStore {
     fun init(capturesDir: File) {
         root = capturesDir
         if (!capturesDir.exists()) capturesDir.mkdirs()
-        // Re-hydrate existing captures into the map. Files are named "<slot>_<epoch>.jpg";
-        // match the known slot prefixes (longest first) so multi-word slot names like
-        // "human_impact" rehydrate into the right key.
-        val slots = listOf(
-            "animal_mortality", "human_impact", "patrol_start", "quick_capture", "water_source", "sighting"
-        )
-        capturesDir.listFiles()?.forEach { file ->
-            val slot: String? = slots.firstOrNull { file.name.startsWith("${it}_") }
-            if (slot != null) {
-                store.getOrPut(slot) { mutableListOf() }.add(file.absolutePath)
-            }
-        }
+        // Do not auto-populate old captured files into active form drafts on startup.
+        store.clear()
     }
 
     fun dir(): File {
@@ -37,7 +27,6 @@ object PhotoStore {
 
     /** Replace all photos for [slot] with [files]. */
     fun set(slot: String, files: List<File>) {
-        clear(slot)
         store[slot] = files.map { it.absolutePath }.toMutableList()
     }
 
@@ -51,19 +40,16 @@ object PhotoStore {
 
     fun has(slot: String): Boolean = paths(slot).isNotEmpty()
 
+    /** Clear in-memory draft list for [slot] without deleting files from disk. */
     fun clear(slot: String) {
-        store.remove(slot)?.forEach { File(it).delete() }
+        store.remove(slot)
     }
 
     fun remove(slot: String) = clear(slot)
 
-    /** Remove a single photo at [path] from [slot]; deletes the underlying file. */
+    /** Remove a single photo from active draft slot without deleting the file. */
     fun removePath(slot: String, path: String): Boolean {
         val list = store[slot] ?: return false
-        if (list.remove(path)) {
-            File(path).delete()
-            return true
-        }
-        return false
+        return list.remove(path)
     }
 }

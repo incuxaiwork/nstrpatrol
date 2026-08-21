@@ -10,7 +10,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.compose.BackHandler
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.enableEdgeToEdge
@@ -40,6 +39,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.R
 import com.nstrpatrol.app.data.AuthSession
@@ -65,6 +65,7 @@ import com.nstrpatrol.app.ui.screens.AllPatrolsScreen
 import com.nstrpatrol.app.ui.screens.AnimalMortalityScreen
 import com.nstrpatrol.app.ui.screens.CameraScreen
 import com.nstrpatrol.app.ui.screens.DashboardScreen
+import com.nstrpatrol.app.ui.screens.FaceSetupScreen
 import com.nstrpatrol.app.ui.screens.GpsDiagnosticsScreen
 import com.nstrpatrol.app.ui.screens.HumanImpactScreen
 import com.nstrpatrol.app.ui.screens.IncidentDetailScreen
@@ -94,7 +95,7 @@ import kotlinx.coroutines.withContext
 private const val DEBUG_START_PATROL = "com.nstrpatrol.app.DEBUG_START_PATROL"
 private const val DEBUG_STOP_PATROL = "com.nstrpatrol.app.DEBUG_STOP_PATROL"
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(SupportedLanguages.wrapContext(newBase))
     }
@@ -360,7 +361,7 @@ fun NstrApp() {
     // Root back (no screen to pop): never close during a patrol — background the
     // app instead so tracking/telemetry keeps running. Otherwise sync-then-close
     // when online, close immediately when offline (sync resumes later via WorkManager).
-    val activity = context as? ComponentActivity
+    val activity = context as? android.app.Activity
     BackHandler(enabled = !nav.canGoBack) {
         if (patrolTimer.isRunning()) {
             @Suppress("DEPRECATION")
@@ -389,17 +390,34 @@ fun NstrApp() {
             .safeDrawingPadding()
     ) {
         when (nav.current) {
-        Route.Login -> LoginScreen(
-            onLogin = { email, password ->
-                try {
-                    auth.login(email, password)
-                    sessionStore.saveRoute(Route.Dashboard.key)
-                    null
-                } catch (e: Exception) {
-                    e.message ?: "Login failed"
+        Route.Login -> {
+            var needsSetup by remember { mutableStateOf(false) }
+            LoginScreen(
+                onLogin = { email, password ->
+                    try {
+                        auth.login(email, password)
+                        needsSetup = auth.needsFaceSetup()
+                        sessionStore.saveRoute(
+                            if (needsSetup) Route.FaceSetup.key else Route.Dashboard.key
+                        )
+                        null
+                    } catch (e: Exception) {
+                        e.message ?: "Login failed"
+                    }
+                },
+                onSuccess = {
+                    nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
                 }
+            )
+        }
+
+        Route.FaceSetup -> FaceSetupScreen(
+            onDone = {
+                sessionStore.saveRoute(Route.Dashboard.key)
+                nav.resetTo(Route.Dashboard)
             },
-            onSuccess = { nav.resetTo(Route.Dashboard) }
+            auth = auth,
+            api = api
         )
 
         Route.Dashboard -> DashboardScreen(
@@ -475,7 +493,9 @@ fun NstrApp() {
             onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
             patrolTimer = patrolTimer,
             dao = database.telemetryDao(),
-            api = api
+            api = api,
+            auth = auth,
+            onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
         )
 
         Route.HumanImpact -> HumanImpactScreen(

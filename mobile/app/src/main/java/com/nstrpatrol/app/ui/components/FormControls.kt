@@ -24,6 +24,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -129,30 +130,32 @@ fun SelectField(
     value: String?,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    isError: Boolean = false
+    isError: Boolean = false,
+    enabled: Boolean = true
 ) {
     Row(
         modifier = modifier
             .fillMaxWidth()
             .height(44.dp)
             .clip(RoundedCornerShape(8.dp))
-            .background(Surface)
+            .background(if (enabled) Surface else SurfaceVariant)
             .border(1.dp, if (isError) ErrorRed else OutlineSoft, RoundedCornerShape(8.dp))
-            .clickable(onClick = onClick)
+            .then(if (enabled) Modifier.clickable(onClick = onClick) else Modifier)
             .padding(horizontal = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Text(
             text = value ?: placeholder,
             modifier = Modifier.weight(1f),
-            color = if (value != null) TextPrimary else if (isError) ErrorRed else TextSecondary,
+            color = if (!enabled) TextSecondary.copy(alpha = 0.45f)
+            else if (value != null) TextPrimary else if (isError) ErrorRed else TextSecondary,
             fontSize = 14.sp,
             fontWeight = FontWeight.Normal
         )
         Icon(
             imageVector = Icons.Filled.ArrowDropDown,
             contentDescription = "Select",
-            tint = TextSecondary
+            tint = if (enabled) TextSecondary else TextSecondary.copy(alpha = 0.4f)
         )
     }
 }
@@ -167,6 +170,7 @@ fun PhotoPlaceholder(
     onClick: () -> Unit = {},
     onRemovePhoto: (String) -> Unit = {}
 ) {
+    var fullScreenPhotoPath by remember { mutableStateOf<String?>(null) }
     val photos = photoPaths.filter { File(it).exists() }
     if (photos.isNotEmpty()) {
         LazyRow(
@@ -174,17 +178,13 @@ fun PhotoPlaceholder(
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(photos) { path ->
-                val bitmap = remember(path) { decodeBitmap(path) }
-                val ratio = bitmap?.let {
-                    (it.width.toFloat() / it.height.toFloat()).coerceIn(0.75f, 1.5f)
-                } ?: 1f
+                val bitmap = com.nstrpatrol.app.data.rememberAsyncBitmap(path)
                 Box(
                     modifier = Modifier
-                        .width(120.dp)
-                        .aspectRatio(ratio)
+                        .size(110.dp)
                         .clip(RoundedCornerShape(8.dp))
                         .border(1.dp, OutlineCard, RoundedCornerShape(8.dp))
-                        .clickable(onClick = onClick),
+                        .clickable { fullScreenPhotoPath = path },
                     contentAlignment = Alignment.BottomEnd
                 ) {
                     if (bitmap != null) {
@@ -192,7 +192,7 @@ fun PhotoPlaceholder(
                             bitmap = bitmap,
                             contentDescription = "Captured photo",
                             modifier = Modifier.fillMaxSize(),
-                            contentScale = ContentScale.Fit
+                            contentScale = ContentScale.Crop
                         )
                     } else {
                         Box(Modifier.fillMaxSize().background(Surface))
@@ -201,6 +201,7 @@ fun PhotoPlaceholder(
                         modifier = Modifier
                             .padding(6.dp)
                             .background(Color.Black.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                            .clickable(onClick = onClick)
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
@@ -214,7 +215,7 @@ fun PhotoPlaceholder(
                         modifier = Modifier
                             .align(Alignment.TopStart)
                             .padding(4.dp)
-                            .size(20.dp)
+                            .size(22.dp)
                             .background(Color(0xCC111111), CircleShape)
                             .clickable { onRemovePhoto(path) }
                     ) {
@@ -291,7 +292,7 @@ fun PhotoPlaceholder(
 }
 
 private fun decodeBitmap(path: String) =
-    PhotoUtils.decodeScaled(File(path))?.asImageBitmap()
+    PhotoUtils.loadBitmap(path)?.asImageBitmap()
 
 /** Free text field with grey hint. */
 @Composable
@@ -497,6 +498,9 @@ fun DetailPanel(
     rows: List<Pair<String, String>>,
     modifier: Modifier = Modifier
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboardManager = androidx.compose.ui.platform.LocalClipboardManager.current
+
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -516,7 +520,8 @@ fun DetailPanel(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = label,
@@ -524,12 +529,37 @@ fun DetailPanel(
                     fontSize = 12.sp,
                     modifier = Modifier.weight(1f)
                 )
-                Text(
-                    text = value,
-                    color = TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = value,
+                        color = TextPrimary,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (label.contains("ID", ignoreCase = true) || label.contains("Id", ignoreCase = true)) {
+                        Box(
+                            modifier = Modifier
+                                .clip(CircleShape)
+                                .background(ForestGreen.copy(alpha = 0.12f))
+                                .clickable {
+                                    clipboardManager.setText(androidx.compose.ui.text.AnnotatedString(value))
+                                    android.widget.Toast.makeText(context, "Report ID copied!", android.widget.Toast.LENGTH_SHORT).show()
+                                }
+                                .padding(5.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.ContentCopy,
+                                contentDescription = "Copy Report ID",
+                                tint = ForestGreen,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -698,4 +728,58 @@ private fun Modifier.dashedBorder(
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(2f, 9f))
         )
     )
+}
+
+/** Full screen image viewer lightbox dialog for viewing captured photos. */
+@Composable
+fun FullScreenImageViewerDialog(
+    photoPath: String?,
+    onDismiss: () -> Unit
+) {
+    if (photoPath == null) return
+    val bitmap = com.nstrpatrol.app.data.rememberAsyncBitmap(photoPath)
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onDismiss,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.Center
+        ) {
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap,
+                    contentDescription = "Full Screen Photo",
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(16.dp),
+                    contentScale = ContentScale.Fit
+                )
+            } else {
+                Text(text = "Image file not found", color = Color.White)
+            }
+
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(24.dp)
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .background(Color.Black.copy(alpha = 0.6f))
+                    .clickable(onClick = onDismiss),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Filled.Close,
+                    contentDescription = "Close",
+                    tint = Color.White,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
 }

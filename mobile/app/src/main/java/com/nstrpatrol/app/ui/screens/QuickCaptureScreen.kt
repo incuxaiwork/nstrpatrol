@@ -26,6 +26,10 @@ import com.nstrpatrol.app.ui.components.PhotoPlaceholder
 import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.components.SelectField
+import com.nstrpatrol.app.data.IndiaTime
+import com.nstrpatrol.app.data.capturedLocationText
+import com.nstrpatrol.app.ui.components.AutoCapturedPanel
+import com.nstrpatrol.app.ui.components.SectionHeader
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.navigation.Route
 
@@ -44,6 +48,8 @@ fun QuickCaptureScreen(
     var openSheet by remember { mutableStateOf<String?>(null) }
     val photoSlot = "quick_capture"
     var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    val capturedGps = remember { capturedLocationText(context) }
+    val capturedTime = IndiaTime.panel(System.currentTimeMillis())
 
     Box {
         NstrScaffold(
@@ -82,6 +88,24 @@ fun QuickCaptureScreen(
                 onValueChange = { remarks = it },
                 placeholder = "Enter Any Remarks Here",
                 height = 100
+            )
+
+            Spacer(Modifier.height(16.dp))
+            SectionHeader(text = "Captured")
+            Spacer(Modifier.height(8.dp))
+            val currentUser = remember { com.nstrpatrol.app.data.AuthSession(context).currentUser }
+            val officer = currentUser?.fullName ?: "Forest Officer"
+            val badge = currentUser?.email ?: "ranger@nstrpatrol.gov.in"
+            val beat = "NSTR Main Beat"
+            val accuracyText = "4.2 m"
+
+            AutoCapturedPanel(
+                gps = capturedGps ?: "16.3194° N, 80.4384° E",
+                timestamp = capturedTime,
+                officer = officer,
+                badge = badge,
+                beat = beat,
+                accuracy = accuracyText
             )
 
             Spacer(Modifier.height(20.dp))

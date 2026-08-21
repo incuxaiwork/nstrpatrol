@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import com.nstrpatrol.app.data.face.FaceRecognizer
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
 import kotlinx.coroutines.CoroutineScope
@@ -99,7 +100,7 @@ class AuthSession(context: Context) {
         val refreshToken = res.optString("refreshToken")
         val user = AuthUser.fromJson(res.optJSONObject("user"))
             ?: throw ApiException(0, "bad_response", "Unexpected server response")
-        val userJson = res.optJSONObject("user").toString()
+        val userJson = res.optJSONObject("user")?.toString().orEmpty()
         prefs.edit()
             .putString("accessToken", accessToken)
             .putString("refreshToken", refreshToken)
@@ -110,22 +111,121 @@ class AuthSession(context: Context) {
         user
     }
 
+    /** Stable identity for this handset (ANDROID_ID, else build fingerprint). */
+    fun deviceId(): String =
+        Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
+            ?: Build.FINGERPRINT
+
+    /** Synchronous check: has THIS officer finished face setup on THIS device? */
+    fun faceSetupDoneLocally(): Boolean =
+        prefs.getString("faceSetupDoneFor", null) == deviceId()
+
+    /**
+     * Whether this officer still has to set up face verification on this handset
+     * before they can start patrols. The backend is authoritative (its Device row
+     * records the last officer who verified; a new phone or a different officer
+     * on the same phone means setup again). Offline, trust the local record.
+     */
+    suspend fun needsFaceSetup(): Boolean = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        val locallyDone = prefs.getString("faceSetupDoneFor", null) == id
+        val backend = deviceVerifiedOnBackend()
+        when (backend) {
+            true -> {
+                // Confirmed on the server by this same officer — record it locally.
+                if (!locallyDone) prefs.edit().putString("faceSetupDoneFor", id).apply()
+                false
+            }
+            false -> true
+            null -> !locallyDone // offline: only a known-good local record lets us skip
+        }
+    }
+
+    /** Queries the backend for this handset's verification state for the signed-in user. */
+    private suspend fun deviceVerifiedOnBackend(): Boolean? = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        val arr = runCatching { client.myDevices() }.getOrNull() ?: return@withContext null
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("deviceId") != id) continue
+            val verifiedBy = o.optString("verifiedByUserId").ifEmpty { null }
+            val verifiedAt = o.optString("faceVerifiedAt").ifEmpty { null }
+            // The device is verified only when the CURRENT officer verified it.
+            return@withContext verifiedAt != null && verifiedBy == currentUser?.id
+        }
+        null // this handset isn't registered yet
+    }
+
+    /** Uploads the reference selfie link and marks this handset verified on the backend. */
+    suspend fun markDeviceFaceVerified(
+        photoKey: String?,
+        mode: String,
+        embedding: FloatArray? = null,
+        matchScore: Float? = null
+    ) = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        client.verifyDeviceFace(id, photoKey, mode, embedding, matchScore)
+        if (embedding != null) cacheFaceReference(embedding)
+        prefs.edit().putString("faceSetupDoneFor", id).apply()
+    }
+
+    /** Caches this device's reference face embedding locally (per handset). */
+    fun cacheFaceReference(embedding: FloatArray) {
+        prefs.edit()
+            .putString("faceRefEmbeddingFor", deviceId())
+            .putString("faceRefEmbedding", com.nstrpatrol.app.data.face.FaceRecognizer.encode(embedding))
+            .apply()
+    }
+
+    /**
+     * The officer's reference face embedding for THIS handset: the local cache when
+     * present, otherwise restored from the backend Device row (e.g. after reinstall).
+     * Null when no reference exists yet.
+     */
+    suspend fun faceReference(): FloatArray? = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        if (prefs.getString("faceRefEmbeddingFor", null) == id) {
+            FaceRecognizer.decode(prefs.getString("faceRefEmbedding", null))?.let { return@withContext it }
+        }
+        // Fall back to the server copy for this handset.
+        val arr = runCatching { client.myDevices() }.getOrNull() ?: return@withContext null
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("deviceId") != id) continue
+            val ref = FaceRecognizer.decode(o.optString("faceEmbedding").ifEmpty { null })
+            if (ref != null) cacheFaceReference(ref)
+            return@withContext ref
+        }
+        null
+    }
+
+    /** Ensures this handset's Device row exists before face-verification is recorded. */
+    suspend fun ensureDeviceRegistered() = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        if (prefs.getString("deviceRegisteredFor", null) == id) return@withContext
+        registerNow()
+        prefs.edit().putString("deviceRegisteredFor", id).apply()
+    }
+
     /** Registers this handset with the backend so patrols can be assigned to it. */
     private fun registerDevice() {
-        val deviceId = Settings.Secure.getString(appContext.contentResolver, Settings.Secure.ANDROID_ID)
-            ?: Build.FINGERPRINT
+        val id = deviceId()
         // Already registered for this install — don't re-POST on every login.
-        if (prefs.getString("deviceRegisteredFor", null) == deviceId) return
-        val body = JSONObject()
-            .put("deviceId", deviceId)
-            .put("deviceName", "NSTR Patrol")
-            .put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
-        runCatching { client.postJson("/api/devices", body) }
-            .onSuccess { prefs.edit().putString("deviceRegisteredFor", deviceId).apply() }
+        if (prefs.getString("deviceRegisteredFor", null) == id) return
+        runCatching { registerNow() }
+            .onSuccess { prefs.edit().putString("deviceRegisteredFor", id).apply() }
             .onFailure { t ->
                 // Best-effort, but surface it so failures aren't invisible.
                 Log.w("AuthSession", "device registration failed: ${t.message}")
             }
+    }
+
+    private fun registerNow() {
+        val body = JSONObject()
+            .put("deviceId", deviceId())
+            .put("deviceName", "NSTR Patrol")
+            .put("deviceModel", "${Build.MANUFACTURER} ${Build.MODEL}")
+        client.postJson("/api/devices", body)
     }
 
     /** Currently assigned patrol name (first ACTIVE/AUTO assignment), best-effort. */

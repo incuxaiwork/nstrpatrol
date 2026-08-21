@@ -25,5 +25,6 @@ data class PatrolSessionEntity(
     val heartPointsEstimate: Double = 0.0,
     val avgSpeedKmh: Double = 0.0,
     val pointCount: Int = 0,
+    val faceVerified: Boolean = false,
     val syncStatus: String = "PENDING"
 )
