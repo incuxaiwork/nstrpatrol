@@ -75,6 +75,17 @@ export function isDivisionWide(user: ScopeUser): boolean {
 }
 
 /**
+ * True when the user holds an officer scope — DIVISION (DFO / legacy admin),
+ * SUB_DIVISION (DyDFO) or RANGE (FRO). Only these roles may read SOS alert
+ * feeds and acknowledge (verify) incidents; BEAT/OPERATIONAL users may not,
+ * not even on their own records.
+ */
+export function isOfficerScope(user: ScopeUser): boolean {
+  const kind = getUserScope(user).kind;
+  return kind === 'DIVISION' || kind === 'SUB_DIVISION' || kind === 'RANGE';
+}
+
+/**
  * Beat names belonging to a set of range names (via Beat.rangeName, the
  * existing free-text GIS linkage — no schema change to the Beat table).
  */

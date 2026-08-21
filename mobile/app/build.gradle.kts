@@ -87,6 +87,8 @@ dependencies {
     implementation(libs.maplibre.android.sdk)
 
     testImplementation(libs.junit)
+    // Real org.json for JVM tests (the android.jar stub throws on use).
+    testImplementation(libs.org.json)
     androidTestImplementation(platform(libs.androidx.compose.bom))
     androidTestImplementation(libs.androidx.compose.ui.test.junit4)
     androidTestImplementation(libs.androidx.espresso.core)

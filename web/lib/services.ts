@@ -48,6 +48,7 @@ import {
   compartmentsFromGeoJson,
   gridsFromGeoJson,
   hierarchyFromGeoJson,
+  isSosIncident,
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
@@ -86,7 +87,7 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
@@ -634,7 +635,7 @@ export const gis = {
       .filter((i) => i.latitude != null && i.longitude != null)
       .map((i) => {
         const { x, y } = lngLatToSvg(i.longitude!, i.latitude!);
-        const sos = i.type === "QUICK_CAPTURE" || i.title.toUpperCase().startsWith("SOS");
+        const sos = isSosIncident(i);
         return {
           id: i.id,
           kind: sos ? ("sos" as const) : i.type === "SIGHTING" ? ("observation" as const) : ("incident" as const),
@@ -683,6 +684,59 @@ export const gis = {
    */
   coverage: async (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}): Promise<ApiGridCoverage> =>
     remoteOnly(async () => api.coverage.grids(query)),
+};
+
+/* ------------------------------------------------------------------ */
+/* SOS / Emergency operations                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One SOS case for the control room — the authoritative incident record
+ * enriched with real user names only. Unknown names stay null/placeholder so
+ * the UI never invents an identity.
+ */
+export interface SosCase {
+  incident: ApiIncident;
+  rangerName: string;
+  verifierName: string | null;
+  /** details.message from the ranger app when present, else the description. */
+  message: string | null;
+}
+
+export const sos = {
+  /**
+   * SOS cases from the scoped incidents list (GET /api/incidents). The
+   * backend applies role scoping — restricted roles see fewer rows, and
+   * 401/403 surface as honest error states upstream.
+   */
+  cases: async (): Promise<SosCase[]> =>
+    remoteOnly(async () => {
+      const [incidents, users] = await Promise.all([
+        api.incidents.list(),
+        api.users.list().catch(() => []),
+      ]);
+      return incidents.filter(isSosIncident).map((incident) => {
+        const details = incident.details as { message?: unknown } | null;
+        // The incidents list endpoint returns raw rows (no relations), so
+        // both names are resolved through the real users register.
+        const ranger = users.find((u) => u.id === incident.userId);
+        const verifier = incident.verifiedById
+          ? users.find((u) => u.id === incident.verifiedById)
+          : undefined;
+        return {
+          incident,
+          rangerName: ranger?.fullName ?? incident.user?.fullName ?? "Unknown ranger",
+          verifierName: verifier?.fullName ?? null,
+          message:
+            typeof details?.message === "string" && details.message.trim().length > 0
+              ? details.message
+              : (incident.description ?? null),
+        };
+      });
+    }),
+  /** Raw alert feed (GET /api/alerts) — SOS + TAMPER + COVERAGE events,
+   *  already scoped server-side by role. */
+  feed: async (): Promise<ApiAlert[]> => remoteOnly(() => api.alerts.list({ limit: 100 })),
 };
 
 /* ------------------------------------------------------------------ */

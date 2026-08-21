@@ -162,6 +162,16 @@
     <string name="sos_tap">Tap to send an SOS alert to your patrol team</string>
     <string name="sos_emergency_contacts">Emergency contacts</string>
     <string name="sos_no_contacts">No emergency contacts configured</string>
+    <string name="sos_countdown_hint">Sending emergency alert in %1$d s — cancel now if this was a mistake</string>
+    <string name="sos_sending">Sending emergency alert…</string>
+    <string name="sos_sent">Emergency alert sent.</string>
+    <string name="sos_queued">No network. Emergency alert saved and will be sent automatically.</string>
+    <string name="sos_cooldown">An SOS was sent recently. Try again in %1$d s.</string>
+    <string name="sos_error_generic">Could not send the emergency alert. It stays saved on this device.</string>
+    <string name="sos_auth_pending">Alert saved on this device. Sign in again so it can be delivered.</string>
+    <string name="sos_location_unavailable">Location unavailable — the alert will still be sent</string>
+    <string name="sos_phone_unavailable">Phone number unavailable</string>
+    <string name="sos_contacts_error">Could not load emergency contacts. Check your connection.</string>
 
     <!-- GPS Diagnostics -->
     <string name="gps_title">GPS Diagnostics</string>

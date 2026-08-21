@@ -300,7 +300,7 @@ export type ObservationCategory =
   | "others";
 
 export type ObservationSeverity = "low" | "medium" | "high" | "critical";
-export type ObservationStatus = "open" | "under-review" | "resolved" | "escalated";
+export type ObservationStatus = "open" | "under-review" | "resolved" | "escalated" | "rejected";
 
 export interface ObservationMedia {
   type: "photo" | "audio";
@@ -326,8 +326,9 @@ export interface Observation {
   patrolId?: string;
   groupSize?: string;
   species?: string;
-  lat: number;
-  lng: number;
+  /** Real device coordinates; null when the field fix was unavailable (never 0,0). */
+  lat: number | null;
+  lng: number | null;
   media?: ObservationMedia[];
   actionTaken?: string;
   voiceNoteMin?: number;
@@ -377,6 +378,8 @@ export interface NotificationItem {
   time: string;
   module: string;
   read: boolean;
+  /** Real deep link when one exists (e.g. SOS → /sos#<incidentId>). */
+  href?: string;
 }
 
 export interface AdminUser {

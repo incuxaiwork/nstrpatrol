@@ -12,6 +12,7 @@ export interface NavItem {
 
 export const navModules: NavItem[] = [
   { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard" },
+  { key: "sos", label: "SOS & Alerts", href: "/sos", icon: "sos" },
   {
     key: "patrols",
     label: "Patrol Operations",
@@ -119,6 +120,7 @@ export const observationStatusTone: Record<ObservationStatus, BadgeTone> = {
   "under-review": "warning",
   resolved: "success",
   escalated: "danger",
+  rejected: "neutral",
 };
 
 export const observationStatusLabel: Record<ObservationStatus, string> = {
@@ -126,6 +128,7 @@ export const observationStatusLabel: Record<ObservationStatus, string> = {
   "under-review": "Under review",
   resolved: "Resolved",
   escalated: "Escalated",
+  rejected: "Rejected",
 };
 
 export const dutyStatusLabel: Record<DutyStatus, string> = {

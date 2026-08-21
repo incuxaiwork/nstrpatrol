@@ -2,17 +2,21 @@
 
 /**
  * Forest MapWorkspace — the single interactive GIS map of the admin portal,
- * modeled 1:1 on the Android app's MapsScreen (mobile/.../ui/screens/MapsScreen.kt):
+ * modeled on the Android app's MapsScreen (mobile/.../ui/screens/MapsScreen.kt):
  *
- *   • the same raster MBTiles basemap (served by the portal /api/tiles proxy)
- *     with the Esri World Imagery satellite overlay on top,
+ *   • selectable raster basemaps — the offline MBTiles atlas (served by the
+ *     portal /api/tiles proxy), OpenStreetMap street tiles, Esri World
+ *     Imagery satellite and OpenTopoMap terrain — switched without moving
+ *     the camera,
+ *   • a free viewport: pan/zoom is NOT clamped to the forest bounds,
  *   • the same GeoJSON layer model — reserve boundary, forest beats,
- *     ranges, compartments, grids, patrol routes, ranger / sighting / SOS
- *     markers, coverage tint, danger heat — every one of them toggleable
- *     from the built-in Layers checkbox panel,
- *   • the same interactive affordances: pan / zoom / rotate / tilt gestures,
- *     tap-to-select, floating controls (zoom in/out, reset bearing, recenter,
- *     fullscreen), collapsible legend and patrol-track replay.
+ *     ranges, compartments, grids, patrol routes, ranger / sighting /
+ *     incident markers, the live SOS alert feed, coverage tint, danger heat
+ *     — every overlay driven by the EXTERNAL layer control panel via real
+ *     MapLibre visibility switches (lib/map-layers.ts),
+ *   • interactive affordances: pan / zoom / rotate / tilt gestures,
+ *     tap-to-select, floating controls (zoom in/out, reset bearing,
+ *     recenter, fullscreen), collapsible legend and patrol-track replay.
  *
  * Shared coordinate space lives in lib/map-space.ts (backend GeoJSON →
  * lon/lat). Replaces the old static SVG map across all pages.
@@ -22,7 +26,6 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Map as MapLibreMap,
-  NavigationControl,
   LngLatBounds,
   setWorkerUrl,
   type MapMouseEvent,
@@ -41,6 +44,7 @@ if (typeof window !== "undefined") {
 import { Icon } from "@/components/icons";
 import { cn } from "@/lib/utils";
 import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
+import { DEFAULT_LAYER_STATE, type BasemapKey, type ForestLayerState } from "@/lib/map-layers";
 import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
 import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 import type { TaggedGrid } from "@/lib/grid-regions";
@@ -67,10 +71,22 @@ import {
   type TimedPoint,
 } from "@/lib/map-space";
 
-const TILE_URL = "/api/tiles/{z}/{x}/{y}";
+const ATLAS_TILE_URL = "/api/tiles/{z}/{x}/{y}";
+const STREET_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const ESRI_SAT_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
+const TERRAIN_TILE_URL = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
 const DIVISION_CENTER: [number, number] = [79.15, 15.92];
+
+/** One point of the live SOS alert feed rendered as its own map layer. */
+export interface SosAlertPoint {
+  /** Backend incident id — doubles as the clickable feature id. */
+  id: string;
+  lng: number;
+  lat: number;
+  /** Card title shown on selection (ranger · time). */
+  label?: string;
+}
 
 /* ------------------------------------------------------------------ */
 /* Public props                                                        */
@@ -117,7 +133,26 @@ export interface MapProps {
    * Applied to beats / compartments / ranges / grid layers by their region
    * properties; clears to null when empty.
    */
-  regionFilter?: GridRegionFilter;
+   regionFilter?: GridRegionFilter;
+  /**
+   * Controlled layer state (owned by the external MAP LAYERS panel). When
+   * omitted the map falls back to internal defaults so lightweight embeds
+   * (detail-page mini maps) keep working without a panel.
+   */
+  layerState?: ForestLayerState;
+  /** Emitted whenever a checkbox / basemap radio changes the layer state. */
+  onLayerStateChange?(next: ForestLayerState): void;
+  /**
+   * Live SOS alert feed points (GET /api/alerts → SOS events with GPS).
+   * Rendered as the dedicated SOS layer; when provided, SOS-kind markers are
+   * removed from the generic sightings/incidents layer to avoid duplicates.
+   */
+  sosAlerts?: SosAlertPoint[];
+  /**
+   * Camera focus request (deep links, "View on Map"). Applied once per
+   * change without touching layer state.
+   */
+   focus?: { lng: number; lat: number; zoom?: number } | null;
 }
 
 export interface GridRegionFilter {
@@ -136,59 +171,9 @@ function regionFilterExpression(v: GridRegionFilter | undefined): FilterSpecific
   return parts.length > 0 ? ["all", ...parts] : null;
 }
 
-/** Layer visibility state — the web counterpart of GisLayerState. */
-export interface ForestLayerState {
-  basemap: boolean;
-  satellite: boolean;
-  boundary: boolean;
-  beats: boolean;
-  ranges: boolean;
-  compartments: boolean;
-  analysisGrid: boolean;
-  grids: boolean;
-  routes: boolean;
-  rangers: boolean;
-  markers: boolean;
-  zeropatrol: boolean;
-  coverage: boolean;
-  heat: boolean;
-}
-
-export const DEFAULT_LAYER_STATE: ForestLayerState = {
-  basemap: true,
-  satellite: true,
-  boundary: true,
-  beats: true,
-  ranges: true,
-  compartments: true,
-  analysisGrid: true,
-  grids: true,
-  routes: true,
-  rangers: true,
-  markers: true,
-  zeropatrol: true,
-  coverage: true,
-  heat: false,
-};
-
-function layerRows(gridSize: GridSizeKey): { key: keyof ForestLayerState; title: string; subtitle: string }[] {
-  return [
-    { key: "basemap", title: "MBTiles Basemap", subtitle: "Offline raster atlas (NSTR.mbtiles)" },
-    { key: "satellite", title: "Satellite Imagery", subtitle: "Esri World Imagery (online)" },
-    { key: "boundary", title: "Reserve Boundary", subtitle: "Reserve outline & name label" },
-    { key: "beats", title: "Forest Beat Boundaries", subtitle: "44 Markapur Division beats" },
-    { key: "ranges", title: "Ranges", subtitle: "Range division outlines & labels" },
-    { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
-    { key: "analysisGrid", title: `${gridSizeLabel(gridSize)} Analysis Grid`, subtitle: "Configurable cells over the forest area" },
-    { key: "grids", title: "Reference Grid", subtitle: "Backend ForestGrid survey cells (~3.3 km)" },
-    { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
-    { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
-    { key: "markers", title: "Sightings & Incidents", subtitle: "Observation, incident & SOS points" },
-    { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-    { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled on the reference grid" },
-    { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
-  ];
-}
+/* ------------------------------------------------------------------ */
+/* Layer stack                                                         */
+/* ------------------------------------------------------------------ */
 
 /* ------------------------------------------------------------------ */
 /* Layer stack                                                         */
@@ -212,11 +197,13 @@ const CLICKABLE = [
   "gl-markers-ranger",
   "gl-markers-obs",
   "gl-markers-sos",
+  "gl-sos-dot",
   "gl-grids-fill",
 ];
 
-const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {  basemap: ["gl-basemap"],
-  satellite: ["gl-satellite"],
+/** Checkbox → GL layer ids. The basemap radio is handled separately
+ *  (BASEMAP_LAYER_IDS below) because it is a single choice, not a toggle. */
+const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]> = {
   boundary: ["gl-boundary-fill", "gl-boundary-line", "gl-boundary-label"],
   beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-beats-coverage"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
@@ -225,10 +212,18 @@ const TOGGLE_LAYERS: Record<keyof ForestLayerState, string[]> = {  basemap: ["gl
   grids: ["gl-grids-fill", "gl-grids-line"],
   routes: ["gl-routes", "gl-replay-trail", "gl-replay-head"],
   rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
-  markers: ["gl-markers-obs", "gl-markers-sos", "gl-markers-sos-label"],
+  markers: ["gl-markers-obs"],
+  sos: ["gl-markers-sos", "gl-markers-sos-label", "gl-sos-dot", "gl-sos-ring", "gl-sos-label"],
   zeropatrol: ["gl-beats-zero-dash"],
   coverage: ["gl-grids-coverage", "gl-grids-coverage-line"],
   heat: ["gl-heat"],
+};
+
+const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
+  atlas: "gl-basemap-atlas",
+  street: "gl-basemap-street",
+  satellite: "gl-basemap-satellite",
+  terrain: "gl-basemap-terrain",
 };
 
 /** Layers whose visibility is constrained by the Range → Beat → Compartment
@@ -260,10 +255,18 @@ const REGION_FILTERED_LAYERS = [
 function buildLayers(m: MapLibreMap) {
   m.addSource("tiles", {
     type: "raster",
-    tiles: [TILE_URL],
+    tiles: [ATLAS_TILE_URL],
     tileSize: 256,
     minzoom: 1,
     maxzoom: 16,
+  });
+  m.addSource("street", {
+    type: "raster",
+    tiles: [STREET_TILE_URL],
+    tileSize: 256,
+    minzoom: 1,
+    maxzoom: 19,
+    attribution: "© OpenStreetMap contributors",
   });
   m.addSource("satellite", {
     type: "raster",
@@ -271,6 +274,15 @@ function buildLayers(m: MapLibreMap) {
     tileSize: 256,
     minzoom: 1,
     maxzoom: 19,
+    attribution: "Imagery © Esri",
+  });
+  m.addSource("terrain", {
+    type: "raster",
+    tiles: [TERRAIN_TILE_URL],
+    tileSize: 256,
+    minzoom: 1,
+    maxzoom: 17,
+    attribution: "© OpenTopoMap (CC-BY-SA)",
   });
   for (const id of [
     "beats",
@@ -286,15 +298,30 @@ function buildLayers(m: MapLibreMap) {
     "boundary",
     "grids",
     "analysis-grid",
+    "sos-alerts",
   ]) {
     m.addSource(id, { type: "geojson", data: emptyFc() });
   }
 
-  // 1. Offline MBTiles basemap (app parity — the portal tile proxy).
-  m.addLayer({ id: "gl-basemap", type: "raster", source: "tiles", paint: { "raster-opacity": 0.9 } });
-
-  // 1b. Satellite imagery overlay (app parity — Esri World Imagery).
-  m.addLayer({ id: "gl-satellite", type: "raster", source: "satellite", paint: { "raster-opacity": 0.9 } });
+  // 1. Basemaps — single-choice radio (lib/map-layers.ts). All four raster
+  //    layers exist in the style; exactly one is visible at a time and
+  //    switching never moves the camera.
+  m.addLayer({ id: "gl-basemap-atlas", type: "raster", source: "tiles", paint: { "raster-opacity": 0.9 } });
+  m.addLayer({
+    id: "gl-basemap-street",
+    type: "raster",
+    source: "street",
+    paint: { "raster-opacity": 1 },
+    layout: { visibility: "none" },
+  });
+  m.addLayer({ id: "gl-basemap-satellite", type: "raster", source: "satellite", paint: { "raster-opacity": 0.92 } });
+  m.addLayer({
+    id: "gl-basemap-terrain",
+    type: "raster",
+    source: "terrain",
+    paint: { "raster-opacity": 1 },
+    layout: { visibility: "none" },
+  });
 
   // 2. Survey grids — geographic grid cells from the backend GIS API.
   //    Subtle by design: lines must never overpower patrol routes, incidents,
@@ -395,13 +422,15 @@ function buildLayers(m: MapLibreMap) {
   });
 
   // 4. Patrol coverage tint (only beats that carry a coverage figure).
+  //    Green ramp — coverage is a patrol-positive metric; orange is reserved
+  //    for incident markers only.
   m.addLayer({
     id: "gl-beats-coverage",
     type: "fill",
     source: "beats",
     filter: ["!=", ["get", "coveragePct"], null],
     paint: {
-      "fill-color": "#FF8F00",
+      "fill-color": "#2E7D32",
       "fill-opacity": [
         "interpolate",
         ["linear"],
@@ -409,7 +438,7 @@ function buildLayers(m: MapLibreMap) {
         0,
         0.05,
         100,
-        0.35,
+        0.3,
       ],
     },
   });
@@ -442,7 +471,7 @@ function buildLayers(m: MapLibreMap) {
     type: "fill",
     source: "beats",
     filter: ["==", ["get", "isAuth"], true],
-    paint: { "fill-color": "#FF8F00", "fill-opacity": 0.12 },
+    paint: { "fill-color": "#7B1FA2", "fill-opacity": 0.1 },
   });
   m.addLayer({
     id: "gl-auth-line",
@@ -450,7 +479,7 @@ function buildLayers(m: MapLibreMap) {
     source: "beats",
     filter: ["==", ["get", "isAuth"], true],
     paint: {
-      "line-color": "#FF8F00",
+      "line-color": "#7B1FA2",
       "line-width": 2.5,
       "line-dasharray": [7, 5],
     },
@@ -498,18 +527,19 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 7. Compartments (app parity: solid amber).
+  // 7. Compartments — quiet blue-gray so amber/orange stays unique to
+  //    incident markers and never competes with beats or routes.
   m.addLayer({
     id: "gl-compartments-fill",
     type: "fill",
     source: "compartments",
-    paint: { "fill-color": "#E65100", "fill-opacity": 0.06 },
+    paint: { "fill-color": "#5B7684", "fill-opacity": 0.05 },
   });
   m.addLayer({
     id: "gl-compartments-line",
     type: "line",
     source: "compartments",
-    paint: { "line-color": "#E65100", "line-width": 1.2, "line-opacity": 0.75 },
+    paint: { "line-color": "#5B7684", "line-width": 1.2, "line-opacity": 0.75 },
   });
   m.addLayer({
     id: "gl-compartments-label",
@@ -522,7 +552,7 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#8a4b00",
+      "text-color": "#41586b",
       "text-halo-color": "#ffffff",
       "text-halo-width": 1.5,
     },
@@ -684,14 +714,46 @@ function buildLayers(m: MapLibreMap) {
     type: "fill",
     source: "analysis-grid",
     filter: ["==", ["get", "selected"], true],
-    paint: { "fill-color": "#FF8F00", "fill-opacity": 0.26 },
+    paint: { "fill-color": "#0E4C92", "fill-opacity": 0.22 },
   });
   m.addLayer({
     id: "gl-agrid-sel-line",
     type: "line",
     source: "analysis-grid",
     filter: ["==", ["get", "selected"], true],
-    paint: { "line-color": "#E65100", "line-width": 2, "line-opacity": 0.9 },
+    paint: { "line-color": "#0E4C92", "line-width": 2, "line-opacity": 0.9 },
+  });
+
+  // 12. Live SOS alert feed (GET /api/alerts → SOS events). A halo ring +
+  //     bold dot + label; sits above everything so an emergency is always
+  //     readable regardless of overlay density.
+  m.addLayer({
+    id: "gl-sos-ring",
+    type: "circle",
+    source: "sos-alerts",
+    paint: {
+      "circle-radius": 22,
+      "circle-color": "#B3261E",
+      "circle-opacity": 0.18,
+    },
+  });
+  m.addLayer({
+    id: "gl-sos-dot",
+    type: "circle",
+    source: "sos-alerts",
+    paint: {
+      "circle-radius": 13,
+      "circle-color": "#B3261E",
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 3,
+    },
+  });
+  m.addLayer({
+    id: "gl-sos-label",
+    type: "symbol",
+    source: "sos-alerts",
+    layout: { "text-field": "SOS", "text-size": 11 },
+    paint: { "text-color": "#ffffff" },
   });
 }
 
@@ -728,6 +790,10 @@ export function MapWorkspace({
   heat,
   detailCard,
   regionFilter,
+  layerState: layerStateProp,
+  onLayerStateChange,
+  sosAlerts,
+  focus,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -735,8 +801,11 @@ export function MapWorkspace({
   const didFit = useRef(false);
   const [ready, setReady] = useState(false);
 
-  const [layerState, setLayerState] = useState<ForestLayerState>(DEFAULT_LAYER_STATE);
-  const [layersOpen, setLayersOpen] = useState(false);
+  // Layer state is controlled when a panel owns it (GIS workspace); the
+  // internal fallback keeps lightweight embeds working without a panel
+  // (fixed defaults — no toggles without an owning panel).
+  const [internalLayers] = useState<ForestLayerState>(DEFAULT_LAYER_STATE);
+  const layerState = layerStateProp ?? internalLayers;
   const [legendOpen, setLegendOpen] = useState(false);
   const [isFull, setIsFull] = useState(false);
 
@@ -763,16 +832,6 @@ export function MapWorkspace({
     setPrevPatrol(replayPatrolId);
     setProgress(0);
   }
-
-  const setLayer = (key: keyof ForestLayerState, value: boolean) =>
-    setLayerState((s) => ({ ...s, [key]: value }));
-  const setAllLayers = (value: boolean) =>
-    setLayerState(
-      (Object.keys(DEFAULT_LAYER_STATE) as (keyof ForestLayerState)[]).reduce(
-        (acc, k) => ({ ...acc, [k]: value }),
-        {} as ForestLayerState
-      )
-    );
 
   // Track the browser fullscreen state on the map wrapper.
   useEffect(() => {
@@ -804,13 +863,9 @@ export function MapWorkspace({
       },
       center: DIVISION_CENTER,
       zoom: 11.2,
-      attributionControl: false,
-      maxBounds: [
-        [78.2, 14.9],
-        [80.2, 17.0],
-      ],
+      // Free viewport — pan/zoom is NOT clamped to the forest bounds.
+      attributionControl: { compact: true },
     });
-    map.addControl(new NavigationControl({ showCompass: true }), "top-right");
     map.on("error", (e) => {
       console.error("GL map error:", (e as { error?: unknown }).error ?? e);
     });
@@ -828,7 +883,28 @@ export function MapWorkspace({
 
   // Feed GeoJSON data into the sources.
   const beatsFc = useMemo(() => beatsToFeatures(beats, selectedId), [beats, selectedId]);
-  const markersFc = useMemo(() => markersToFeatures(markers ?? []), [markers]);
+  // When the dedicated SOS layer is fed, drop SOS-kind points from the
+  // generic sightings/incidents layer so an alert never renders twice.
+  const groundMarkers = useMemo(
+    () => (sosAlerts ? (markers ?? []).filter((m) => m.kind !== "sos") : markers ?? []),
+    [markers, sosAlerts]
+  );
+  const markersFc = useMemo(() => markersToFeatures(groundMarkers), [groundMarkers]);
+  const sosAlertsFc = useMemo<GeoJSON.FeatureCollection>(
+    () =>
+      sosAlerts
+        ? {
+            type: "FeatureCollection",
+            features: sosAlerts.map((a) => ({
+              type: "Feature" as const,
+              id: a.id,
+              properties: { id: a.id, label: a.label ?? "SOS alert" },
+              geometry: { type: "Point" as const, coordinates: [a.lng, a.lat] },
+            })),
+          }
+        : emptyFc(),
+    [sosAlerts]
+  );
   const routesFc = useMemo(() => routesToFeatures(routes ?? []), [routes]);
   const heatFc = useMemo(() => heatToFeatures(heat ?? []), [heat]);
   const rangesFc = useMemo(() => rangesToFeatures(ranges), [ranges]);
@@ -856,6 +932,7 @@ export function MapWorkspace({
     setSourceData(m, "boundary", boundaryFc);
     setSourceData(m, "grids", gridsFc);
     setSourceData(m, "analysis-grid", analysisGridsFc);
+    setSourceData(m, "sos-alerts", sosAlertsFc);
 
     if (!didFit.current && beatsFc.features.length > 0) {
       didFit.current = true;
@@ -870,20 +947,42 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc]);
+  }, [ready, beatsFc, markersFc, routesFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
 
-  // Layer checkbox visibility.
+  // Layer checkbox visibility (overlay groups).
   useEffect(() => {
     if (!ready) return;
     const m = mapRef.current!;
     for (const [key, ids] of Object.entries(TOGGLE_LAYERS)) {
-      const v = layerState[key as keyof ForestLayerState] ? "visible" : "none";
+      const v = layerState[key as Exclude<keyof ForestLayerState, "basemap">] ? "visible" : "none";
       for (const lid of ids) {
         if (!m.getLayer(lid)) continue;
         m.setLayoutProperty(lid, "visibility", v);
       }
     }
   }, [ready, layerState]);
+
+  // Basemap radio — exactly one raster basemap visible; the camera is never
+  // touched by a basemap switch.
+  useEffect(() => {
+    if (!ready) return;
+    const m = mapRef.current!;
+    for (const [key, lid] of Object.entries(BASEMAP_LAYER_IDS)) {
+      if (!m.getLayer(lid)) continue;
+      m.setLayoutProperty(lid, "visibility", key === layerState.basemap ? "visible" : "none");
+    }
+  }, [ready, layerState.basemap]);
+
+  // Camera focus request ("View on Map" deep links). Applied on change only;
+  // never mutates layer state.
+  useEffect(() => {
+    if (!ready || !focus) return;
+    mapRef.current?.easeTo({
+      center: [focus.lng, focus.lat],
+      zoom: focus.zoom ?? 14,
+      duration: 1200,
+    });
+  }, [ready, focus]);
 
   // Region filter (Range → Beat → Compartment; division is fixed context).
   useEffect(() => {
@@ -1033,48 +1132,14 @@ export function MapWorkspace({
                 : ""}
           </span>
         </div>
-        <button
-          onClick={() => setLayersOpen((v) => !v)}
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
-            layersOpen
-              ? "border-forest-700 bg-forest-700 text-white"
-              : "border-line bg-white text-ink hover:bg-forest-50"
-          )}
-        >
-          <Icon name="layers" size={13} />
-          <span>Layers</span>
-          <Icon name={layersOpen ? "chevronUp" : "chevronDown"} size={12} />
-        </button>
+        <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
+          <Icon name="layers" size={13} className="text-forest-700" />
+          Layer controls live in the MAP LAYERS panel
+        </span>
       </div>
 
       <div ref={wrapRef} className={cn("relative overflow-hidden", heightClass)}>
         <div ref={containerRef} className="h-full w-full" role="img" aria-label="Forest map with beats, patrol routes and markers" />
-
-        {/* Layers checkbox panel */}
-        {layersOpen && (
-          <div className="absolute left-3 top-3 z-20 max-h-[75%] w-64 overflow-y-auto rounded-md border border-line bg-white/95 p-2 shadow-card">
-            <div className="mb-1 flex items-center justify-between px-1.5">
-              <p className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Map layers</p>
-              <div className="flex gap-1 text-[11px] font-medium text-forest-700">
-                <button onClick={() => setAllLayers(true)} className="hover:underline">All</button>
-                <span className="text-ink-faint">/</span>
-                <button onClick={() => setAllLayers(false)} className="hover:underline">None</button>
-              </div>
-            </div>
-            <div className="space-y-0.5">
-              {layerRows(gridSize).map((row) => (
-                <LayerRow
-                  key={row.key}
-                  title={row.title}
-                  subtitle={row.subtitle}
-                  checked={layerState[row.key]}
-                  onChange={(v) => setLayer(row.key, v)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
 
         {/* Floating controls (app parity — top right) */}
         <div className="absolute right-3 top-3 z-10 flex flex-col gap-2">
@@ -1108,7 +1173,7 @@ export function MapWorkspace({
           />
         </div>
 
-        {/* Legend (collapsible, like the app) */}
+        {/* Legend (collapsible; reflects only the layers currently on) */}
         <div className="absolute bottom-3 left-3 z-10 max-w-52 overflow-hidden rounded-md border border-line bg-white/95 shadow-card">
           <button
             onClick={() => setLegendOpen((v) => !v)}
@@ -1122,22 +1187,22 @@ export function MapWorkspace({
           </button>
           {legendOpen && (
             <div className="space-y-1 border-t border-line px-2.5 py-2 text-[11px] text-ink-soft">
-              <LegendRow color="#1E4620" label="Forest beat boundary" />
-              <LegendRow color="#E65100" label="Compartment boundary" />
-              <LegendRow color="#C3A24C" dashed label="Reserve boundary" />
-              <LegendRow color="#0E4C92" dashed label="Range boundary" />
-              <LegendRow color="#2E7D32" label="Patrol route" />
-              <LegendRow color="#1B365D" isPoint label="Ranger position" />
-              <LegendRow color="#B3261E" isPoint label="Sighting / incident" />
-              <LegendRow color="#FF8F00" isPoint label="SOS / alert" />
-              <LegendRow color="#B3261E" dashed label="Zero patrol zone" />
-              <LegendRow color="#FF8F00" dashed label="Authorization area" />
-              <LegendRow color="#8a8f98" label="Reference grid (backend)" />
-              <LegendRow color="#5b7684" label="Analysis grid" />
-              <LegendRow color="#E65100" label="Analysis grid — selected" />
-              <LegendRow color="#2E7D32" label="Patrol coverage — patrolled" />
-              <LegendRow color="#B3261E" label="Patrol coverage — unpatrolled" />
-              <LegendRow color="#5b7684" isRaster label="Satellite / offline basemap" />
+              {activeLegendRows(layerState).map((row) => (
+                <LegendRow key={row.label} color={row.color} label={row.label} dashed={row.dashed} isPoint={row.isPoint} />
+              ))}
+              <LegendRow
+                color={
+                  layerState.basemap === "satellite"
+                    ? "#3f4a45"
+                    : layerState.basemap === "street"
+                      ? "#cfd6cc"
+                      : layerState.basemap === "terrain"
+                        ? "#d8cfae"
+                        : "#e8e0cd"
+                }
+                isRaster
+                label={`Basemap — ${BASEMAP_LABELS[layerState.basemap]}`}
+              />
             </div>
           )}
         </div>
@@ -1201,31 +1266,40 @@ export function MapWorkspace({
 /* Small building blocks                                               */
 /* ------------------------------------------------------------------ */
 
-function LayerRow({
-  title,
-  subtitle,
-  checked,
-  onChange,
-}: {
-  title: string;
-  subtitle: string;
-  checked: boolean;
-  onChange(v: boolean): void;
-}) {
-  return (
-    <label className="flex cursor-pointer items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-forest-50">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="size-4 shrink-0 accent-forest-800"
-      />
-      <span className="min-w-0">
-        <span className="block truncate text-xs font-medium text-ink">{title}</span>
-        <span className="block truncate text-[10px] text-ink-soft">{subtitle}</span>
-      </span>
-    </label>
-  );
+const BASEMAP_LABELS: Record<BasemapKey, string> = {
+  atlas: "Atlas (offline)",
+  street: "Street",
+  satellite: "Satellite",
+  terrain: "Terrain",
+};
+
+/** Legend rows for the layers that are currently switched ON — colors match
+ *  the GL paint exactly, so the legend never describes a hidden layer. */
+function activeLegendRows(s: ForestLayerState): { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] {
+  const rows: { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] = [];
+  if (s.boundary) rows.push({ color: "#C3A24C", label: "Reserve boundary", dashed: true });
+  if (s.beats) rows.push({ color: "#1E4620", label: "Forest beat boundary" });
+  if (s.ranges) rows.push({ color: "#0E4C92", label: "Range boundary", dashed: true });
+  if (s.compartments) rows.push({ color: "#5B7684", label: "Compartment boundary" });
+  if (s.routes) rows.push({ color: "#2E7D32", label: "Patrol route" });
+  if (s.rangers) rows.push({ color: "#1B365D", label: "Ranger position", isPoint: true });
+  if (s.markers) {
+    rows.push({ color: "#B3261E", label: "Observation / sighting", isPoint: true });
+    rows.push({ color: "#FF8F00", label: "Incident marker", isPoint: true });
+  }
+  if (s.sos) rows.push({ color: "#B3261E", label: "SOS alert (live feed)", isPoint: true });
+  if (s.zeropatrol) rows.push({ color: "#B3261E", label: "Zero patrol zone", dashed: true });
+  if (s.coverage) {
+    rows.push({ color: "#2E7D32", label: "Coverage — patrolled cell" });
+    rows.push({ color: "#B3261E", label: "Coverage — unpatrolled cell" });
+  }
+  if (s.analysisGrid) {
+    rows.push({ color: "#8a8f98", label: "Analysis grid cell" });
+    rows.push({ color: "#0E4C92", label: "Analysis grid — selected" });
+  }
+  if (s.grids) rows.push({ color: "#8a8f98", label: "Reference grid (backend)" });
+  if (s.heat) rows.push({ color: "#B3261E", label: "Danger heat block" });
+  return rows;
 }
 
 function MapFloatButton({

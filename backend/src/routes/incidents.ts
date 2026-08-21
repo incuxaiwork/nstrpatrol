@@ -9,7 +9,7 @@ import { validateBody, validateQuery } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { param } from '../lib/http';
 import { storeBuffer } from '../services/storage';
-import { applyIncidentWhere, incidentVisibleTo } from '../lib/scope';
+import { applyIncidentWhere, incidentVisibleTo, isOfficerScope } from '../lib/scope';
 
 export const incidentsRouter = Router();
 
@@ -107,7 +107,13 @@ async function assertIncidentInScope(req: Request, id: string): Promise<void> {
   }
 }
 
-incidentsRouter.post('/:id/verify', requireAdmin, async (req, res) => {
+incidentsRouter.post('/:id/verify', requireAuth, async (req, res) => {
+  // Acknowledgement is an officer action: DFO (division), DyDFO
+  // (sub-division) or FRO (range). Field/beat users cannot verify — not even
+  // their own incidents. incidentVisibleTo below then enforces the boundary.
+  if (!isOfficerScope(req.user!)) {
+    throw new HttpError(403, 'forbidden', 'Verification requires DFO/DyDFO/FRO authority');
+  }
   await assertIncidentInScope(req, param(req, 'id'));
   const updated = await prisma.incident.update({
     where: { id: param(req, 'id') },

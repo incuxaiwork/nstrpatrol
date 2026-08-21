@@ -5,9 +5,10 @@
  * live markers, patrol route playback, and the zero-patrol-zone board.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, Suspense } from "react";
 import Link from "next/link";
-import { gis, rangers as servicesRangers, observations as servicesObservations, hierarchy as hierarchyService } from "@/lib/services";
+import { useSearchParams } from "next/navigation";
+import { gis, rangers as servicesRangers, observations as servicesObservations, hierarchy as hierarchyService, sos as sosService } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { api, invalidateCache, ApiError } from "@/lib/api";
 import type { ApiGridCoverage } from "@/lib/api";
@@ -15,6 +16,8 @@ import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
 import { MapWorkspace } from "@/components/map-loader";
 import { MapSidebarFacts, type GridRegionFilter } from "@/components/map";
+import { MapLayersPanel } from "@/components/map-layers-panel";
+import { DEFAULT_LAYER_STATE, type ForestLayerState } from "@/lib/map-layers";
 import { RegionFilter } from "@/components/gis-region-filter";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
@@ -156,13 +159,28 @@ function selectedDetail(
 }
 
 export default function GisPage() {
+  // ?sos=<incidentId> deep link ("View on Map") — read inside Suspense per
+  // the Next.js useSearchParams contract.
+  return (
+    <Suspense fallback={<SkeletonRows rows={8} />}>
+      <GisWorkspace />
+    </Suspense>
+  );
+}
+
+function GisWorkspace() {
+  const searchParams = useSearchParams();
+  const sosParam = searchParams.get("sos");
   // Beats come from the backend GIS API (GeoJSON → GL layers).
   const beatsData = useAsyncData(() => gis.beats());
   const assetsData = useAsyncData(() => gis.assets());
-  const [selected, setSelected] = useState<string | null>(null);
+  const [rawSelected, setSelected] = useState<string | null>(null);
   // No patrol preselected — play/pause appears only after the admin picks one.
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  // Layer control state lives HERE (outside the canvas) and is passed down
+  // controlled; checkboxes map to real MapLibre visibility switches.
+  const [layerState, setLayerState] = useState<ForestLayerState>(DEFAULT_LAYER_STATE);
   // Range → Beat → Compartment filter (division is the fixed context).
   const [regionFilter, setRegionFilter] = useState<GridRegionFilter>({});
   // Analysis grid state — configurable size + deterministic cell selection.
@@ -237,6 +255,43 @@ export default function GisPage() {
     return map;
   }, [coverageData.data]);
   const coverageSummary = coverageData.data?.summary ?? null;
+
+  // Live SOS alert feed (Part B) — powers the dedicated SOS map layer and
+  // the ?sos= deep link. Strict remote; a failure surfaces as an inline
+  // note, never as fabricated points.
+  const sosCasesData = useAsyncData(() => sosService.cases());
+  const sosCases = useMemo(() => sosCasesData.data ?? [], [sosCasesData.data]);
+  const sosAlerts = useMemo(
+    () =>
+      sosCases
+        .filter((c) => c.incident.latitude != null && c.incident.longitude != null)
+        .map((c) => ({
+          id: c.incident.id,
+          lng: c.incident.longitude!,
+          lat: c.incident.latitude!,
+        })),
+    [sosCases]
+  );
+
+  // ?sos=<id> deep link ("View on Map") — fully derived during render (no
+  // effects, no cascading setState): ease the camera to the alert's real
+  // coordinates, select its card and force the SOS layer on while the link
+  // is active. A SOS without GPS shows the honest banner instead.
+  const sosFocusCase = useMemo(
+    () => (sosParam ? sosCases.find((c) => c.incident.id === sosParam) ?? null : null),
+    [sosParam, sosCases]
+  );
+  const focus = useMemo(() => {
+    if (!sosFocusCase) return null;
+    const { latitude, longitude } = sosFocusCase.incident;
+    return latitude != null && longitude != null ? { lng: longitude, lat: latitude, zoom: 15 } : null;
+  }, [sosFocusCase]);
+  const effectiveLayerState = useMemo(
+    () => (focus ? { ...layerState, sos: true } : layerState),
+    [layerState, focus]
+  );
+  // Deep-linked SOS stays selected until the admin clicks something else.
+  const selected = rawSelected ?? (focus ? sosFocusCase?.incident.id ?? null : null);
 
   // Name lookups for the grid popup (real register only — never fabricated).
   const unitNames = useMemo(() => {
@@ -382,9 +437,31 @@ export default function GisPage() {
                 Couldn&apos;t load map markers — showing the map without incident points.
               </p>
             )}
+            {sosCasesData.error && (
+              <p className="border-b border-line px-4 py-2 text-xs text-danger">
+                Couldn&apos;t load the SOS alert feed — {sosCasesData.error.message} The map works
+                without the live SOS layer.
+              </p>
+            )}
+            {sosParam && sosCasesData.data && !sosFocusCase && (
+              <p className="border-b border-line px-4 py-2 text-xs text-warning">
+                The requested SOS is not in your scoped alert feed (it may belong to another range,
+                or was reported by a device that has not synced yet).
+              </p>
+            )}
+            {sosFocusCase && (sosFocusCase.incident.latitude == null || sosFocusCase.incident.longitude == null) && (
+              <p className="border-b border-line bg-warning-soft px-4 py-2 text-xs font-medium text-[#8a4b00]">
+                This SOS was reported without GPS coordinates — location unavailable. It cannot be
+                placed on the map; open the report for details instead.
+              </p>
+            )}
             <MapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
+              layerState={layerState}
+              onLayerStateChange={setLayerState}
+              sosAlerts={sosAlerts}
+              focus={focus}
               liveBeats={taggedBeats}
               compartments={taggedCompartments}
               boundary={boundary}
@@ -555,6 +632,21 @@ export default function GisPage() {
         </div>
 
         <div className="space-y-4">
+          <Card>
+            <CardHeader
+              title="MAP LAYERS"
+              icon="layers"
+              subtitle="Drives real map visibility — the camera never moves"
+            />
+            <div className="p-4">
+              <MapLayersPanel
+              layerState={effectiveLayerState}
+                onChange={setLayerState}
+                gridSizeLabel={gridSizeLabel(analysisGridSize)}
+              />
+            </div>
+          </Card>
+
           <MapSidebarFacts rangers={rangersData.data ?? []} observations={observationsData.data ?? []} />
 
           <Card>

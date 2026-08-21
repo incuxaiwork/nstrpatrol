@@ -11,8 +11,13 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /** Raised when the backend answers a JSON request with a non-2xx status. */
-class ApiException(val statusCode: Int, val errorCode: String?, message: String?) :
-    Exception(message ?: "HTTP $statusCode")
+class ApiException(
+    val statusCode: Int,
+    val errorCode: String?,
+    message: String?,
+    /** Server-provided retry hint (e.g. the SOS cooldown), when present. */
+    val retryAfterSeconds: Int? = null
+) : Exception(message ?: "HTTP $statusCode")
 
 /**
  * Minimal HTTP client for the NSTR backend. Uses HttpURLConnection so no extra
@@ -167,17 +172,28 @@ class BackendApiClient {
         }
         var errorCode: String? = null
         var message: String? = null
+        var retryAfterSeconds: Int? = null
         if (res.second != null) {
             Log.w("BackendApiClient", "HTTP ${res.first} $path body: ${res.second?.take(500)}")
             runCatching {
-                val err = JSONObject(res.second).optJSONObject("error")
+                val root = JSONObject(res.second)
+                val err = root.optJSONObject("error")
                 if (err != null) {
                     errorCode = err.optString("code").ifEmpty { null }
                     message = err.optString("message").ifEmpty { null }
+                } else {
+                    // Some endpoints return the code as a plain string field,
+                    // e.g. {"error":"SOS_COOLDOWN","retryAfterSeconds":42}.
+                    errorCode = root.optString("error").ifEmpty { null }
+                    message = root.optString("message").ifEmpty { null }
+                }
+                if (root.has("retryAfterSeconds")) {
+                    val secs = root.optInt("retryAfterSeconds")
+                    if (secs > 0) retryAfterSeconds = secs
                 }
             }
         }
-        throw ApiException(res.first, errorCode, message)
+        throw ApiException(res.first, errorCode, message, retryAfterSeconds)
     }
 
     @Volatile

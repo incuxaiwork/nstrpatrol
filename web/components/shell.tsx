@@ -99,7 +99,8 @@ function PasswordDialog({ open, onClose }: { open: boolean; onClose(): void }) {
 /* ------------------------------------------------------------------ */
 
 function NotificationsMenu() {
-  const { notifications, unreadCount, markAllRead } = useApp();
+  const { notifications, unreadCount, markAllRead, notificationsError, reloadNotifications } = useApp();
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const toneFor = (kind: string) =>
     kind === "critical" ? "danger" : kind === "warning" ? "warning" : kind === "success" ? "success" : "info";
@@ -130,25 +131,61 @@ function NotificationsMenu() {
           Mark all read
         </button>
       </div>
+      {notificationsError && (
+        <div className="space-y-2 border-b border-line bg-danger-soft/40 px-3 py-2.5">
+          <p className="flex items-start gap-1.5 text-xs leading-snug text-danger">
+            <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
+            {notificationsError}
+          </p>
+          <button
+            onClick={reloadNotifications}
+            className="inline-flex h-6 items-center gap-1 rounded border border-line bg-white px-2 text-[11px] font-medium text-ink hover:bg-forest-50"
+          >
+            <Icon name="refresh" size={11} /> Retry
+          </button>
+        </div>
+      )}
       <div className="max-h-80 overflow-y-auto">
-        {notifications.length === 0 && (
+        {!notificationsError && notifications.length === 0 && (
           <p className="p-6 text-center text-sm text-ink-soft">No notifications yet.</p>
         )}
-        {notifications.map((n) => (
-          <div key={n.id} className={cn("flex gap-3 border-b border-line px-3 py-2.5", !n.read && "bg-forest-50/40")}>
-            <Badge tone={toneFor(n.kind)} dot>
-              {n.kind === "critical" ? "SOS" : n.kind}
-            </Badge>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-ink">{n.title}</p>
-              <p className="truncate text-xs text-ink-soft">{n.body}</p>
-              <p className="mt-0.5 text-[11px] text-ink-faint">{n.module}</p>
+        {notifications.map((n) => {
+          const row = (
+            <>
+              <Badge tone={toneFor(n.kind)} dot>
+                {n.kind === "critical" ? "SOS" : n.kind}
+              </Badge>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-ink">{n.title}</p>
+                <p className="truncate text-xs text-ink-soft">{n.body}</p>
+                <p className="mt-0.5 text-[11px] text-ink-faint">{n.module}</p>
+              </div>
+            </>
+          );
+          const rowClass = cn(
+            "flex w-full gap-3 border-b border-line px-3 py-2.5 text-left",
+            !n.read && "bg-forest-50/40",
+            n.href && "cursor-pointer hover:bg-surface"
+          );
+          return n.href ? (
+            <Link key={n.id} href={n.href} onClick={() => setOpen(false)} className={rowClass}>
+              {row}
+            </Link>
+          ) : (
+            <div key={n.id} className={rowClass}>
+              {row}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="border-t border-line bg-surface px-3 py-2">
-        <button className="w-full text-center text-xs font-medium text-forest-700 hover:underline">
+        <button
+          onClick={() => {
+            setOpen(false);
+            router.push("/notifications");
+          }}
+          className="w-full text-center text-xs font-medium text-forest-700 hover:underline"
+        >
           Open notification center
         </button>
       </div>

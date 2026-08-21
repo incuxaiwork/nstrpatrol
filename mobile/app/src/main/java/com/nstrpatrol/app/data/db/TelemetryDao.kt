@@ -21,6 +21,14 @@ interface TelemetryDao {
     @Query("UPDATE incidents SET syncStatus = 'SYNCED' WHERE syncStatus = 'PENDING'")
     suspend fun markIncidentsSynced()
 
+    /** Marks a single incident (e.g. a directly-POSTed SOS) as synced. */
+    @Query("UPDATE incidents SET syncStatus = 'SYNCED' WHERE id = :id")
+    suspend fun markIncidentSynced(id: String)
+
+    /** Removes one local incident row (e.g. an SOS rejected by the server). */
+    @Query("DELETE FROM incidents WHERE id = :id")
+    suspend fun deleteIncident(id: String)
+
     @Query("SELECT * FROM incidents ORDER BY occurredAt DESC")
     suspend fun allIncidents(): List<IncidentEntity>
 
