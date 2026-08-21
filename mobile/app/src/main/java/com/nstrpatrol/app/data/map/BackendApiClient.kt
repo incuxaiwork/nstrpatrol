@@ -124,12 +124,19 @@ class BackendApiClient {
     }
 
     /** Marks this handset as face-verified for the signed-in officer. */
-    fun verifyDeviceFace(deviceId: String, photoKey: String?, mode: String): JSONObject =
-        postJson("/api/devices/verify", JSONObject().apply {
-            put("deviceId", deviceId)
-            if (photoKey != null) put("photoKey", photoKey)
-            put("mode", mode)
-        })
+    fun verifyDeviceFace(
+        deviceId: String,
+        photoKey: String?,
+        mode: String,
+        embedding: FloatArray? = null,
+        matchScore: Float? = null
+    ): JSONObject = postJson("/api/devices/verify", JSONObject().apply {
+        put("deviceId", deviceId)
+        if (photoKey != null) put("photoKey", photoKey)
+        put("mode", mode)
+        if (embedding != null) put("embedding", JSONArray(embedding.toList()))
+        if (matchScore != null) put("matchScore", matchScore.toDouble())
+    })
 
     /** Lists the signed-in user's registered devices (includes verification state). */
     fun myDevices(): JSONArray = getJsonArray("/api/devices") ?: JSONArray()

@@ -2,8 +2,6 @@ package com.nstrpatrol.app.ui.screens
 
 import com.nstrpatrol.app.R
 
-import androidx.biometric.BiometricManager
-import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -21,6 +19,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -29,8 +28,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
-import androidx.core.content.ContextCompat
-import androidx.fragment.app.FragmentActivity
 import com.nstrpatrol.app.data.Options
 import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.data.PatrolTimer
@@ -56,8 +53,6 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 
-private enum class BiometricAvailability { OK, NO_ENROLLED, UNAVAILABLE }
-
 @Composable
 fun PatrolStartScreen(
     onSave: () -> Unit,
@@ -80,13 +75,13 @@ fun PatrolStartScreen(
     var showErrors by remember { mutableStateOf(false) }
     var faceVerified by remember { mutableStateOf(false) }
     var faceError by remember { mutableStateOf<String?>(null) }
-    var promptKey by remember { mutableStateOf(0) }
-    var biometricAvailability by remember { mutableStateOf(BiometricAvailability.UNAVAILABLE) }
+    var faceScanning by remember { mutableStateOf(false) }
+    var faceMatching by remember { mutableStateOf(false) }
+    var faceMatchScore by remember { mutableStateOf<Float?>(null) }
     val photoSlot = "patrol_start"
     var photoPaths by remember { mutableStateOf(PhotoStore.paths(photoSlot)) }
+    val scope = rememberCoroutineScope()
 
-    // Detect whether this device can prove identity via its built-in biometrics
-    // (preferring the enrolled face when present). Used to gate patrol start.
     val context = LocalContext.current
 
     // This officer must finish one-time face setup on this handset before patrolling.
@@ -96,65 +91,37 @@ fun PatrolStartScreen(
         }
     }
 
-    LaunchedEffect(Unit) {
-        val allowed = BiometricManager.Authenticators.BIOMETRIC_WEAK or
-            BiometricManager.Authenticators.DEVICE_CREDENTIAL
-        biometricAvailability = when (BiometricManager.from(context).canAuthenticate(allowed)) {
-            BiometricManager.BIOMETRIC_SUCCESS -> BiometricAvailability.OK
-            BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> BiometricAvailability.NO_ENROLLED
-            else -> BiometricAvailability.UNAVAILABLE
-        }
-        if (biometricAvailability != BiometricAvailability.OK) {
+    // Live-selfie match: compares the captured frame against this officer's
+    // enrolled reference embedding. Identity is proven purely by face match —
+    // no device fingerprint / PIN prompt is involved.
+    fun onSelfieCaptured(file: java.io.File) {
+        scope.launch {
+            faceMatching = true
             faceError = null
-        }
-    }
-
-    // Single, stable prompt + callback so recompositions never re-trigger auth.
-    val executor = remember(context) { ContextCompat.getMainExecutor(context) }
-    val authenticationCallback = remember {
-        object : BiometricPrompt.AuthenticationCallback() {
-            override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
-                faceVerified = true
-                faceError = null
-            }
-
-            override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
-                if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON &&
-                    errorCode != BiometricPrompt.ERROR_USER_CANCELED
-                ) {
-                    faceError = errString.toString()
+            try {
+                val live = com.nstrpatrol.app.data.face.FaceRecognizer.embed(context, file)
+                file.delete()
+                val reference = auth?.faceReference()
+                when {
+                    live == null ->
+                        faceError = "No clear face detected. Try again in better light."
+                    reference == null ->
+                        faceError = "No face reference found on this device. Complete face setup first."
+                    else -> {
+                        val score = com.nstrpatrol.app.data.face.FaceRecognizer.similarity(live, reference)
+                        if (score >= com.nstrpatrol.app.data.face.FaceRecognizer.MATCH_THRESHOLD) {
+                            faceMatchScore = score
+                            faceVerified = true
+                            faceScanning = false
+                        } else {
+                            faceError = "This face does not match your enrolled reference. Only the officer who set up this device can start the patrol."
+                        }
+                    }
                 }
-            }
-
-            override fun onAuthenticationFailed() {
-                faceError = "Face not recognized. Please try again."
-            }
-        }
-    }
-    val promptInfo = remember {
-        BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Officer identity verification")
-            .setSubtitle("Use this device's face unlock to confirm you are the assigned officer")
-            .setDescription("Capture your face; the phone's built-in recognition verifies the identity of the person holding the device before the patrol starts.")
-            .setNegativeButtonText("Cancel")
-            .setAllowedAuthenticators(
-                BiometricManager.Authenticators.BIOMETRIC_WEAK or
-                    BiometricManager.Authenticators.DEVICE_CREDENTIAL
-            )
-            .build()
-    }
-
-    LaunchedEffect(promptKey) {
-        if (promptKey > 0 && biometricAvailability == BiometricAvailability.OK) {
-            val activity = context as? FragmentActivity
-            if (activity != null) {
-                try {
-                    BiometricPrompt(activity, executor, authenticationCallback).authenticate(promptInfo)
-                } catch (e: Exception) {
-                    faceError = "Could not start face verification: ${e.message}"
-                }
-            } else {
-                faceError = "Face verification is not available here."
+            } catch (e: Exception) {
+                faceError = "Face check failed: ${e.message}"
+            } finally {
+                faceMatching = false
             }
         }
     }
@@ -184,23 +151,35 @@ fun PatrolStartScreen(
             Spacer(Modifier.height(12.dp))
             SectionHeader(text = "Officer verification")
             Spacer(Modifier.height(8.dp))
-            FaceVerificationCard(
-                verified = faceVerified,
-                error = faceError,
-                enabled = biometricAvailability == BiometricAvailability.OK,
-                onVerify = {
-                    faceError = null
-                    promptKey += 1
-                }
-            )
-            if (biometricAvailability == BiometricAvailability.NO_ENROLLED) {
-                Spacer(Modifier.height(4.dp))
+            if (faceScanning) {
+                com.nstrpatrol.app.ui.components.FaceScanCard(
+                    buttonLabel = "Scan my face",
+                    hint = "Look straight at the front camera. Your face is matched against your enrolled reference on this device.",
+                    busy = faceMatching,
+                    error = faceError,
+                    persistentFile = false,
+                    onCaptured = { onSelfieCaptured(it) }
+                )
+                Spacer(Modifier.height(6.dp))
                 Text(
-                    text = "No face is enrolled on this device. Add your face in device Settings to enable verification.",
-                    color = ErrorRed, fontSize = 11.sp
+                    text = "Cancel",
+                    color = TextSecondary,
+                    fontSize = 12.sp,
+                    modifier = Modifier
+                        .clickable { faceScanning = false; faceError = null }
+                        .padding(vertical = 4.dp)
+                )
+            } else {
+                FaceVerificationCard(
+                    verified = faceVerified,
+                    error = faceError,
+                    onVerify = {
+                        faceError = null
+                        faceScanning = true
+                    }
                 )
             }
-            if (showErrors && biometricAvailability == BiometricAvailability.OK && !faceVerified) {
+            if (showErrors && !faceVerified) {
                 Spacer(Modifier.height(4.dp))
                 Text(
                     text = "Verify your face before starting the patrol.",
@@ -281,7 +260,7 @@ fun PatrolStartScreen(
                 if (patrolType == null || patrolMethod == null || beat == null) {
                     return@PrimaryButton
                 }
-                if (biometricAvailability == BiometricAvailability.OK && !faceVerified) {
+                if (!faceVerified) {
                     faceError = "Verify your face before starting the patrol."
                     return@PrimaryButton
                 }
@@ -311,6 +290,7 @@ fun PatrolStartScreen(
                                 put("type", mapPatrolType(patrolType))
                                 put("name", buildPatrolName(patrolType, beat))
                                 put("faceVerified", faceVerified)
+                                if (faceMatchScore != null) put("faceMatchScore", faceMatchScore!!.toDouble())
                             }
                         )
                     }.onSuccess { dao.updateSessionSyncStatus(pid, "SYNCED") }
@@ -358,15 +338,14 @@ fun PatrolStartScreen(
 }
 
 /**
- * Compact card that shows the officer-identity verification state and offers the
- * device's built-in face recognition. Gets a confirmed state only after the
- * biometric prompt succeeds; otherwise it shows the current status/error.
+ * Compact card that shows the officer-identity verification state and opens the
+ * face scanner. Gets a confirmed state only after the live selfie matches the
+ * officer's enrolled reference; otherwise it shows the current status/error.
  */
 @Composable
 private fun FaceVerificationCard(
     verified: Boolean,
     error: String?,
-    enabled: Boolean,
     onVerify: () -> Unit
 ) {
     Column(
@@ -374,7 +353,7 @@ private fun FaceVerificationCard(
             .fillMaxWidth()
             .background(if (verified) ForestGreen.copy(alpha = 0.08f) else Surface)
             .border(1.dp, if (verified) ForestGreen.copy(alpha = 0.5f) else if (error != null) ErrorRed.copy(alpha = 0.5f) else Color(0xFFDDDDDD), RoundedCornerShape(8.dp))
-            .clickable(enabled = enabled && !verified, onClick = onVerify)
+            .clickable(enabled = !verified, onClick = onVerify)
             .padding(horizontal = 14.dp, vertical = 12.dp)
     ) {
         Row {
@@ -388,9 +367,9 @@ private fun FaceVerificationCard(
                 Spacer(Modifier.height(2.dp))
                 Text(
                     text = if (verified)
-                        "The person starting this patrol was verified using this device's face recognition."
+                        "Your live selfie matched your enrolled reference on this device."
                     else
-                        "Tap to scan your face. Startup is allowed only after the device confirms it is you.",
+                        "Tap to scan your face. Your selfie is matched against your enrolled reference before the patrol starts.",
                     color = TextSecondary,
                     fontSize = 11.sp
                 )
@@ -402,7 +381,7 @@ private fun FaceVerificationCard(
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                 ) {
                     Text(
-                        text = if (enabled) "Scan face" else "Unavailable",
+                        text = "Scan face",
                         color = Color.White,
                         fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold

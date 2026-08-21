@@ -416,7 +416,6 @@ fun NstrApp() {
                 sessionStore.saveRoute(Route.Dashboard.key)
                 nav.resetTo(Route.Dashboard)
             },
-            onOpenCamera = { slot -> nav.navigateTo(Route.Camera(slot)) },
             auth = auth,
             api = api
         )

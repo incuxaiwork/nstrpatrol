@@ -58,6 +58,10 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    androidResources {
+        noCompress += "tflite"
+    }
 }
 
 ksp {
@@ -85,6 +89,9 @@ dependencies {
     implementation(libs.androidx.work.runtime.ktx)
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.fragment.ktx)
+    implementation(libs.tensorflow.lite)
+    implementation(libs.mlkit.face.detection)
+    implementation(libs.androidx.exifinterface)
     implementation(libs.play.services.location)
     implementation(libs.maplibre.android.sdk)
 

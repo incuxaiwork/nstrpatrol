@@ -53,7 +53,11 @@ devicesRouter.get('/', async (req, res) => {
 const verifySchema = z.object({
   deviceId: z.string().trim().min(1).max(255),
   photoKey: z.string().trim().max(255).nullish(),
-  mode: z.enum(['FACE_BIOMETRIC', 'PHOTO_ONLY']).default('FACE_BIOMETRIC'),
+  mode: z.enum(['FACE_MATCH', 'FACE_BIOMETRIC', 'PHOTO_ONLY']).default('FACE_MATCH'),
+  // On-device face embedding (MobileFaceNet, L2-normalized) stored as a CSV
+  // reference so future patrol-start selfies can be matched against it.
+  embedding: z.array(z.number().finite()).length(192).nullish(),
+  matchScore: z.number().finite().min(0).max(1).nullish(),
 });
 
 // Records that the officer verified their identity on this handset using the
@@ -61,7 +65,7 @@ const verifySchema = z.object({
 // must be owned by the signed-in user; verification is stored so reinstall or
 // device handoffs can be audited and re-verified.
 devicesRouter.post('/verify', validateBody(verifySchema), async (req, res) => {
-  const { deviceId, photoKey, mode } = req.body;
+  const { deviceId, photoKey, mode, embedding, matchScore } = req.body;
   const existing = await prisma.device.findUnique({ where: { deviceId } });
   if (!existing || existing.userId !== req.user!.id) {
     throw new HttpError(403, 'forbidden', 'This device is not registered to your account');
@@ -73,6 +77,8 @@ devicesRouter.post('/verify', validateBody(verifySchema), async (req, res) => {
       facePhotoKey: photoKey ?? existing.facePhotoKey,
       verificationMode: mode,
       verifiedByUserId: req.user!.id,
+      faceEmbedding: embedding ? embedding.map((v: number) => v.toFixed(6)).join(',') : existing.faceEmbedding,
+      lastMatchScore: matchScore ?? existing.lastMatchScore,
       lastSeenAt: new Date(),
     },
   });

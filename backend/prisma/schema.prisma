@@ -37,6 +37,8 @@ model Device {
   facePhotoKey      String?
   verificationMode  String?
   verifiedByUserId  String?
+  faceEmbedding     String?
+  lastMatchScore    Float?
   lastSeenAt        DateTime?
   createdAt         DateTime  @default(now())
   user              User      @relation(fields: [userId], references: [id])
@@ -100,6 +102,7 @@ model Patrol {
   avgSpeedKmh           Float?
   detectedMethod        String?
   faceVerified          Boolean                @default(false)
+  faceMatchScore        Float?
   accelerometerReadings AccelerometerReading[]
   activitySegments      ActivitySegment[]
   barometerReadings     BarometerReading[]

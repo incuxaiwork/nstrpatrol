@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import com.nstrpatrol.app.data.face.FaceRecognizer
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
 import kotlinx.coroutines.CoroutineScope
@@ -156,10 +157,46 @@ class AuthSession(context: Context) {
     }
 
     /** Uploads the reference selfie link and marks this handset verified on the backend. */
-    suspend fun markDeviceFaceVerified(photoKey: String?, mode: String) = withContext(Dispatchers.IO) {
+    suspend fun markDeviceFaceVerified(
+        photoKey: String?,
+        mode: String,
+        embedding: FloatArray? = null,
+        matchScore: Float? = null
+    ) = withContext(Dispatchers.IO) {
         val id = deviceId()
-        client.verifyDeviceFace(id, photoKey, mode)
+        client.verifyDeviceFace(id, photoKey, mode, embedding, matchScore)
+        if (embedding != null) cacheFaceReference(embedding)
         prefs.edit().putString("faceSetupDoneFor", id).apply()
+    }
+
+    /** Caches this device's reference face embedding locally (per handset). */
+    fun cacheFaceReference(embedding: FloatArray) {
+        prefs.edit()
+            .putString("faceRefEmbeddingFor", deviceId())
+            .putString("faceRefEmbedding", com.nstrpatrol.app.data.face.FaceRecognizer.encode(embedding))
+            .apply()
+    }
+
+    /**
+     * The officer's reference face embedding for THIS handset: the local cache when
+     * present, otherwise restored from the backend Device row (e.g. after reinstall).
+     * Null when no reference exists yet.
+     */
+    suspend fun faceReference(): FloatArray? = withContext(Dispatchers.IO) {
+        val id = deviceId()
+        if (prefs.getString("faceRefEmbeddingFor", null) == id) {
+            FaceRecognizer.decode(prefs.getString("faceRefEmbedding", null))?.let { return@withContext it }
+        }
+        // Fall back to the server copy for this handset.
+        val arr = runCatching { client.myDevices() }.getOrNull() ?: return@withContext null
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            if (o.optString("deviceId") != id) continue
+            val ref = FaceRecognizer.decode(o.optString("faceEmbedding").ifEmpty { null })
+            if (ref != null) cacheFaceReference(ref)
+            return@withContext ref
+        }
+        null
     }
 
     /** Ensures this handset's Device row exists before face-verification is recorded. */
