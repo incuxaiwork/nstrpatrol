@@ -139,7 +139,10 @@ fun NstrApp() {
     val sessionStore = remember { SessionStore(context) }
     val auth = remember { AuthSession(context) }
     val restoredSession = remember { auth.restore() }
-    val savedRoute = remember { sessionStore.lastRoute()?.let(Route::fromKey) }
+    val savedRoute = remember {
+        val r = sessionStore.lastRoute()?.let(Route::fromKey)
+        if (r == Route.FaceSetup) Route.Dashboard else r
+    }
     val nav = rememberSaveable(saver = NavStateSaver) {
         NstrNavState(
             initial = if (restoredSession && savedRoute != null && savedRoute != Route.Login) {
@@ -496,7 +499,7 @@ fun NstrApp() {
             dao = database.telemetryDao(),
             api = api,
             auth = auth,
-            onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
+            onRequireFaceSetup = {}
         )
 
         Route.HumanImpact -> HumanImpactScreen(

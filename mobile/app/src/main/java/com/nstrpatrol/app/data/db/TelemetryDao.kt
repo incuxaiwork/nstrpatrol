@@ -21,6 +21,12 @@ interface TelemetryDao {
     @Query("UPDATE incidents SET syncStatus = 'SYNCED' WHERE syncStatus = 'PENDING'")
     suspend fun markIncidentsSynced()
 
+    @Query("UPDATE incidents SET photos = :photos, syncStatus = :syncStatus WHERE id = :id")
+    suspend fun updateIncidentPhotosAndSyncStatus(id: String, photos: String, syncStatus: String)
+
+    @Query("UPDATE incidents SET syncStatus = 'PENDING' WHERE photos LIKE '%/data/%'")
+    suspend fun resetLocalPathIncidentsToPending()
+
     @Query("SELECT * FROM incidents ORDER BY occurredAt DESC")
     suspend fun allIncidents(): List<IncidentEntity>
 

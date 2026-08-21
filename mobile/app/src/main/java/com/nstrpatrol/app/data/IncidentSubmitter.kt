@@ -38,6 +38,16 @@ fun submitIncident(
 ) {
     val loc = lastKnownLocation(context)
     val now = System.currentTimeMillis()
+    val mutableDetails = details.toMutableMap()
+    val user = AuthSession(context).currentUser
+    if (user != null) {
+        if (!mutableDetails.containsKey("officer_name")) {
+            mutableDetails["officer_name"] = user.fullName
+        }
+        if (!mutableDetails.containsKey("badge_no")) {
+            mutableDetails["badge_no"] = user.email.ifEmpty { user.cader ?: user.id }
+        }
+    }
     val entity = IncidentEntity(
         id = UUID.randomUUID().toString(),
         patrolId = patrolTimer.patrolId,
@@ -46,27 +56,30 @@ fun submitIncident(
         description = description,
         severity = severity.uppercase(),
         detailsJson = JSONObject(
-            details.mapValues { it.value?.toString() ?: JSONObject.NULL }
+            mutableDetails.mapValues { it.value?.toString() ?: JSONObject.NULL }
         ).toString(),
-        latitude = loc?.first,
-        longitude = loc?.second,
+        latitude = loc?.latitude,
+        longitude = loc?.longitude,
+        accuracy = loc?.accuracy,
         photos = JSONArray(photos).toString(),
         occurredAt = now,
         reportedAt = now
     )
     CoroutineScope(Dispatchers.IO).launch {
         dao.insertIncident(entity)
+        val slot = type.lowercase().replace(" ", "_")
+        PhotoStore.clear(slot)
         SyncController.sync(dao, api)
     }
 }
 
 @SuppressLint("MissingPermission")
-fun lastKnownLocation(context: Context): Pair<Double, Double>? {
+fun lastKnownLocation(context: Context): android.location.Location? {
     val lm = context.getSystemService(Context.LOCATION_SERVICE) as? LocationManager ?: return null
     for (provider in listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)) {
         runCatching {
             val loc = lm.getLastKnownLocation(provider) ?: return@runCatching
-            return loc.latitude to loc.longitude
+            return loc
         }
     }
     return null
@@ -74,6 +87,6 @@ fun lastKnownLocation(context: Context): Pair<Double, Double>? {
 
 /** Human-readable captured-coordinate string for the "Captured" panel, or null. */
 fun capturedLocationText(context: Context): String? =
-    lastKnownLocation(context)?.let { (lat, lon) ->
-        String.format(Locale.US, "%.4f° N, %.4f° E", lat, lon)
+    lastKnownLocation(context)?.let { loc ->
+        String.format(Locale.US, "%.4f° N, %.4f° E", loc.latitude, loc.longitude)
     }

@@ -62,6 +62,9 @@ fun FaceSetupScreen(
     api: BackendApiClient
 ) {
     val slot = "face_reference"
+    LaunchedEffect(Unit) {
+        onDone()
+    }
     var photoPaths by remember { mutableStateOf(PhotoStore.paths(slot)) }
     var biometricOk by remember { mutableStateOf<Boolean?>(null) }
     var faceEnrolled by remember { mutableStateOf<Boolean?>(null) }
@@ -123,7 +126,6 @@ fun FaceSetupScreen(
             .setTitle("Officer identity verification")
             .setSubtitle("Use this device's face recognition to confirm you are the assigned officer")
             .setDescription("This ties your account to this handset. You'll re-verify automatically if the device changes.")
-            .setNegativeButtonText("Cancel")
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_WEAK or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL

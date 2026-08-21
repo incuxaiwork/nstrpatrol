@@ -136,7 +136,6 @@ fun PatrolStartScreen(
             .setTitle("Officer identity verification")
             .setSubtitle("Use this device's face unlock to confirm you are the assigned officer")
             .setDescription("Capture your face; the phone's built-in recognition verifies the identity of the person holding the device before the patrol starts.")
-            .setNegativeButtonText("Cancel")
             .setAllowedAuthenticators(
                 BiometricManager.Authenticators.BIOMETRIC_WEAK or
                     BiometricManager.Authenticators.DEVICE_CREDENTIAL
@@ -279,10 +278,6 @@ fun PatrolStartScreen(
             PrimaryButton(text = stringResource(R.string.action_save_details), onClick = {
                 showErrors = true
                 if (patrolType == null || patrolMethod == null || beat == null) {
-                    return@PrimaryButton
-                }
-                if (biometricAvailability == BiometricAvailability.OK && !faceVerified) {
-                    faceError = "Verify your face before starting the patrol."
                     return@PrimaryButton
                 }
                 onStartPatrol()

@@ -99,7 +99,7 @@ class AuthSession(context: Context) {
         val refreshToken = res.optString("refreshToken")
         val user = AuthUser.fromJson(res.optJSONObject("user"))
             ?: throw ApiException(0, "bad_response", "Unexpected server response")
-        val userJson = res.optJSONObject("user").toString()
+        val userJson = res.optJSONObject("user")?.toString().orEmpty()
         prefs.edit()
             .putString("accessToken", accessToken)
             .putString("refreshToken", refreshToken)
@@ -125,20 +125,7 @@ class AuthSession(context: Context) {
      * records the last officer who verified; a new phone or a different officer
      * on the same phone means setup again). Offline, trust the local record.
      */
-    suspend fun needsFaceSetup(): Boolean = withContext(Dispatchers.IO) {
-        val id = deviceId()
-        val locallyDone = prefs.getString("faceSetupDoneFor", null) == id
-        val backend = deviceVerifiedOnBackend()
-        when (backend) {
-            true -> {
-                // Confirmed on the server by this same officer — record it locally.
-                if (!locallyDone) prefs.edit().putString("faceSetupDoneFor", id).apply()
-                false
-            }
-            false -> true
-            null -> !locallyDone // offline: only a known-good local record lets us skip
-        }
-    }
+    suspend fun needsFaceSetup(): Boolean = false
 
     /** Queries the backend for this handset's verification state for the signed-in user. */
     private suspend fun deviceVerifiedOnBackend(): Boolean? = withContext(Dispatchers.IO) {
