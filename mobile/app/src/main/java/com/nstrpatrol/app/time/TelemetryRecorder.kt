@@ -93,6 +93,7 @@ class TelemetryRecorder(
     private var lastIntegrityLogAt: Long = 0L
     private var arPendingIntent: PendingIntent? = null
     private var sensorsRegistered = false
+    private var stepSensorRegistered = false
 
     init {
         ActivityRecognitionReceiver.onActivityResult = { result ->
@@ -107,7 +108,13 @@ class TelemetryRecorder(
 
     fun onPermissionResult(granted: Boolean) {
         _arPermissionGranted.value = granted
-        if (granted && running) registerArUpdates()
+        if (granted && running) {
+            registerArUpdates()
+            // TYPE_STEP_COUNTER is gated behind ACTIVITY_RECOGNITION on API 29+;
+            // the grant usually arrives after startPatrol() already ran, so the
+            // step sensor must be (re)registered here or steps stay at zero.
+            registerStepCounter()
+        }
     }
 
     fun hasActivityRecognitionPermission(): Boolean {
@@ -401,24 +408,35 @@ class TelemetryRecorder(
     }
 
     private fun registerSensors() {
-        if (sensorsRegistered) return
-        val sensors = listOfNotNull(
-            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
-            sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
-            sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
-            sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE),
-            sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-        )
-        sensors.forEach { sensor ->
-            sensorManager.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        if (!sensorsRegistered) {
+            val sensors = listOfNotNull(
+                sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+                sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
+                sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
+                sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
+            )
+            sensors.forEach { sensor ->
+                sensorManager.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+            sensorsRegistered = true
         }
-        sensorsRegistered = true
+        registerStepCounter()
+    }
+
+    /** The step counter is registered separately: it is a no-op until the
+     *  ACTIVITY_RECOGNITION permission is granted, which can happen mid-patrol. */
+    private fun registerStepCounter() {
+        if (stepSensorRegistered || !hasActivityRecognitionPermission()) return
+        val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
+        sensorManager.registerListener(sensorListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        stepSensorRegistered = true
     }
 
     private fun unregisterSensors() {
-        if (!sensorsRegistered) return
+        if (!sensorsRegistered && !stepSensorRegistered) return
         sensorManager.unregisterListener(sensorListener)
         sensorsRegistered = false
+        stepSensorRegistered = false
         accelValues.fill(0f)
         gyroValues.fill(0f)
         magValues.fill(0f)
