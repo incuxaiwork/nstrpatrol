@@ -85,11 +85,12 @@ fun PatrolStartScreen(
     val context = LocalContext.current
 
     // This officer must finish one-time face setup on this handset before patrolling.
-    LaunchedEffect(Unit) {
-        if (auth != null && !auth.faceSetupDoneLocally()) {
-            onRequireFaceSetup()
-        }
-    }
+    // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+    // LaunchedEffect(Unit) {
+    //     if (auth != null && !auth.faceSetupDoneLocally()) {
+    //         onRequireFaceSetup()
+    //     }
+    // }
 
     // Live-selfie match: compares the captured frame against this officer's
     // enrolled reference embedding. Identity is proven purely by face match —
@@ -148,44 +149,45 @@ fun PatrolStartScreen(
                 }
             )
 
-            Spacer(Modifier.height(12.dp))
-            SectionHeader(text = "Officer verification")
-            Spacer(Modifier.height(8.dp))
-            if (faceScanning) {
-                com.nstrpatrol.app.ui.components.FaceScanCard(
-                    buttonLabel = "Scan my face",
-                    hint = "Look straight at the front camera. Your face is matched against your enrolled reference on this device.",
-                    busy = faceMatching,
-                    error = faceError,
-                    persistentFile = false,
-                    onCaptured = { onSelfieCaptured(it) }
-                )
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    text = "Cancel",
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier
-                        .clickable { faceScanning = false; faceError = null }
-                        .padding(vertical = 4.dp)
-                )
-            } else {
-                FaceVerificationCard(
-                    verified = faceVerified,
-                    error = faceError,
-                    onVerify = {
-                        faceError = null
-                        faceScanning = true
-                    }
-                )
-            }
-            if (showErrors && !faceVerified) {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    text = "Verify your face before starting the patrol.",
-                    color = ErrorRed, fontSize = 11.sp
-                )
-            }
+            // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+            // Spacer(Modifier.height(12.dp))
+            // SectionHeader(text = "Officer verification")
+            // Spacer(Modifier.height(8.dp))
+            // if (faceScanning) {
+            //     com.nstrpatrol.app.ui.components.FaceScanCard(
+            //         buttonLabel = "Scan my face",
+            //         hint = "Look straight at the front camera. Your face is matched against your enrolled reference on this device.",
+            //         busy = faceMatching,
+            //         error = faceError,
+            //         persistentFile = false,
+            //         onCaptured = { onSelfieCaptured(it) }
+            //     )
+            //     Spacer(Modifier.height(6.dp))
+            //     Text(
+            //         text = "Cancel",
+            //         color = TextSecondary,
+            //         fontSize = 12.sp,
+            //         modifier = Modifier
+            //             .clickable { faceScanning = false; faceError = null }
+            //             .padding(vertical = 4.dp)
+            //     )
+            // } else {
+            //     FaceVerificationCard(
+            //         verified = faceVerified,
+            //         error = faceError,
+            //         onVerify = {
+            //             faceError = null
+            //             faceScanning = true
+            //         }
+            //     )
+            // }
+            // if (showErrors && !faceVerified) {
+            //     Spacer(Modifier.height(4.dp))
+            //     Text(
+            //         text = "Verify your face before starting the patrol.",
+            //         color = ErrorRed, fontSize = 11.sp
+            //     )
+            // }
 
             Spacer(Modifier.height(16.dp))
             SectionHeader(text = stringResource(R.string.patrol_start_details))
@@ -260,10 +262,11 @@ fun PatrolStartScreen(
                 if (patrolType == null || patrolMethod == null || beat == null) {
                     return@PrimaryButton
                 }
-                if (!faceVerified) {
-                    faceError = "Verify your face before starting the patrol."
-                    return@PrimaryButton
-                }
+                // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+                // if (!faceVerified) {
+                //     faceError = "Verify your face before starting the patrol."
+                //     return@PrimaryButton
+                // }
                 onStartPatrol()
                 val pid = patrolTimer.patrolId ?: return@PrimaryButton
                 // Write on a scope NOT tied to this composable: onSave() pops the

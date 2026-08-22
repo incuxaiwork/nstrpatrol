@@ -69,7 +69,8 @@ import com.nstrpatrol.app.ui.screens.AllPatrolsScreen
 import com.nstrpatrol.app.ui.screens.AnimalMortalityScreen
 import com.nstrpatrol.app.ui.screens.CameraScreen
 import com.nstrpatrol.app.ui.screens.DashboardScreen
-import com.nstrpatrol.app.ui.screens.FaceSetupScreen
+// DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+// import com.nstrpatrol.app.ui.screens.FaceSetupScreen
 import com.nstrpatrol.app.ui.screens.GpsDiagnosticsScreen
 import com.nstrpatrol.app.ui.screens.HumanImpactScreen
 import com.nstrpatrol.app.ui.screens.IncidentDetailScreen
@@ -406,34 +407,36 @@ fun NstrApp() {
     ) {
         when (nav.current) {
         Route.Login -> {
-            var needsSetup by remember { mutableStateOf(false) }
+            // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+            // var needsSetup by remember { mutableStateOf(false) }
             LoginScreen(
                 onLogin = { email, password ->
                     try {
                         auth.login(email, password)
-                        needsSetup = auth.needsFaceSetup()
-                        sessionStore.saveRoute(
-                            if (needsSetup) Route.FaceSetup.key else Route.Dashboard.key
-                        )
+                        // DISABLED FOR BETA: needsSetup = auth.needsFaceSetup()
+                        sessionStore.saveRoute(Route.Dashboard.key)
                         null
                     } catch (e: Exception) {
                         e.message ?: "Login failed"
                     }
                 },
                 onSuccess = {
-                    nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
+                    // DISABLED FOR BETA: nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
+                    nav.resetTo(Route.Dashboard)
                 }
             )
         }
 
-        Route.FaceSetup -> FaceSetupScreen(
-            onDone = {
-                sessionStore.saveRoute(Route.Dashboard.key)
-                nav.resetTo(Route.Dashboard)
-            },
-            auth = auth,
-            api = api
-        )
+        // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+        // Route.FaceSetup -> FaceSetupScreen(
+        //     onDone = {
+        //         sessionStore.saveRoute(Route.Dashboard.key)
+        //         nav.resetTo(Route.Dashboard)
+        //     },
+        //     auth = auth,
+        //     api = api
+        // )
+        Route.FaceSetup -> { }
 
         Route.Dashboard -> DashboardScreen(
             onOpenLogs = { nav.navigateTo(Route.Logs) },
@@ -510,7 +513,9 @@ fun NstrApp() {
             dao = database.telemetryDao(),
             api = api,
             auth = auth,
-            onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
+            // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+            // onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
+            onRequireFaceSetup = { }
         )
 
         Route.HumanImpact -> HumanImpactScreen(
