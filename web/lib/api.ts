@@ -446,10 +446,49 @@ export const uploads = {
   urlFor: (key: string) => `${API_BASE}/api/uploads/${encodeURIComponent(key)}`,
 };
 
+/** Multipart POST used for binary uploads (e.g. release APKs). */
+async function requestForm<T>(path: string, file: File, fieldName = "file"): Promise<T> {
+  const form = new FormData();
+  form.append(fieldName, file);
+  const headers: Record<string, string> = {};
+  if (accessToken) headers.Authorization = `Bearer ${accessToken}`;
+  const res = await fetch(`${API_BASE}${path}`, { method: "POST", headers, body: form, cache: "no-store" });
+  if (!res.ok) throw new ApiError(res.status, "http_error", `Upload failed (${res.status})`);
+  return (await res.json()) as T;
+}
+
+export interface ApiAppRelease {
+  id: string;
+  versionCode: number;
+  versionName: string;
+  apkKey: string;
+  sha256: string;
+  sizeBytes: number;
+  notes: string | null;
+  isLatest: boolean;
+  createdAt: string;
+}
+
+export const appReleases = {
+  /** Public — mirrors what the mobile updater polls. */
+  latest: () => request<ApiAppRelease>("/api/app/latest", { auth: false }),
+  list: () => request<ApiAppRelease[]>("/api/app"),
+  uploadApk: (file: File) =>
+    requestForm<{ key: string; size: number; sha256: string; contentType: string }>("/api/uploads", file),
+  register: (body: {
+    versionCode: number;
+    versionName: string;
+    apkKey: string;
+    sha256: string;
+    sizeBytes: number;
+    notes?: string;
+  }) => request<ApiAppRelease>("/api/app", { method: "POST", body }),
+};
+
 export const health = {
   check: () => request<ApiHealth>("/api/health", { auth: false }),
 };
 
 /** Aggregate client mirroring the backend router tree (for discoverability + tooling). */
-export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, uploads, health };
+export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, uploads, appReleases, health };
 export default api;
