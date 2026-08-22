@@ -487,7 +487,21 @@ function Topbar({ onMenu }: { onMenu(): void }) {
         <Icon name="chevronLeft" size={18} />
       </button>
       <DivisionContextChip className="hidden md:inline-flex" />
-      <div className="flex-1" />
+      <button
+        onClick={() => setSearchOpen(true)}
+        className="hidden h-9 max-w-md flex-1 items-center gap-2 rounded-field border border-line bg-white px-3 text-sm text-ink-soft hover:border-forest-600 md:flex"
+      >
+        <Icon name="search" size={15} />
+        <span className="flex-1 truncate text-left">Search patrols, rangers, reports…</span>
+      </button>
+      <button
+        onClick={() => setSearchOpen(true)}
+        aria-label="Search"
+        className="ml-auto flex size-9 items-center justify-center rounded-md text-ink-soft hover:bg-white md:hidden"
+      >
+        <Icon name="search" size={18} />
+      </button>
+      <ScopePicker />
       <NotificationsMenu />
       <ProfileMenu />
     </header>
