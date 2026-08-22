@@ -81,10 +81,10 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
     {
       label: "Forest & administrative",
       rows: [
-        { key: "boundary", title: "Forest Boundary", subtitle: "Reserve outline & name label (outline only)" },
-        { key: "ranges", title: "Range Boundaries", subtitle: "Range outlines & labels" },
-        { key: "beats", title: "Beat Boundaries", subtitle: "Markapur Division beat outlines & labels" },
-        { key: "compartments", title: "Compartment Boundaries", subtitle: "Compartment polygons & labels" },
+        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid deep-green reserve outline & label" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Burnt-sienna dashed range hulls & labels" },
+        { key: "beats", title: "Beat Boundaries", subtitle: "Teal beat outlines & labels — no fill" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin amber internal lines (zoom in) & labels" },
       ],
     },
     {
@@ -102,7 +102,7 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
         { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
         { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
         { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled on the reference grid" },
+        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled grid cells + per-beat coverage tint" },
         { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
       ],
     },

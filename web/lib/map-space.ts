@@ -311,7 +311,7 @@ export interface RangePolygon {
 export const RANGE_COLORS = [
   "#1F4626",
   "#0E4C92",
-  "#7B1FA2",
+  "#4A6572",
   "#92500E",
   "#2E7D32",
   "#00695C",

@@ -186,6 +186,7 @@ interface ReplayModel {
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 const CLICKABLE = [
+  "gl-beats-fill",
   "gl-beats-outline",
   "gl-compartments-fill",
   "gl-routes",
@@ -199,21 +200,35 @@ const CLICKABLE = [
 /** Checkbox → GL layer ids. The basemap radio is handled separately
  *  (BASEMAP_LAYER_IDS below) because it is a single choice, not a toggle. */
 const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]> = {
-  // NOTE: the former solid forest/beat fills (gl-boundary-fill, gl-beats-fill)
-  // were removed by design — the forest renders as the plain basemap with
-  // boundary OUTLINES only. Sources are untouched; do not re-add fills.
+  // NOTE: there is deliberately NO solid forest/boundary fill — the reserve
+  // renders as the plain basemap inside its outline. Beats DO carry the
+  // Android-app's subtle dark-green tint (#1E4620 @ 0.12, MapsScreen.kt
+  // "beats-fill-layer"); sources are untouched beyond that.
   boundary: ["gl-boundary-line", "gl-boundary-label"],
-  beats: ["gl-beats-outline", "gl-beats-label", "gl-beats-coverage"],
+  // Beat group owns EVERYTHING beat-derived: hit-test fill, outlines, labels
+  // AND the authorized-patrol highlight (gl-auth-*) — previously these two
+  // were orphaned outside this map and stayed visible with every box off
+  // (the reported stray violet lines).
+  beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-auth-fill", "gl-auth-line"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
   analysisGrid: ["gl-agrid-fill", "gl-agrid-line", "gl-agrid-label", "gl-agrid-sel-fill", "gl-agrid-sel-line"],
   grids: ["gl-grids-fill", "gl-grids-line"],
-  routes: ["gl-routes", "gl-replay-trail", "gl-replay-head"],
+  routes: [
+    "gl-routes",
+    "gl-replay-case",
+    "gl-replay-trail",
+    "gl-replay-dots",
+    "gl-replay-head-halo",
+    "gl-replay-head",
+  ],
   rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
   markers: ["gl-markers-obs"],
   sos: ["gl-markers-sos", "gl-markers-sos-label", "gl-sos-dot", "gl-sos-ring", "gl-sos-label"],
   zeropatrol: ["gl-beats-zero-dash"],
-  coverage: ["gl-grids-coverage", "gl-grids-coverage-line"],
+  // Coverage group = authoritative grid coverage + the per-beat coverage tint
+  // (a coverage visualization, not a boundary — so Beat ON stays pure lines).
+  coverage: ["gl-grids-coverage", "gl-grids-coverage-line", "gl-beats-coverage"],
   heat: ["gl-heat"],
 };
 
@@ -227,6 +242,7 @@ const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
 /** Layers whose visibility is constrained by the Range → Beat → Compartment
  *  region filter (division is fixed context, never filtered). */
 const REGION_FILTERED_LAYERS = [
+  "gl-beats-fill",
   "gl-beats-outline",
   "gl-beats-zero-dash",
   "gl-beats-label",
@@ -288,6 +304,7 @@ function buildLayers(m: MapLibreMap) {
     "heat",
     "replay-trail",
     "replay-head",
+    "replay-points",
     "compartments",
     "ranges",
     "range-labels",
@@ -381,17 +398,15 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 3. Reserve boundary — OUTLINE ONLY. The solid polygon fill was removed
-  //    deliberately so the reserve reads as normal basemap inside its
-  //    boundary; the outline + label carry the extent instead.
+  // 3. Reserve boundary — the STRONGEST administrative line: solid deep
+  //    forest green, heaviest width. Outline only — never a fill.
   m.addLayer({
     id: "gl-boundary-line",
     type: "line",
     source: "boundary",
     paint: {
-      "line-color": "#C3A24C",
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2.5, 14, 5],
-      "line-dasharray": [6, 3],
+      "line-color": "#1B4332",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3.2, 14, 5.5],
       "line-opacity": 0.95,
     },
   });
@@ -408,15 +423,15 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#8a6d1f",
+      "text-color": "#143d2b",
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
   });
 
-  // 4. Patrol coverage tint (only beats that carry a coverage figure).
-  //    Green ramp — coverage is a patrol-positive metric; orange is reserved
-  //    for incident markers only.
+  // 4. Per-beat coverage tint (green ramp where a beat carries a coverage
+  //    figure). It is a COVERAGE visualization and follows the Coverage
+  //    checkbox — Beat ON alone shows boundaries only.
   m.addLayer({
     id: "gl-beats-coverage",
     type: "fill",
@@ -444,16 +459,23 @@ function buildLayers(m: MapLibreMap) {
     paint: { "fill-color": "#B3261E", "fill-opacity": ["*", ["get", "intensity"], 0.32] },
   });
 
-  // 6. Beat polygons — OUTLINE ONLY (app-parity dark-green boundary). The
-  //    beat FILL (dark green over every beat = a solid green wash across the
-  //    whole forest) was removed on purpose; zero-patrol beats keep their red
-  //    dashed outline and authorized beats keep the purple highlight below.
+  // 6. Beat polygons — boundary-focused: the fill exists ONLY for click
+  //    hit-testing (fill-opacity ≈ 0), outlines are a distinct teal so beats
+  //    never read as a green bucket and never blend with the deep-green
+  //    reserve boundary. Zero-patrol beats keep their red dashed outline;
+  //    authorized-patrol highlight is gold (matches the Jurisdiction module).
+  m.addLayer({
+    id: "gl-beats-fill",
+    type: "fill",
+    source: "beats",
+    paint: { "fill-color": "#1E4620", "fill-opacity": 0.02 },
+  });
   m.addLayer({
     id: "gl-auth-fill",
     type: "fill",
     source: "beats",
     filter: ["==", ["get", "isAuth"], true],
-    paint: { "fill-color": "#7B1FA2", "fill-opacity": 0.1 },
+    paint: { "fill-color": "#B07D12", "fill-opacity": 0.08 },
   });
   m.addLayer({
     id: "gl-auth-line",
@@ -461,7 +483,7 @@ function buildLayers(m: MapLibreMap) {
     source: "beats",
     filter: ["==", ["get", "isAuth"], true],
     paint: {
-      "line-color": "#7B1FA2",
+      "line-color": "#B07D12",
       "line-width": 2.5,
       "line-dasharray": [7, 5],
     },
@@ -475,9 +497,10 @@ function buildLayers(m: MapLibreMap) {
         "case",
         ["boolean", ["get", "isZero"], false],
         "#B3261E",
-        ["case", ["boolean", ["get", "selected"], false], "#1F4626", "#1E4620"],
+        ["case", ["boolean", ["get", "selected"], false], "#0B4F49", "#0F766E"],
       ],
       "line-width": ["case", ["boolean", ["get", "selected"], false], 3, 2.2],
+      "line-opacity": 0.9,
     },
   });
   m.addLayer({
@@ -496,57 +519,62 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-beats-label",
     type: "symbol",
     source: "beats",
-    minzoom: 8.5,
+    minzoom: 9,
     layout: {
       "text-field": ["get", "name"],
       "text-size": 12,
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#1E4620"],
+      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#0C5A52"],
       "text-halo-color": "#ffffff",
-      "text-halo-width": 1.5,
+      "text-halo-width": 2,
     },
   });
 
-  // 7. Compartments — quiet blue-gray so amber/orange stays unique to
-  //    incident markers and never competes with beats or routes.
+  // 7. Compartments — the LIGHTEST administrative line: thin amber, low
+  //    opacity, zoom-gated so dense internal boundaries only appear when the
+  //    admin has zoomed in. Fill is hit-test only.
   m.addLayer({
     id: "gl-compartments-fill",
     type: "fill",
     source: "compartments",
-    paint: { "fill-color": "#5B7684", "fill-opacity": 0.05 },
+    paint: { "fill-color": "#E65100", "fill-opacity": 0.02 },
   });
   m.addLayer({
     id: "gl-compartments-line",
     type: "line",
     source: "compartments",
-    paint: { "line-color": "#5B7684", "line-width": 1.2, "line-opacity": 0.75 },
+    minzoom: 9.5,
+    paint: { "line-color": "#E65100", "line-width": 1, "line-opacity": 0.6 },
   });
   m.addLayer({
     id: "gl-compartments-label",
     type: "symbol",
     source: "compartment-labels",
-    minzoom: 10.5,
+    minzoom: 11,
     layout: {
       "text-field": ["get", "compNo"],
       "text-size": 10,
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#41586b",
+      "text-color": "#B34700",
       "text-halo-color": "#ffffff",
       "text-halo-width": 1.5,
     },
   });
 
-  // 8. Ranges (derived hulls of each range's beats).
+  // 8. Ranges (derived hulls of each range's beats) — one consistent warm
+  //    secondary color (burnt sienna), dashed, between the heavy forest
+  //    boundary and the thin teal beats. A rainbow of per-range colors read
+  //    as random violet/orange noise; hierarchy needs ONE range color.
   m.addLayer({
     id: "gl-ranges-outline",
     type: "line",
     source: "ranges",
     paint: {
-      "line-color": ["get", "color"],
+      "line-color": "#92500E",
       "line-width": 2.5,
       "line-dasharray": [9, 5],
       "line-opacity": 0.9,
@@ -563,7 +591,7 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": ["get", "color"],
+      "text-color": "#92500E",
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
@@ -609,7 +637,11 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 9. Patrol routes + playback track.
+  // 9. Patrol routes + playback track. The replay visual is the Android
+  //    PatrolReportScreen language: white casing under a bold blue line
+  //    (#2E7BF6 w 5 @ 0.95, round caps), every recorded GPS fix as a small
+  //    blue dot, and the playhead as the app's "current position" marker
+  //    (soft blue halo + dot with white ring).
   m.addLayer({
     id: "gl-routes",
     type: "line",
@@ -622,17 +654,46 @@ function buildLayers(m: MapLibreMap) {
     },
   });
   m.addLayer({
+    id: "gl-replay-case",
+    type: "line",
+    source: "replay-trail",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#FFFFFF", "line-width": 9, "line-opacity": 0.9 },
+  });
+  m.addLayer({
     id: "gl-replay-trail",
     type: "line",
     source: "replay-trail",
     layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#2E7D32", "line-width": 5 },
+    paint: { "line-color": "#2E7BF6", "line-width": 5, "line-opacity": 0.95 },
+  });
+  m.addLayer({
+    id: "gl-replay-dots",
+    type: "circle",
+    source: "replay-points",
+    paint: {
+      "circle-radius": 5,
+      "circle-color": "#2E7BF6",
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2,
+    },
+  });
+  m.addLayer({
+    id: "gl-replay-head-halo",
+    type: "circle",
+    source: "replay-head",
+    paint: { "circle-radius": 16, "circle-color": "#2E7BF6", "circle-opacity": 0.33 },
   });
   m.addLayer({
     id: "gl-replay-head",
     type: "circle",
     source: "replay-head",
-    paint: { "circle-radius": 7, "circle-color": "#2E7D32", "circle-stroke-color": "#fff", "circle-stroke-width": 2 },
+    paint: {
+      "circle-radius": 7,
+      "circle-color": "#2E7BF6",
+      "circle-stroke-color": "#fff",
+      "circle-stroke-width": 2.5,
+    },
   });
 
   // 10. Ground markers — rangers, sightings/incidents, SOS.
@@ -841,10 +902,10 @@ export function MapWorkspace({
       style: {
         version: 8,
         sources: {},
-        layers: [{ id: "gl-bg", type: "background", paint: { "background-color": "#f5eedc" } }],
+        layers: [{ id: "gl-bg", type: "background", paint: { "background-color": "#e8eaed" } }],
       },
       center: DIVISION_CENTER,
-      zoom: 11.2,
+      zoom: 11.8,
       // Free viewport — pan/zoom is NOT clamped to the forest bounds.
       attributionControl: { compact: true },
     });
@@ -1089,12 +1150,22 @@ export function MapWorkspace({
     const m = mapRef.current!;
     if (replayRoute) {
       const { trail, head } = replayFeatures(replayRoute.timed, progress);
+      const allPoints: GeoJSON.FeatureCollection = {
+        type: "FeatureCollection",
+        features: replayRoute.timed.map((p) => ({
+          type: "Feature" as const,
+          properties: {},
+          geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] as [number, number] },
+        })),
+      };
       setSourceData(m, "replay-trail", trail);
       setSourceData(m, "replay-head", head);
+      setSourceData(m, "replay-points", allPoints);
       m.setFilter("gl-routes", ["==", "patrolId", replayRoute.patrolId]);
     } else {
       setSourceData(m, "replay-trail", emptyFc());
       setSourceData(m, "replay-head", emptyFc());
+      setSourceData(m, "replay-points", emptyFc());
       m.setFilter("gl-routes", null);
     }
   }, [ready, replayRoute, progress]);
@@ -1259,11 +1330,14 @@ const BASEMAP_LABELS: Record<BasemapKey, string> = {
  *  the GL paint exactly, so the legend never describes a hidden layer. */
 function activeLegendRows(s: ForestLayerState): { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] {
   const rows: { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] = [];
-  if (s.boundary) rows.push({ color: "#C3A24C", label: "Reserve boundary", dashed: true });
-  if (s.beats) rows.push({ color: "#1E4620", label: "Forest beat boundary" });
-  if (s.ranges) rows.push({ color: "#0E4C92", label: "Range boundary", dashed: true });
-  if (s.compartments) rows.push({ color: "#5B7684", label: "Compartment boundary" });
-  if (s.routes) rows.push({ color: "#2E7D32", label: "Patrol route" });
+  if (s.boundary) rows.push({ color: "#1B4332", label: "Forest boundary" });
+  if (s.ranges) rows.push({ color: "#92500E", label: "Range boundary", dashed: true });
+  if (s.beats) rows.push({ color: "#0F766E", label: "Beat boundary" });
+  if (s.compartments) rows.push({ color: "#E65100", label: "Compartment boundary" });
+  if (s.routes) {
+    rows.push({ color: "#2E7D32", label: "Patrol route" });
+    rows.push({ color: "#2E7BF6", label: "Replay track", isPoint: false });
+  }
   if (s.rangers) rows.push({ color: "#1B365D", label: "Ranger position", isPoint: true });
   if (s.markers) {
     rows.push({ color: "#B3261E", label: "Observation / sighting", isPoint: true });
