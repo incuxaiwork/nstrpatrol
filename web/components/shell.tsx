@@ -149,7 +149,7 @@ function NotificationsMenu() {
         {!notificationsError && notifications.length === 0 && (
           <p className="p-6 text-center text-sm text-ink-soft">No notifications yet.</p>
         )}
-        {notifications.map((n) => {
+        {notifications.map((n, idx) => {
           const row = (
             <>
               <Badge tone={toneFor(n.kind)} dot>
@@ -168,11 +168,11 @@ function NotificationsMenu() {
             n.href && "cursor-pointer hover:bg-surface"
           );
           return n.href ? (
-            <Link key={n.id} href={n.href} onClick={() => setOpen(false)} className={rowClass}>
+            <Link key={`${n.id}-${idx}`} href={n.href} onClick={() => setOpen(false)} className={rowClass}>
               {row}
             </Link>
           ) : (
-            <div key={n.id} className={rowClass}>
+            <div key={`${n.id}-${idx}`} className={rowClass}>
               {row}
             </div>
           );

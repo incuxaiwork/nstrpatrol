@@ -76,7 +76,7 @@ export default function NotificationsPage() {
               No notifications yet. SOS, tamper and coverage events appear here as rangers report them.
             </p>
           ) : (
-            notifications.map((n) => {
+            notifications.map((n, idx) => {
               const row = (
                 <>
                   <div className="flex items-center justify-between gap-2">
@@ -96,14 +96,14 @@ export default function NotificationsPage() {
               );
               return n.href ? (
                 <Link
-                  key={n.id}
+                  key={`${n.id}-${idx}`}
                   href={n.href}
                   className={`block px-4 py-3.5 transition hover:bg-surface ${!n.read ? "bg-forest-50/40" : ""}`}
                 >
                   {row}
                 </Link>
               ) : (
-                <div key={n.id} className={`px-4 py-3.5 ${!n.read ? "bg-forest-50/40" : ""}`}>
+                <div key={`${n.id}-${idx}`} className={`px-4 py-3.5 ${!n.read ? "bg-forest-50/40" : ""}`}>
                   {row}
                 </div>
               );

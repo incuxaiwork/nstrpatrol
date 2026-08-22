@@ -3,7 +3,7 @@
 /** Administration dashboard (PRD §11.1) — governance overview */
 
 import Link from "next/link";
-import { admin } from "@/lib/services";
+import { admin, hierarchy as hierarchyService, dashboard } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { KpiCard, DataTable } from "@/components/data";
@@ -16,11 +16,15 @@ export default function AdminDashboardPage() {
   const roles = useAsyncData(() => admin.roles());
   const audit = useAsyncData(() => admin.audit());
   const md = useAsyncData(() => admin.masterData());
+  const units = useAsyncData(() => hierarchyService.units());
+  const dash = useAsyncData(() => dashboard.summary());
 
   if (users.loading || !users.data) return <SkeletonRows rows={7} />;
   if (users.error) return <ErrorState message={users.error.message} onRetry={users.reload} />;
 
   const active = users.data.filter((u) => u.status === "active").length;
+  const divisions = units.data?.divisions ?? [];
+  const rangesByDivision = units.data?.ranges ?? {};
 
   return (
     <div>
@@ -33,6 +37,42 @@ export default function AdminDashboardPage() {
         <KpiCard label="Roles" value={roles.data?.length ?? 0} icon="shield" tone="khaki" />
         <KpiCard label="Species" value={md.data?.species.length ?? 0} icon="paw" tone="warning" />
         <KpiCard label="Audit entries" value={audit.data?.length ?? 0} icon="history" tone="neutral" />
+      </div>
+
+      {/* Forest hierarchy */}
+      <div className="mt-4">
+        <Card>
+          <CardHeader title="Forest hierarchy" icon="tree" subtitle="Operational units & administrative divisions" />
+          <div className="grid gap-3 p-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+            {divisions.map((d) => (
+              <div key={d.id} className="rounded-card border border-line bg-surface p-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium text-ink">{d.name}</p>
+                  <Badge tone="forest">{rangesByDivision[d.id]?.length ?? 0} ranges</Badge>
+                </div>
+                <div className="mt-3 flex items-center justify-between text-xs text-ink-soft">
+                  <span>Patrols</span>
+                  <span className="font-semibold text-ink">{dash.data?.patrolsTotal ?? "—"}</span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
+                  <span>Coverage</span>
+                  <span className="font-semibold text-ink">
+                    {dash.data && dash.data.coveragePct > 0 ? `${dash.data.coveragePct}%` : "—"}
+                  </span>
+                </div>
+                <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
+                  <span>Rangers</span>
+                  <span className="font-semibold text-ink">{dash.data?.rangersTotal ?? "—"}</span>
+                </div>
+              </div>
+            ))}
+            {divisions.length === 0 && !units.loading && (
+              <p className="col-span-full py-6 text-center text-sm text-ink-soft">
+                No hierarchy data available yet.
+              </p>
+            )}
+          </div>
+        </Card>
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-3">

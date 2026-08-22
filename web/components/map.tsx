@@ -845,7 +845,12 @@ export function MapWorkspace({
       },
       center: DIVISION_CENTER,
       zoom: 11.2,
-      // Free viewport — pan/zoom is NOT clamped to the forest bounds.
+      minZoom: 9.8,
+      maxZoom: 18,
+      maxBounds: [
+        [78.0, 14.8],
+        [80.3, 17.0],
+      ],
       attributionControl: { compact: true },
     });
     map.on("error", (e) => {
@@ -1102,22 +1107,15 @@ export function MapWorkspace({
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">
       {/* Map header strip */}
-      <div className="flex items-center justify-between gap-2 border-b border-line bg-white px-3 py-2">
-        <div className="flex min-w-0 items-center gap-2 text-xs text-ink-soft">
-          <Icon name="map" size={14} className="shrink-0 text-forest-700" />
+      <div className="flex items-center justify-between gap-2 border-b border-line bg-white px-3.5 py-2.5">
+        <div className="flex min-w-0 items-center gap-2 text-xs font-semibold text-ink">
+          <Icon name="map" size={15} className="shrink-0 text-forest-700" />
           <span className="truncate">
-            NSTR Forest — operational view · {FOREST_CONTEXT.divisionName}
-            {analysisGrids && analysisGrids.length > 0
-              ? ` · ${analysisGrids.length} ${gridSizeLabel(gridSize)} grid cells`
-              : grids && grids.length > 0
-                ? ` · ${grids.length} reference cells`
-                : ""}
+            Live patrol activity across the forest
+            {beats.length > 0 ? ` · ${beats.length} beats` : ""}
+            {comps.length > 0 ? ` · ${comps.length} compartments` : ""}
           </span>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
-          <Icon name="layers" size={13} className="text-forest-700" />
-          Layer controls live in the MAP LAYERS panel
-        </span>
       </div>
 
       <div ref={wrapRef} className={cn("relative overflow-hidden", heightClass)}>

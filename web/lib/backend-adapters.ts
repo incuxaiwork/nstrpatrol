@@ -630,7 +630,7 @@ export function rangerFromApi(
  */
 export function alertFromApi(a: ApiAlert): NotificationItem {
   const base: Pick<NotificationItem, "id" | "time" | "read"> = {
-    id: `${a.type}-${a.incidentId ?? a.patrolId ?? a.timestamp}`,
+    id: `${a.type}-${a.incidentId ?? a.patrolId ?? ""}-${a.timestamp}`,
     time: a.timestamp,
     read: false,
   };
