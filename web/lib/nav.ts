@@ -75,6 +75,7 @@ export const navModules: NavItem[] = [
     children: [
       { label: "Administration Dashboard", href: "/admin" },
       { label: "Users", href: "/admin/users" },
+      { label: "App Releases", href: "/admin/app-releases" },
       { label: "Roles & Permissions", href: "/admin/roles" },
       { label: "Master Data", href: "/admin/master-data" },
       { label: "Audit Logs", href: "/admin/audit-logs" },

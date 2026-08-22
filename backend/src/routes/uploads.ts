@@ -6,10 +6,17 @@ import { deleteStored, readStored, storeBuffer } from '../services/storage';
 
 export const uploadsRouter = Router();
 
+// Express 5 named wildcards capture as string[]; join back into the raw key.
+function keyFromParams(params: Record<string, unknown>): string {
+  const p = params?.key;
+  const joined = Array.isArray(p) ? p.join('/') : p;
+  return String(joined ?? '').replace(/^\/+/, '');
+}
+
 // Public image getter (allows loading photos directly by S3 key)
 uploadsRouter.get('/*key', async (req, res, next) => {
   try {
-    const rawKey = (req.params as any).key || req.path.replace(/^\//, '');
+    const rawKey = keyFromParams(req.params);
     if (!rawKey) throw new HttpError(400, 'invalid_key', 'File key required');
     const data = await readStored(rawKey);
     if (!data) throw new HttpError(404, 'not_found', 'File not found');
@@ -40,7 +47,7 @@ uploadsRouter.post('/', upload.single('file'), async (req, res) => {
 
 uploadsRouter.delete('/*key', async (req, res, next) => {
   try {
-    const rawKey = (req.params as any).key || req.path.replace(/^\//, '');
+    const rawKey = keyFromParams(req.params);
     const removed = await deleteStored(rawKey);
     if (!removed) throw new HttpError(404, 'not_found', 'File not found');
     res.status(204).end();

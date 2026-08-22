@@ -11,7 +11,7 @@ import {
 import { env } from '../config/env';
 import { HttpError } from '../middleware/error';
 
-const KEY_PATTERN = /^[0-9]{8}\/[a-f0-9]{16}\.[a-z0-9]{1,8}$/i;
+const KEY_PATTERN = /^[0-9]{8}\/[a-f0-9]{16}\.[a-z0-9]{1,12}$/i;
 
 function keyFor(ext: string): string {
   const date = new Date().toISOString().slice(0, 10).replace(/-/g, '');

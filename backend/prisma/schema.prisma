@@ -372,6 +372,18 @@ model MapAsset {
   data        Bytes?
 }
 
+model AppRelease {
+  id          String   @id @default(cuid())
+  versionCode Int      @unique
+  versionName String
+  apkKey      String
+  sha256      String
+  sizeBytes   Int
+  notes       String?
+  isLatest    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+}
+
 model SyncLog {
   id           String    @id @default(cuid())
   deviceId     String?

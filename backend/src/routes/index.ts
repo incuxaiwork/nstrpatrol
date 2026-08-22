@@ -15,6 +15,7 @@ import { optionsRouter } from './options';
 import { uploadsRouter } from './uploads';
 import { coverageRouter } from './coverage';
 import { analyticsRouter } from './analytics';
+import { appRouter } from './app';
 
 export const apiRouter = Router();
 
@@ -39,3 +40,4 @@ apiRouter.use('/options', optionsRouter);
 apiRouter.use('/uploads', uploadsRouter);
 apiRouter.use('/coverage', coverageRouter);
 apiRouter.use('/analytics', analyticsRouter);
+apiRouter.use('/app', appRouter);

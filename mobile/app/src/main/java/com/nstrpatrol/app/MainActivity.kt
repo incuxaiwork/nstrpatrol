@@ -30,8 +30,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -43,6 +45,8 @@ import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.R
 import com.nstrpatrol.app.data.AuthSession
+import com.nstrpatrol.app.data.AppUpdater
+import com.nstrpatrol.app.data.UpdateInfo
 import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.data.ConnectivityObserver
 import com.nstrpatrol.app.data.NetworkStatus
@@ -65,7 +69,8 @@ import com.nstrpatrol.app.ui.screens.AllPatrolsScreen
 import com.nstrpatrol.app.ui.screens.AnimalMortalityScreen
 import com.nstrpatrol.app.ui.screens.CameraScreen
 import com.nstrpatrol.app.ui.screens.DashboardScreen
-import com.nstrpatrol.app.ui.screens.FaceSetupScreen
+// DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+// import com.nstrpatrol.app.ui.screens.FaceSetupScreen
 import com.nstrpatrol.app.ui.screens.GpsDiagnosticsScreen
 import com.nstrpatrol.app.ui.screens.HumanImpactScreen
 import com.nstrpatrol.app.ui.screens.IncidentDetailScreen
@@ -347,6 +352,17 @@ fun NstrApp() {
         }
     }
 
+    // OTA self-update: check the backend for a newer release once per app open.
+    var pendingUpdate by remember { mutableStateOf<UpdateInfo?>(null) }
+    var updateDownloading by remember { mutableStateOf(false) }
+    var updateFailed by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        val info = withContext(Dispatchers.IO) {
+            runCatching { AppUpdater.fetchLatest(api) }.getOrNull()
+        }
+        if (info != null && AppUpdater.isNewer(info)) pendingUpdate = info
+    }
+
     BackHandler(enabled = nav.canGoBack) {
         nav.popBack()
     }
@@ -391,34 +407,36 @@ fun NstrApp() {
     ) {
         when (nav.current) {
         Route.Login -> {
-            var needsSetup by remember { mutableStateOf(false) }
+            // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+            // var needsSetup by remember { mutableStateOf(false) }
             LoginScreen(
                 onLogin = { email, password ->
                     try {
                         auth.login(email, password)
-                        needsSetup = auth.needsFaceSetup()
-                        sessionStore.saveRoute(
-                            if (needsSetup) Route.FaceSetup.key else Route.Dashboard.key
-                        )
+                        // DISABLED FOR BETA: needsSetup = auth.needsFaceSetup()
+                        sessionStore.saveRoute(Route.Dashboard.key)
                         null
                     } catch (e: Exception) {
                         e.message ?: "Login failed"
                     }
                 },
                 onSuccess = {
-                    nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
+                    // DISABLED FOR BETA: nav.resetTo(if (needsSetup) Route.FaceSetup else Route.Dashboard)
+                    nav.resetTo(Route.Dashboard)
                 }
             )
         }
 
-        Route.FaceSetup -> FaceSetupScreen(
-            onDone = {
-                sessionStore.saveRoute(Route.Dashboard.key)
-                nav.resetTo(Route.Dashboard)
-            },
-            auth = auth,
-            api = api
-        )
+        // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+        // Route.FaceSetup -> FaceSetupScreen(
+        //     onDone = {
+        //         sessionStore.saveRoute(Route.Dashboard.key)
+        //         nav.resetTo(Route.Dashboard)
+        //     },
+        //     auth = auth,
+        //     api = api
+        // )
+        Route.FaceSetup -> { }
 
         Route.Dashboard -> DashboardScreen(
             onOpenLogs = { nav.navigateTo(Route.Logs) },
@@ -495,7 +513,9 @@ fun NstrApp() {
             dao = database.telemetryDao(),
             api = api,
             auth = auth,
-            onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
+            // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
+            // onRequireFaceSetup = { nav.navigateTo(Route.FaceSetup) }
+            onRequireFaceSetup = { }
         )
 
         Route.HumanImpact -> HumanImpactScreen(
@@ -590,6 +610,65 @@ fun NstrApp() {
                         text = stringResource(R.string.exit_sync_message),
                         color = Color.White
                     )
+                }
+            }
+        }
+
+        pendingUpdate?.let { info ->
+            AlertDialog(
+                onDismissRequest = { if (!updateDownloading) pendingUpdate = null },
+                title = { Text(text = "Update available") },
+                text = {
+                    Text(
+                        text = buildString {
+                            append("Version ${info.versionName}")
+                            if (info.sizeBytes > 0) append(" (${info.sizeBytes / (1024 * 1024)} MB)")
+                            info.notes?.let { append("\n\n$it") }
+                            if (updateFailed) append("\n\nDownload failed — check connection and try again.")
+                        }
+                    )
+                },
+                confirmButton = {
+                    TextButton(
+                        enabled = !updateDownloading,
+                        onClick = {
+                            updateFailed = false
+                            if (!AppUpdater.canInstall(context)) {
+                                AppUpdater.openInstallPermissionSettings(context)
+                            } else {
+                                updateDownloading = true
+                                syncScope.launch {
+                                    val ok = runCatching {
+                                        AppUpdater.downloadAndLaunchInstall(context.applicationContext, info)
+                                    }.getOrDefault(false)
+                                    updateDownloading = false
+                                    if (ok) pendingUpdate = null else updateFailed = true
+                                }
+                            }
+                        }
+                    ) {
+                        Text(text = if (updateDownloading) "Downloading…" else "Update now")
+                    }
+                },
+                dismissButton = {
+                    if (!updateDownloading) {
+                        TextButton(onClick = { pendingUpdate = null }) { Text(text = "Later") }
+                    }
+                }
+            )
+        }
+
+        if (updateDownloading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.6f)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = Color.White)
+                    Spacer(Modifier.height(16.dp))
+                    Text(text = "Downloading update…", color = Color.White)
                 }
             }
         }
