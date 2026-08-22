@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.nstrpatrol.app.AppConfig
 import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.db.MovementSample
@@ -51,6 +53,7 @@ import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.ui.components.ActivityRings
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -125,8 +128,14 @@ fun PatrolReportScreen(
     // with a precise from/to time (readings are recorded once per sampling tick).
     // Keyed on the points flow so a live (in-progress) report keeps updating.
     LaunchedEffect(patrolId, localPoints.size) {
-        val samples = dao.movementSamplesForPatrol(patrolId)
-        movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
+        withContext(Dispatchers.IO) {
+            val samples = dao.movementSamplesForPatrol(patrolId)
+            movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
+            val metrics = ActivitySummary.computeForPatrol(patrolId, dao)
+            if (metrics.moveMinutes > 0) {
+                moveMinutes = metrics.moveMinutes
+            }
+        }
     }
 
     LaunchedEffect(patrolId) {
@@ -150,6 +159,20 @@ fun PatrolReportScreen(
     val totalDistance = computeReportDistance(points)
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded
+
+    val calculatedSteps = if ((s?.totalSteps ?: 0) > 0) s!!.totalSteps
+    else if (totalDistance > 0) (totalDistance / 0.75).toInt()
+    else 0
+
+    val calculatedMoveMinutes = if (moveMinutes > 0) moveMinutes
+    else if ((s?.moveMinutes ?: 0) > 0) s!!.moveMinutes
+    else {
+        val durationMs = if (s?.startTime != null && s.endTime != null) s.endTime - s.startTime
+            else if (points.size >= 2) points.last().timestamp - points.first().timestamp
+            else 0L
+        val avgSpeed = s?.avgSpeedKmh ?: (if (durationMs > 0) (totalDistance / 1000.0) / (durationMs / 3_600_000.0) else 0.0)
+        if (avgSpeed >= 0.5 && durationMs > 0) (durationMs / 60_000).toInt() else 0
+    }
 
     val detectedCategory = patrolMethodCategory(s?.detectedMethod)
     val expectedCategory = patrolMethodCategory(s?.patrolMethod)
@@ -179,10 +202,14 @@ fun PatrolReportScreen(
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(12.dp))
+            // Priority alert if detected movement doesn't match selected patrol method
+            if (methodMismatch) {
+                MovementMismatchBanner(
+                    detectedLabel = detectedLabel,
+                    selectedMethod = s?.patrolMethod ?: "—"
+                )
+            }
 
-        Column(
-            modifier = Modifier
-        ) {
             if (onEndPatrol != null && isActive) {
                 Button(
                     onClick = { showEndConfirm = true },
@@ -192,14 +219,6 @@ fun PatrolReportScreen(
                     Text("End Patrol", color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(12.dp))
-            }
-
-            if (methodMismatch) {
-                Spacer(Modifier.height(12.dp))
-                MovementMismatchBanner(
-                    detectedLabel = detectedLabel,
-                    selectedMethod = s?.patrolMethod ?: "—"
-                )
             }
 
             // Route map
@@ -228,7 +247,7 @@ fun PatrolReportScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ReportStatCard("Distance", distText, Modifier.weight(1f))
-                ReportStatCard("Steps", "${s?.totalSteps ?: 0}", Modifier.weight(1f))
+                ReportStatCard("Steps", "$calculatedSteps", Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(
@@ -243,7 +262,7 @@ fun PatrolReportScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ReportStatCard("Move min", "$moveMinutes", Modifier.weight(1f))
+                ReportStatCard("Move min", "$calculatedMoveMinutes", Modifier.weight(1f))
                 ReportStatCard("GPS points", "${s?.pointCount ?: points.size}", Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
@@ -261,9 +280,9 @@ fun PatrolReportScreen(
             SectionHeader(text = "Activity")
             Spacer(Modifier.height(8.dp))
             ActivityRings(
-                steps = s?.totalSteps ?: 0,
+                steps = calculatedSteps,
                 stepsGoal = 10000,
-                moveMinutes = moveMinutes,
+                moveMinutes = calculatedMoveMinutes,
                 moveGoal = 60,
                 calories = s?.caloriesEstimate ?: 0.0,
                 calGoal = 500
@@ -355,7 +374,6 @@ fun PatrolReportScreen(
                     TextButton(onClick = { showEndConfirm = false }) { Text("Cancel") }
                 }
             )
-        }
         }
 
         if (fullscreenMap) {

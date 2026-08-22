@@ -124,7 +124,8 @@ private class SessionStore(context: Context) {
     fun lastRoute(): String? = prefs.getString("route", null)
 
     fun saveRoute(key: String) {
-        prefs.edit().putString("route", key).apply()
+        val target = if (key == "face_setup") Route.Dashboard.key else key
+        prefs.edit().putString("route", target).apply()
     }
 
     fun clear() {
@@ -145,14 +146,17 @@ fun NstrApp() {
     val auth = remember { AuthSession(context) }
     val restoredSession = remember { auth.restore() }
     val savedRoute = remember { sessionStore.lastRoute()?.let(Route::fromKey) }
+    val initialRoute = if (restoredSession) {
+        if (savedRoute != null && savedRoute != Route.Login && savedRoute != Route.FaceSetup) {
+            savedRoute
+        } else {
+            Route.Dashboard
+        }
+    } else {
+        Route.Login
+    }
     val nav = rememberSaveable(saver = NavStateSaver) {
-        NstrNavState(
-            initial = if (restoredSession && savedRoute != null && savedRoute != Route.Login) {
-                savedRoute
-            } else {
-                Route.Login
-            }
-        )
+        NstrNavState(initial = initialRoute)
     }
     LaunchedEffect(nav.current) {
         sessionStore.saveRoute(nav.current.key)
@@ -436,7 +440,11 @@ fun NstrApp() {
         //     auth = auth,
         //     api = api
         // )
-        Route.FaceSetup -> { }
+        Route.FaceSetup -> {
+            LaunchedEffect(Unit) {
+                nav.resetTo(Route.Dashboard)
+            }
+        }
 
         Route.Dashboard -> DashboardScreen(
             onOpenLogs = { nav.navigateTo(Route.Logs) },
