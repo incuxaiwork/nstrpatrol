@@ -67,6 +67,7 @@ export function setTokens(access: string, refresh?: string): void {
       if (refresh) window.localStorage.setItem(STORAGE_REFRESH, refresh);
     } catch { /* ignore */ }
   }
+  emitAuthChange();
 }
 
 export function clearTokens(): void {
@@ -78,10 +79,34 @@ export function clearTokens(): void {
       window.localStorage.removeItem(STORAGE_REFRESH);
     } catch { /* ignore */ }
   }
+  emitAuthChange();
 }
 
 export function hasSession(): boolean {
   return Boolean(accessToken);
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth store subscription                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lets client components observe the token store (e.g. via
+ * `useSyncExternalStore`) without reading localStorage during render —
+ * the source of SSR/client hydration mismatches.
+ */
+
+type AuthListener = () => void;
+
+const authListeners = new Set<AuthListener>();
+
+function emitAuthChange(): void {
+  for (const listener of authListeners) listener();
+}
+
+export function subscribeToAuth(listener: AuthListener): () => void {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
 }
 
 /* ------------------------------------------------------------------ */
