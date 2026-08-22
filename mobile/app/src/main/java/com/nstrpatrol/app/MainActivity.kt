@@ -571,7 +571,12 @@ fun NstrApp() {
             api = api
         )
 
-        Route.Sos -> SosScreen(api = api, onTabSelected = nav::selectTab)
+        Route.Sos -> SosScreen(
+            api = api,
+            dao = database.telemetryDao(),
+            patrolTimer = patrolTimer,
+            onTabSelected = nav::selectTab
+        )
 
         is Route.IncidentDetail -> IncidentDetailScreen(
             incidentId = (nav.current as Route.IncidentDetail).incidentId,

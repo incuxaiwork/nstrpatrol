@@ -13,7 +13,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { MapWorkspace } from "@/components/map";
+import { MapWorkspace } from "@/components/map-loader";
 import { Dialog } from "@/components/overlays";
 import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -31,7 +31,7 @@ export default function ObservationDetailPage() {
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [actionNote, setActionNote] = useState("");
-  const [escalateOpen, setEscalateOpen] = useState(false);
+  const [verifyOpen, setVerifyOpen] = useState(false);
   const [mediaIndex, setMediaIndex] = useState<number | null>(null);
 
   if (loading || !obs || spatial.loading || !spatial.data) return <SkeletonRows rows={7} />;
@@ -48,10 +48,10 @@ export default function ObservationDetailPage() {
             <Badge tone={severityTone[obs.severity]} dot>{severityLabel[obs.severity]}</Badge>
             <Badge tone={observationStatusTone[obs.status]} dot>{observationStatusLabel[obs.status]}</Badge>
             <button
-              onClick={() => setEscalateOpen(true)}
-              className="inline-flex h-9 items-center gap-2 rounded-field border border-danger/40 bg-white px-3 text-sm font-medium text-danger hover:bg-danger-soft"
+              onClick={() => setVerifyOpen(true)}
+              className="inline-flex h-9 items-center gap-2 rounded-field border border-forest-600 bg-white px-3 text-sm font-medium text-forest-800 hover:bg-forest-50"
             >
-              <Icon name="alert" size={14} /> Escalate
+              <Icon name="check" size={14} /> Verify
             </button>
             <button
               onClick={() => setResolveOpen(true)}
@@ -101,7 +101,9 @@ export default function ObservationDetailPage() {
               <MapWorkspace mode="overview" heightClass="h-[240px]" liveBeats={spatial.data.beats} compartments={spatial.data.compartments} boundary={spatial.data.boundary} grids={spatial.data.grids} onSelect={() => undefined} />
             </div>
             <p className="px-4 pb-4 font-mono text-xs text-ink-soft">
-              {obs.lat.toFixed(5)}, {obs.lng.toFixed(5)}
+              {obs.lat != null && obs.lng != null
+                ? `${obs.lat.toFixed(5)}, ${obs.lng.toFixed(5)}`
+                : "Location unavailable — the field device recorded no GPS fix for this report."}
             </p>
           </Card>
 
@@ -191,9 +193,13 @@ export default function ObservationDetailPage() {
           <button
             onClick={async () => {
               setResolveOpen(false);
-              await observations.setStatus(obs.id, "resolved");
-              reload();
-              pushToast("success", "Report resolved", `${obs.code} marked as resolved (mock store)`);
+              try {
+                await observations.setStatus(obs.id, "resolved");
+                reload();
+                pushToast("success", "Report resolved", `${obs.code} marked as resolved via the backend`);
+              } catch (err) {
+                pushToast("error", "Resolve failed", err instanceof Error ? err.message : "Backend rejected the request");
+              }
             }}
             className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700"
           >
@@ -202,25 +208,32 @@ export default function ObservationDetailPage() {
         </div>
       </Dialog>
 
-      {/* Escalate dialog */}
-      <Dialog open={escalateOpen} onClose={() => setEscalateOpen(false)} title="Escalate report" icon="sos">
+      {/* Verify dialog — the real backend transition (SUBMITTED → VERIFIED).
+          There is no escalate endpoint; escalation used to fake a verify call,
+          which silently acknowledged the report. */}
+      <Dialog open={verifyOpen} onClose={() => setVerifyOpen(false)} title="Verify report" icon="check">
         <p className="text-sm text-ink-soft">
-          Escalation notifies the SOC duty officer and Divisional Forest Officer (mock).
+          Verifying acknowledges {obs.code} in the backend (SUBMITTED → VERIFIED). Resolve stays a
+          separate, admin-only step.
         </p>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setEscalateOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">
+          <button onClick={() => setVerifyOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">
             Cancel
           </button>
           <button
             onClick={async () => {
-              setEscalateOpen(false);
-              await observations.setStatus(obs.id, "escalated");
-              reload();
-              pushToast("warning", "Report escalated", `${obs.code} escalated — SOC notified (mock store)`);
+              setVerifyOpen(false);
+              try {
+                await observations.setStatus(obs.id, "under-review");
+                reload();
+                pushToast("success", "Report verified", `${obs.code} acknowledged via the backend`);
+              } catch (err) {
+                pushToast("error", "Verify failed", err instanceof Error ? err.message : "Backend rejected the request");
+              }
             }}
-            className="h-9 rounded-field bg-danger px-4 text-sm font-medium text-white hover:bg-danger/90"
+            className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700"
           >
-            Escalate
+            Verify report
           </button>
         </div>
       </Dialog>

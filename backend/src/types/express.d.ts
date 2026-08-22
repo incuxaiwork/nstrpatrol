@@ -8,6 +8,10 @@ declare global {
         role: Role;
         cader: Cader;
         isAdmin: boolean;
+        divisionId?: string | null;
+        subDivisionId?: string | null;
+        rangeId?: string | null;
+        beatId?: string | null;
       };
     }
   }

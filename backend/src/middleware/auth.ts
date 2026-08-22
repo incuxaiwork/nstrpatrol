@@ -11,22 +11,57 @@ function extractBearer(req: Request): string | null {
   return token.length > 0 ? token : null;
 }
 
+/* Short-TTL in-memory user-scope cache, so authenticated requests skip the
+ * per-request user lookup (scope changes propagate within the TTL or on
+ * explicit invalidateUserScope from write routes). */
+const USER_CACHE_TTL_MS = 30_000;
+const userScopeCache = new Map<string, { at: number; user: NonNullable<Request['user']> }>();
+
+/** Drop cached scope for a user (or everyone) after a write. */
+export function invalidateUserScope(userId?: string): void {
+  if (userId) userScopeCache.delete(userId);
+  else userScopeCache.clear();
+}
+
 async function resolveUser(req: Request): Promise<boolean> {
   const token = extractBearer(req);
   if (!token) return false;
   try {
     const payload = verifyAccessToken(token);
+
+    const hit = userScopeCache.get(payload.sub);
+    if (hit && Date.now() - hit.at < USER_CACHE_TTL_MS) {
+      req.user = hit.user;
+      return true;
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, role: true, cader: true, isAdmin: true, isActive: true },
+      select: {
+        id: true,
+        role: true,
+        cader: true,
+        isAdmin: true,
+        isActive: true,
+        divisionId: true,
+        subDivisionId: true,
+        rangeId: true,
+        beatId: true,
+      },
     });
     if (!user || !user.isActive) return false;
-    req.user = {
+    const scopeUser = {
       id: user.id,
       role: user.role,
       cader: user.cader,
       isAdmin: user.isAdmin,
+      divisionId: user.divisionId,
+      subDivisionId: user.subDivisionId,
+      rangeId: user.rangeId,
+      beatId: user.beatId,
     };
+    userScopeCache.set(payload.sub, { at: Date.now(), user: scopeUser });
+    req.user = scopeUser;
     return true;
   } catch {
     return false;

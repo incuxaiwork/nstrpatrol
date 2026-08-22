@@ -48,6 +48,7 @@ import {
   compartmentsFromGeoJson,
   gridsFromGeoJson,
   hierarchyFromGeoJson,
+  isSosIncident,
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
@@ -86,11 +87,12 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiMapAsset, ApiIncident, ApiPatrol } from "@/lib/api";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
-const delay = (ms = 300) => new Promise<void>((r) => setTimeout(r, ms));
+/* Mock paths resolve on the next microtask — no artificial latency. */
+const delay = (_ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, _ms));
 
 /**
  * Strict remote call: NO mock fallback. Any failure (network, 401, business
@@ -597,6 +599,8 @@ export const gis = {
     compartments: CompartmentPolygon[];
     boundary: BoundaryPolygon[];
     grids: GridPolygon[];
+    /** Real lon/lat extent every layer shares (projection anchor). */
+    extent: GeoExtent | null;
   }> => {
     const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
       api.gis.beats(),
@@ -610,6 +614,7 @@ export const gis = {
       compartments: compartmentsFromGeoJson(compFc, extent),
       boundary: boundariesFromGeoJson(boundaryFc, extent),
       grids: gridsFromGeoJson(gridFc, extent),
+      extent,
     };
   },
   beats: async (): Promise<BeatPolygon[]> => (await gis.spatial()).beats,
@@ -619,6 +624,8 @@ export const gis = {
   boundary: async (): Promise<BoundaryPolygon[]> => (await gis.spatial()).boundary,
   /** Reference grid cells (GeoJSON → SVG polygons). */
   grids: async (): Promise<GridPolygon[]> => (await gis.spatial()).grids,
+  /** Real lon/lat extent the shared GIS projection is anchored to. */
+  extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => api.gis.assets(),
   /** Incident markers projected into the shared SVG space — real records. */
@@ -628,7 +635,7 @@ export const gis = {
       .filter((i) => i.latitude != null && i.longitude != null)
       .map((i) => {
         const { x, y } = lngLatToSvg(i.longitude!, i.latitude!);
-        const sos = i.type === "QUICK_CAPTURE" || i.title.toUpperCase().startsWith("SOS");
+        const sos = isSosIncident(i);
         return {
           id: i.id,
           kind: sos ? ("sos" as const) : i.type === "SIGHTING" ? ("observation" as const) : ("incident" as const),
@@ -665,6 +672,71 @@ export const gis = {
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.
   heat: async (): Promise<HeatBlock[]> => [],
+  /**
+   * Authoritative patrol coverage (GET /api/coverage/grids). Backend-scoped;
+   * no mock fallback — failures surface honestly. The API accepts real
+   * backend range/beat/forest ids. Beat ids ARE resolvable (GIS beat features
+   * carry the backend Beat primary key, OBJECTID_1 ≡ Beat.id — the GIS page
+   * translates its derived hierarchy id to a valid beatId before calling).
+   * Range ids have no portal catalog (Range PKs are never exposed), so range
+   * filters keep the request division-scoped and the map applies them
+   * visually.
+   */
+  coverage: async (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}): Promise<ApiGridCoverage> =>
+    remoteOnly(async () => api.coverage.grids(query)),
+};
+
+/* ------------------------------------------------------------------ */
+/* SOS / Emergency operations                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One SOS case for the control room — the authoritative incident record
+ * enriched with real user names only. Unknown names stay null/placeholder so
+ * the UI never invents an identity.
+ */
+export interface SosCase {
+  incident: ApiIncident;
+  rangerName: string;
+  verifierName: string | null;
+  /** details.message from the ranger app when present, else the description. */
+  message: string | null;
+}
+
+export const sos = {
+  /**
+   * SOS cases from the scoped incidents list (GET /api/incidents). The
+   * backend applies role scoping — restricted roles see fewer rows, and
+   * 401/403 surface as honest error states upstream.
+   */
+  cases: async (): Promise<SosCase[]> =>
+    remoteOnly(async () => {
+      const [incidents, users] = await Promise.all([
+        api.incidents.list(),
+        api.users.list().catch(() => []),
+      ]);
+      return incidents.filter(isSosIncident).map((incident) => {
+        const details = incident.details as { message?: unknown } | null;
+        // The incidents list endpoint returns raw rows (no relations), so
+        // both names are resolved through the real users register.
+        const ranger = users.find((u) => u.id === incident.userId);
+        const verifier = incident.verifiedById
+          ? users.find((u) => u.id === incident.verifiedById)
+          : undefined;
+        return {
+          incident,
+          rangerName: ranger?.fullName ?? incident.user?.fullName ?? "Unknown ranger",
+          verifierName: verifier?.fullName ?? null,
+          message:
+            typeof details?.message === "string" && details.message.trim().length > 0
+              ? details.message
+              : (incident.description ?? null),
+        };
+      });
+    }),
+  /** Raw alert feed (GET /api/alerts) — SOS + TAMPER + COVERAGE events,
+   *  already scoped server-side by role. */
+  feed: async (): Promise<ApiAlert[]> => remoteOnly(() => api.alerts.list({ limit: 100 })),
 };
 
 /* ------------------------------------------------------------------ */
@@ -831,6 +903,28 @@ export const analytics = {
       reviewPct: Math.round(((count("requires-review") + count("pending-review")) / total) * 100),
     };
   },
+};
+
+/* ------------------------------------------------------------------ */
+/* Work Analytics (strict remote — server-side aggregations only)      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Work Analytics bindings. Every method calls the real /api/analytics/*
+ * endpoints through the same request layer as every other page — there is
+ * NO mock fallback, NO client-side fabrication of metrics. Sections with no
+ * backend rows surface as empty states (see the page).
+ */
+export const workAnalytics = {
+  /** Patrol volume / distance / duration / steps / mode samples in window. */
+  patrols: (window: { from?: string; to?: string }) =>
+    remoteOnly(() => api.analytics.patrols(window)),
+  /** Incident volume grouped by type / severity / status in window. */
+  incidents: (filter: { from?: string; to?: string; type?: string; severity?: string; status?: string }) =>
+    remoteOnly(() => api.analytics.incidents(filter)),
+  /** Telemetry health: floating patrols, pending sync, integrity, coverage events. */
+  health: (window: { from?: string; to?: string }) =>
+    remoteOnly(() => api.analytics.health(window)),
 };
 
 /* ------------------------------------------------------------------ */

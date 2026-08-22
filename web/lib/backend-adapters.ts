@@ -445,6 +445,22 @@ export function patrolFromApi(
 /* Observations ↔ backend incidents                                    */
 /* ------------------------------------------------------------------ */
 
+/**
+ * True when an incident record IS an SOS. The ranger app sends SOS as
+ * QUICK_CAPTURE with details.sos === true; legacy/manual entries may carry a
+ * title starting with "SOS". Same predicate the GIS marker builder uses, so
+ * the map, the feed and the control room always agree on what an SOS is.
+ */
+export function isSosIncident(i: {
+  type?: string;
+  title?: string;
+  details?: Record<string, unknown> | null;
+}): boolean {
+  if (i.type === "QUICK_CAPTURE") return true;
+  if ((i.title ?? "").toUpperCase().startsWith("SOS")) return true;
+  return i.details?.sos === true;
+}
+
 const categoryFromType: Record<string, ObservationCategory> = {
   HUMAN_IMPACT: "human-impact",
   ANIMAL_MORTALITY: "mortality",
@@ -464,7 +480,9 @@ const statusFromApi: Record<string, ObservationStatus> = {
   SUBMITTED: "open",
   VERIFIED: "under-review",
   RESOLVED: "resolved",
-  REJECTED: "resolved",
+  // REJECTED is its own lifecycle state — it must never read as "resolved"
+  // (a rejected report was dismissed, not closed out successfully).
+  REJECTED: "rejected",
 };
 
 export function observationFromApi(i: {
@@ -499,8 +517,10 @@ export function observationFromApi(i: {
     recordedBy: i.user?.fullName ?? "—",
     recordedAt: i.occurredAt ?? i.reportedAt ?? new Date().toISOString(),
     patrolId: i.patrolId ?? undefined,
-    lat: i.latitude ?? 0,
-    lng: i.longitude ?? 0,
+    // Preserve absence honestly — a missing GPS fix must never become a
+    // fabricated (0, 0) pin in the Gulf of Guinea.
+    lat: i.latitude ?? null,
+    lng: i.longitude ?? null,
     media: (i.photos ?? []).map((src, n) => {
       void src;
       return {
@@ -610,7 +630,7 @@ export function rangerFromApi(
  */
 export function alertFromApi(a: ApiAlert): NotificationItem {
   const base: Pick<NotificationItem, "id" | "time" | "read"> = {
-    id: `${a.type}-${a.incidentId ?? a.patrolId ?? a.timestamp}`,
+    id: `${a.type}-${a.eventId ?? a.incidentId ?? a.patrolId ?? a.timestamp}`,
     time: a.timestamp,
     read: false,
   };
@@ -625,6 +645,9 @@ export function alertFromApi(a: ApiAlert): NotificationItem {
           ? `Emergency at ${a.latitude.toFixed(4)}, ${a.longitude?.toFixed(4) ?? "?"}`
           : "Emergency alert fired from ranger device"),
       module: "sos",
+      // Real destination only when the backend gave us the incident id —
+      // lands on the SOS Control Room card (acknowledge / view on map).
+      href: a.incidentId ? `/sos#${encodeURIComponent(a.incidentId)}` : undefined,
     };
   }
   if (a.type === "TAMPER") {

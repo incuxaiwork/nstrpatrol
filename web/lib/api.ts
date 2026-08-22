@@ -67,6 +67,7 @@ export function setTokens(access: string, refresh?: string): void {
       if (refresh) window.localStorage.setItem(STORAGE_REFRESH, refresh);
     } catch { /* ignore */ }
   }
+  emitAuthChange();
 }
 
 export function clearTokens(): void {
@@ -78,10 +79,34 @@ export function clearTokens(): void {
       window.localStorage.removeItem(STORAGE_REFRESH);
     } catch { /* ignore */ }
   }
+  emitAuthChange();
 }
 
 export function hasSession(): boolean {
   return Boolean(accessToken);
+}
+
+/* ------------------------------------------------------------------ */
+/* Auth store subscription                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Lets client components observe the token store (e.g. via
+ * `useSyncExternalStore`) without reading localStorage during render —
+ * the source of SSR/client hydration mismatches.
+ */
+
+type AuthListener = () => void;
+
+const authListeners = new Set<AuthListener>();
+
+function emitAuthChange(): void {
+  for (const listener of authListeners) listener();
+}
+
+export function subscribeToAuth(listener: AuthListener): () => void {
+  authListeners.add(listener);
+  return () => authListeners.delete(listener);
 }
 
 /* ------------------------------------------------------------------ */
@@ -110,8 +135,52 @@ async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
     method: opts.method ?? "GET",
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    cache: "no-store",
+    // GETs may be served from the HTTP cache (GIS layers declare max-age);
+    // mutations stay no-store.
+    cache: (opts.method ?? "GET") === "GET" ? "default" : "no-store",
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* GET cache + single-flight dedupe                                    */
+/* ------------------------------------------------------------------ */
+
+const ttlCache = new Map<string, { at: number; value: unknown }>();
+const inflight = new Map<string, Promise<unknown>>();
+const DEFAULT_TTL_MS = 30_000;
+
+function cacheKey(method: string, url: string): string {
+  return `${method} ${url}`;
+}
+
+/** Drops cached GET responses (called automatically after mutations). */
+export function invalidateCache(): void {
+  ttlCache.clear();
+}
+
+/** Cached, deduped GET. Concurrent identical GETs share one request. */
+async function cachedGet<T>(method: string, url: string, ttlMs: number, run: () => Promise<T>): Promise<T> {
+  const key = cacheKey(method, url);
+
+  const hit = ttlCache.get(key);
+  if (hit && Date.now() - hit.at < ttlMs) return hit.value as T;
+
+  const pending = inflight.get(key);
+  if (pending) return pending as Promise<T>;
+
+  const promise = run().then(
+    (value) => {
+      inflight.delete(key);
+      ttlCache.set(key, { at: Date.now(), value });
+      return value;
+    },
+    (err: unknown) => {
+      inflight.delete(key);
+      throw err;
+    }
+  );
+  inflight.set(key, promise);
+  return promise;
 }
 
 async function parseBody(res: Response): Promise<unknown> {
@@ -125,40 +194,60 @@ async function parseBody(res: Response): Promise<unknown> {
 }
 
 export async function request<T>(path: string, opts: RequestOpts = {}): Promise<T> {
-  let res = await rawRequest(path, opts);
-
-  // One-shot refresh-and-retry on session expiry.
-  if (res.status === 401 && refreshToken && opts.auth !== false) {
-    try {
-      const refreshed = await rawRequest("/api/auth/refresh", {
-        method: "POST",
-        body: { refreshToken },
-      });
-      if (refreshed.ok) {
-        const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
-        setTokens(data.accessToken, data.refreshToken);
-        res = await rawRequest(path, opts);
-      } else {
-        clearTokens();
-      }
-    } catch {
-      clearTokens();
+  const method = opts.method ?? "GET";
+  const url = new URL(`${API_BASE}${path}`);
+  if (opts.query) {
+    for (const [k, v] of Object.entries(opts.query)) {
+      if (v !== undefined) url.searchParams.set(k, String(v));
     }
   }
 
-  if (!res.ok) {
-    let code = "http_error";
-    let message = `Request failed (${res.status})`;
-    try {
-      const payload = (await res.json()) as { error?: { code?: string; message?: string } };
-      if (payload?.error) {
-        code = payload.error.code ?? code;
-        message = payload.error.message ?? message;
+  const run = async (): Promise<T> => {
+    let res = await rawRequest(path, opts);
+
+    // One-shot refresh-and-retry on session expiry.
+    if (res.status === 401 && refreshToken && opts.auth !== false) {
+      try {
+        const refreshed = await rawRequest("/api/auth/refresh", {
+          method: "POST",
+          body: { refreshToken },
+        });
+        if (refreshed.ok) {
+          const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
+          setTokens(data.accessToken, data.refreshToken);
+          res = await rawRequest(path, opts);
+        } else {
+          clearTokens();
+        }
+      } catch {
+        clearTokens();
       }
-    } catch { /* non-JSON error body */ }
-    throw new ApiError(res.status, code, message);
+    }
+
+    if (!res.ok) {
+      let code = "http_error";
+      let message = `Request failed (${res.status})`;
+      try {
+        const payload = (await res.json()) as { error?: { code?: string; message?: string } };
+        if (payload?.error) {
+          code = payload.error.code ?? code;
+          message = payload.error.message ?? message;
+        }
+      } catch { /* non-JSON error body */ }
+      throw new ApiError(res.status, code, message);
+    }
+    return (await parseBody(res)) as T;
+  };
+
+  // Mutations bust the cache so fresh data is always read next navigation.
+  if (method !== "GET") {
+    const value = await run();
+    invalidateCache();
+    return value;
   }
-  return (await parseBody(res)) as T;
+
+  // GETs are cached (TTL) and deduped while in flight.
+  return cachedGet<T>(method, url.toString(), DEFAULT_TTL_MS, run);
 }
 
 /* ------------------------------------------------------------------ */
@@ -273,6 +362,8 @@ export interface ApiSyncLog {
 
 export interface ApiAlert {
   type: "SOS" | "TAMPER" | "COVERAGE";
+  /** Per-row id (coverage/tamper event or incident) — unique across the feed. */
+  eventId?: string;
   timestamp: string;
   incidentId?: string;
   patrolId?: string;
@@ -327,6 +418,117 @@ export interface ApiTelemetryAggregate {
   totalSeconds: number;
   gridsTouched: number;
   computedAt: string;
+}
+
+/* ------------------------------------------------------------------ */
+/* Work Analytics (GET /api/analytics/* — server-side aggregations)    */
+/* ------------------------------------------------------------------ */
+
+/** The user scope an analytics response was computed under (mirrors scope.ts). */
+export interface ApiAnalyticsScope {
+  kind: "DIVISION" | "SUB_DIVISION" | "RANGE" | "BEAT" | "OPERATIONAL";
+  divisionId?: string;
+  subDivisionId?: string;
+  rangeId?: string;
+  beatId?: string;
+}
+
+export interface ApiPatrolAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    count: number;
+    countByStatus: Record<string, number>;
+    patrolDays: number;
+    clockDurationSeconds: number;
+    completedCount: number;
+    gpsTrackedDistanceKm: number;
+    gpsTrackedDurationSeconds: number;
+    pointCount: number;
+    patrolsWithPoints: number;
+    steps: number;
+    patrolsWithStepReadings: number;
+    modeSamples: Record<string, number>;
+  };
+  byDay: { day: string; count: number }[];
+  byUser: { userId: string; fullName: string; count: number; distanceKm: number; points: number }[];
+}
+
+export interface ApiIncidentAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    total: number;
+    withLocation: number;
+    byType: Record<string, number>;
+    bySeverity: Record<string, number>;
+    byStatus: Record<string, number>;
+    byDay: { day: string; count: number }[];
+  };
+}
+
+export interface ApiHealthAnalytics {
+  generatedAt: string;
+  timezone: string;
+  from: string | null;
+  to: string | null;
+  scope: ApiAnalyticsScope;
+  metrics: {
+    totalPatrols: number;
+    patrolsWithPoints: number;
+    patrolsWithoutPoints: number;
+    pointCount: number;
+    pending: Record<string, number>;
+    syncByDay: { day: string; total: number; failed: number }[];
+    syncFailureRate: number;
+    lastSyncAt: string | null;
+    lastSyncStatus: string | null;
+    integrity: { logs: number; tamperTrue: number; divergenceOver60: number };
+    coverageEventsByType: Record<string, number>;
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Grid coverage (GET /api/coverage/grids — authoritative ForestGrid)  */
+/* ------------------------------------------------------------------ */
+
+export interface ApiGridCoverageCell {
+  /** ForestGrid primary key — the authoritative join key (matches the GIS
+   *  layer feature id from GET /api/gis/grids). */
+  id: string;
+  gridCode: string;
+  forestId: string;
+  forestCode: string | null;
+  covered: boolean;
+  pointCount: number;
+  lastPatrolledAt: string | null;
+}
+
+export interface ApiGridCoverageSummary {
+  totalCells: number;
+  patrolledCells: number;
+  unpatrolledCells: number;
+  /** Server-round1 decimal (e.g. 0.2 = 0.2%). Display as returned. */
+  coveragePercent: number;
+  pointCount: number;
+}
+
+export interface ApiGridCoverage {
+  generatedAt: string;
+  scope: {
+    kind: string;
+    subDivisionId: string | null;
+    rangeId: string | null;
+    beatId: string | null;
+  };
+  summary: ApiGridCoverageSummary;
+  cells: ApiGridCoverageCell[];
 }
 
 /* ------------------------------------------------------------------ */
@@ -442,6 +644,20 @@ export const forests = {
   list: () => request<ApiForest[]>("/api/forests"),
 };
 
+export const coverage = {
+  grids: (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
+    request<ApiGridCoverage>("/api/coverage/grids", { query }),
+};
+
+export const analytics = {
+  patrols: (query: { from?: string; to?: string } = {}) =>
+    request<ApiPatrolAnalytics>("/api/analytics/patrols", { query }),
+  incidents: (query: { from?: string; to?: string; type?: string; severity?: string; status?: string } = {}) =>
+    request<ApiIncidentAnalytics>("/api/analytics/incidents", { query }),
+  health: (query: { from?: string; to?: string } = {}) =>
+    request<ApiHealthAnalytics>("/api/analytics/health", { query }),
+};
+
 export const uploads = {
   urlFor: (key: string) => `${API_BASE}/api/uploads/${encodeURIComponent(key)}`,
 };
@@ -490,5 +706,5 @@ export const health = {
 };
 
 /** Aggregate client mirroring the backend router tree (for discoverability + tooling). */
-export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, uploads, appReleases, health };
+export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, appReleases, health };
 export default api;

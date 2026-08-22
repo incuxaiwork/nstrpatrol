@@ -33,6 +33,7 @@ jest.mock('../lib/jwt', () => ({
 
 import { prisma } from '../db/prisma';
 import { verifyAccessToken } from '../lib/jwt';
+import { invalidateUserScope } from '../middleware/auth';
 
 type ReleaseModel = {
   findFirst: jest.Mock;
@@ -53,6 +54,9 @@ function stubTransaction(): void {
 
 beforeEach(() => {
   jest.clearAllMocks();
+  // The auth middleware caches user scope for 30s; tests re-mock the user
+  // between cases so the cache must be dropped too.
+  invalidateUserScope();
   stubTransaction();
 });
 

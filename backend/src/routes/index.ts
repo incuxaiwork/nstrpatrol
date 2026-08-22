@@ -13,6 +13,8 @@ import { syncRouter } from './sync';
 import { sosRouter, alertsRouter } from './sos';
 import { optionsRouter } from './options';
 import { uploadsRouter } from './uploads';
+import { coverageRouter } from './coverage';
+import { analyticsRouter } from './analytics';
 import { appRouter } from './app';
 
 export const apiRouter = Router();
@@ -36,4 +38,6 @@ apiRouter.use('/sos', sosRouter);
 apiRouter.use('/alerts', alertsRouter);
 apiRouter.use('/options', optionsRouter);
 apiRouter.use('/uploads', uploadsRouter);
+apiRouter.use('/coverage', coverageRouter);
+apiRouter.use('/analytics', analyticsRouter);
 apiRouter.use('/app', appRouter);
