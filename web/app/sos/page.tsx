@@ -170,7 +170,7 @@ export default function SosControlRoomPage() {
           ) : (
             otherAlerts.map((a) => (
               <div
-                key={`${a.type}-${a.incidentId ?? a.patrolId ?? a.timestamp}`}
+                key={`${a.type}-${a.eventId ?? a.incidentId ?? a.patrolId ?? a.timestamp}`}
                 className="flex items-start justify-between gap-3 px-4 py-3"
               >
                 <div className="min-w-0">

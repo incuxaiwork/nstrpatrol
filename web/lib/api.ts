@@ -362,6 +362,8 @@ export interface ApiSyncLog {
 
 export interface ApiAlert {
   type: "SOS" | "TAMPER" | "COVERAGE";
+  /** Per-row id (coverage/tamper event or incident) — unique across the feed. */
+  eventId?: string;
   timestamp: string;
   incidentId?: string;
   patrolId?: string;

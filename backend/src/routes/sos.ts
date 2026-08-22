@@ -172,6 +172,7 @@ alertsRouter.get('/', requireAuth, async (req, res) => {
 
   const sosFeed = sosIncidents.map((i) => ({
     type: 'SOS',
+    eventId: i.id,
     timestamp: i.occurredAt,
     incidentId: i.id,
     latitude: i.latitude,
@@ -212,6 +213,7 @@ alertsRouter.get('/', requireAuth, async (req, res) => {
     ...sosFeed,
     ...tamperLogs.map((t) => ({
       type: 'TAMPER',
+      eventId: t.id,
       timestamp: t.timestamp,
       patrolId: t.patrolId,
       rangerId: t.patrol.userId,
@@ -219,6 +221,7 @@ alertsRouter.get('/', requireAuth, async (req, res) => {
     })),
     ...coverageEvents.map((c) => ({
       type: 'COVERAGE',
+      eventId: c.id,
       eventType: c.type,
       timestamp: c.timestamp,
       patrolId: c.patrolId,
