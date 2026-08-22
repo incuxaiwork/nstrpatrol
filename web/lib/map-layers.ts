@@ -59,25 +59,59 @@ export const BASEMAP_OPTIONS: { key: BasemapKey; label: string; subtitle: string
   { key: "terrain", label: "Terrain", subtitle: "OpenTopoMap topographic relief (online)" },
 ];
 
-/** Overlay checkbox rows (everything except the basemap radio). */
-export function overlayLayerRows(
-  gridSizeLabelStr: string
-): { key: keyof Omit<ForestLayerState, "basemap">; title: string; subtitle: string }[] {
+/** One checkbox row of the external MAP LAYERS panel. */
+export interface OverlayRow {
+  key: keyof Omit<ForestLayerState, "basemap">;
+  title: string;
+  subtitle: string;
+}
+
+/** Panel sections: administrative boundaries, grids, then operational feeds. */
+export interface OverlayGroup {
+  label: string;
+  rows: OverlayRow[];
+}
+
+/**
+ * Grouped overlay rows for the MAP LAYERS panel. The Analysis Grid row title
+ * always carries the ACTIVE cell size (never a stale hard-coded one).
+ */
+export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
   return [
-    { key: "boundary", title: "Reserve Boundary", subtitle: "Reserve outline & name label" },
-    { key: "beats", title: "Forest Beat Boundaries", subtitle: "Markapur Division beat polygons" },
-    { key: "ranges", title: "Ranges", subtitle: "Range outlines & labels" },
-    { key: "compartments", title: "Forest Compartments", subtitle: "Compartment polygons & labels" },
-    { key: "analysisGrid", title: `${gridSizeLabelStr} Analysis Grid`, subtitle: "Configurable cells over the forest area" },
-    { key: "grids", title: "Reference Grid", subtitle: "Backend ForestGrid survey cells (~3.3 km)" },
-    { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
-    { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
-    { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
-    { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
-    { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-    { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled on the reference grid" },
-    { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
+    {
+      label: "Forest & administrative",
+      rows: [
+        { key: "boundary", title: "Forest Boundary", subtitle: "Reserve outline & name label (outline only)" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Range outlines & labels" },
+        { key: "beats", title: "Beat Boundaries", subtitle: "Markapur Division beat outlines & labels" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Compartment polygons & labels" },
+      ],
+    },
+    {
+      label: "Grid",
+      rows: [
+        { key: "analysisGrid", title: `Analysis Grid — ${gridSizeLabelStr}`, subtitle: "Configurable cells over the forest area" },
+        { key: "grids", title: "Reference ForestGrid", subtitle: "Backend survey cells (~3.3 km) — authoritative coverage grid" },
+      ],
+    },
+    {
+      label: "Operations",
+      rows: [
+        { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
+        { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
+        { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
+        { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
+        { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
+        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled on the reference grid" },
+        { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
+      ],
+    },
   ];
+}
+
+/** Flat overlay rows (panel list order). */
+export function overlayLayerRows(gridSizeLabelStr: string): OverlayRow[] {
+  return overlayGroups(gridSizeLabelStr).flatMap((g) => g.rows);
 }
 
 /** Overlay keys only — Select All / Clear All must never touch the basemap radio. */

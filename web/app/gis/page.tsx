@@ -640,9 +640,11 @@ function GisWorkspace() {
             />
             <div className="p-4">
               <MapLayersPanel
-              layerState={effectiveLayerState}
+                layerState={effectiveLayerState}
                 onChange={setLayerState}
                 gridSizeLabel={gridSizeLabel(analysisGridSize)}
+                gridSize={analysisGridSize}
+                onGridSizeChange={changeGridSize}
               />
             </div>
           </Card>

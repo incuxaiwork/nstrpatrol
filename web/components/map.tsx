@@ -175,10 +175,6 @@ function regionFilterExpression(v: GridRegionFilter | undefined): FilterSpecific
 /* Layer stack                                                         */
 /* ------------------------------------------------------------------ */
 
-/* ------------------------------------------------------------------ */
-/* Layer stack                                                         */
-/* ------------------------------------------------------------------ */
-
 interface ReplayModel {
   id: string;
   patrolId: string;
@@ -190,7 +186,6 @@ interface ReplayModel {
 const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 const CLICKABLE = [
-  "gl-beats-fill",
   "gl-beats-outline",
   "gl-compartments-fill",
   "gl-routes",
@@ -204,8 +199,11 @@ const CLICKABLE = [
 /** Checkbox → GL layer ids. The basemap radio is handled separately
  *  (BASEMAP_LAYER_IDS below) because it is a single choice, not a toggle. */
 const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]> = {
-  boundary: ["gl-boundary-fill", "gl-boundary-line", "gl-boundary-label"],
-  beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-beats-coverage"],
+  // NOTE: the former solid forest/beat fills (gl-boundary-fill, gl-beats-fill)
+  // were removed by design — the forest renders as the plain basemap with
+  // boundary OUTLINES only. Sources are untouched; do not re-add fills.
+  boundary: ["gl-boundary-line", "gl-boundary-label"],
+  beats: ["gl-beats-outline", "gl-beats-label", "gl-beats-coverage"],
   ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
   analysisGrid: ["gl-agrid-fill", "gl-agrid-line", "gl-agrid-label", "gl-agrid-sel-fill", "gl-agrid-sel-line"],
@@ -229,7 +227,6 @@ const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
 /** Layers whose visibility is constrained by the Range → Beat → Compartment
  *  region filter (division is fixed context, never filtered). */
 const REGION_FILTERED_LAYERS = [
-  "gl-beats-fill",
   "gl-beats-outline",
   "gl-beats-zero-dash",
   "gl-beats-label",
@@ -384,13 +381,9 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 3. Reserve boundary.
-  m.addLayer({
-    id: "gl-boundary-fill",
-    type: "fill",
-    source: "boundary",
-    paint: { "fill-color": "#C3A24C", "fill-opacity": 0.08 },
-  });
+  // 3. Reserve boundary — OUTLINE ONLY. The solid polygon fill was removed
+  //    deliberately so the reserve reads as normal basemap inside its
+  //    boundary; the outline + label carry the extent instead.
   m.addLayer({
     id: "gl-boundary-line",
     type: "line",
@@ -451,21 +444,10 @@ function buildLayers(m: MapLibreMap) {
     paint: { "fill-color": "#B3261E", "fill-opacity": ["*", ["get", "intensity"], 0.32] },
   });
 
-  // 6. Beat polygons (app parity: dark-green tint + bold boundary).
-  m.addLayer({
-    id: "gl-beats-fill",
-    type: "fill",
-    source: "beats",
-    paint: {
-      "fill-color": [
-        "case",
-        ["boolean", ["get", "isZero"], false],
-        "#fbeae9",
-        ["case", ["boolean", ["get", "selected"], false], "#dceadc", "#1E4620"],
-      ],
-      "fill-opacity": 0.14,
-    },
-  });
+  // 6. Beat polygons — OUTLINE ONLY (app-parity dark-green boundary). The
+  //    beat FILL (dark green over every beat = a solid green wash across the
+  //    whole forest) was removed on purpose; zero-patrol beats keep their red
+  //    dashed outline and authorized beats keep the purple highlight below.
   m.addLayer({
     id: "gl-auth-fill",
     type: "fill",
