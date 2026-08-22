@@ -542,7 +542,7 @@ export const compartmentsMock: CompartmentPolygonMock[] = [
 ];
 
 export const defaultLayers: MapLayerDef[] = [
-  { id: "boundary", name: "Forest boundary", group: "basemap", visible: true, color: "#C3A24C" },
+  { id: "boundary", name: "Forest boundary", group: "basemap", visible: true, color: "#1B4332" },
   { id: "grids", name: "Reference grids", group: "basemap", visible: true, color: "#8a8f98" },
   { id: "basemap", name: "Basemap / boundaries", group: "basemap", visible: true, color: "#1F4626" },
   { id: "beats", name: "Beat boundaries", group: "basemap", visible: true, color: "#37554a" },
