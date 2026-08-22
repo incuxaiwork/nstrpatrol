@@ -263,6 +263,11 @@ export interface ApiUser {
   phone: string | null;
   isActive: boolean;
   isAdmin: boolean;
+  /** Organizational assignment ids (nullable until officially finalized). */
+  divisionId?: string | null;
+  subDivisionId?: string | null;
+  rangeId?: string | null;
+  beatId?: string | null;
 }
 
 export interface ApiLoginResponse {
@@ -286,12 +291,33 @@ export interface ApiPatrol {
   userId: string;
   user?: { id: string; fullName: string; email: string; phone?: string | null; cader?: string | null; role?: string };
   forest?: { id: string; name: string; code: string };
+  /** Authoritative organizational geography resolved server-side from
+   *  Patrol.beat → Beat → Range → SubDivision (null when unresolved). */
+  geography?: {
+    beatId: string | null;
+    beat: string | null;
+    range: string | null;
+    rangeId: string | null;
+    subDivision: string | null;
+    subDivisionId: string | null;
+    division: string | null;
+  } | null;
 }
 
 export interface ApiPatrolStats {
   points: number;
   distanceKm: number;
   durationSeconds: number;
+}
+
+/** Response of GET /api/patrols/:id/coverage/summary (ForestGrid coverage). */
+export interface ApiPatrolCoverageSummary {
+  patrolId: string;
+  totalCells: number;
+  patrolledCells: number;
+  /** Server-rounded to one decimal. */
+  coveragePercent: number;
+  pointCount: number;
 }
 
 export interface ApiIncident {
@@ -538,8 +564,12 @@ export interface ApiGridCoverage {
 export const auth = {
   login: (email: string, password: string) =>
     request<ApiLoginResponse>("/api/auth/login", { method: "POST", body: { email, password }, auth: false }),
+  // Admin-created users MUST go through the authenticated path: the backend
+  // only allows unauthenticated registration for the first-run bootstrap
+  // account. Sending auth:false here produced 403 for every post-bootstrap
+  // invite. With a token attached the backend enforces its own ADMIN check.
   register: (input: { email: string; password: string; fullName: string; role?: string; cader?: string; phone?: string }) =>
-    request<ApiUser>("/api/auth/register", { method: "POST", body: input, auth: false }),
+    request<ApiUser>("/api/auth/register", { method: "POST", body: input }),
   refresh: () =>
     request<{ accessToken: string; refreshToken: string }>("/api/auth/refresh", {
       method: "POST",
@@ -565,6 +595,12 @@ export const patrols = {
   list: (query: { mine?: boolean; status?: string; forestId?: string } = {}) =>
     request<ApiPatrol[]>("/api/patrols", { query: { ...query, mine: query.mine ? "true" : undefined } }),
   get: (id: string) => request<ApiPatrol & { stats: ApiPatrolStats }>(`/api/patrols/${id}`),
+  // Coverage summary — DISTINCT from the CoverageEvent feed at
+  // /api/patrols/:id/coverage, which is the Android SyncManager contract
+  // (JSON array) and must never change shape. Detail-only: lists must not
+  // call this per row (N+1).
+  coverageSummary: (id: string) =>
+    request<ApiPatrolCoverageSummary>(`/api/patrols/${id}/coverage/summary`),
   points: (id: string) =>
     request<{ lat: number; lng: number; altitude?: number | null; speed?: number | null; t: string }[]>(`/api/patrols/${id}/points`),
   start: (id: string, startedAt?: string) => request<{ status: string; startedAt: string }>(`/api/patrols/${id}/start`, { method: "POST", body: { startedAt } }),

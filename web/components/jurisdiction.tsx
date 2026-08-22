@@ -26,7 +26,9 @@ export function JurisdictionBadge({ state }: { state: JurisdictionState }) {
           ? "Authorized exception"
           : state === "pending-review"
             ? "Pending review"
-            : "Requires review"}
+            : state === "unknown"
+              ? "Unknown / Unassigned"
+              : "Requires review"}
     </Badge>
   );
 }
@@ -46,6 +48,22 @@ export function JurisdictionBanner({
   homeArea?: string;
   patrolArea: string;
 }) {
+  // Data gap, not a violation — neutral presentation, never alarm styling.
+  if (state === "unknown") {
+    return (
+      <div className="flex items-start gap-3 rounded-card border border-line bg-surface px-4 py-3">
+        <Icon name="info" size={16} className="mt-0.5 shrink-0 text-ink-soft" />
+        <div>
+          <p className="text-sm font-medium text-ink">Jurisdiction unknown</p>
+          <p className="mt-0.5 text-xs text-ink-soft">
+            The ranger&apos;s home jurisdiction is not on record for this patrol
+            {patrolArea ? ` (patrol area: ${patrolArea})` : ""}. Assign the ranger to an organizational unit to enable validation.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
   if (state === "normal") {
     return (
       <div className="flex items-start gap-3 rounded-card border border-forest-200 bg-forest-50 px-4 py-3">

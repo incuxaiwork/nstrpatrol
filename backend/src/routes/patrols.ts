@@ -5,11 +5,101 @@ import { requireAuth } from '../middleware/auth';
 import { validateBody, validateQuery } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { param } from '../lib/http';
-import { applyPatrolWhere, patrolVisibleTo } from '../lib/scope';
+import { applyPatrolWhere, patrolVisibleTo, DIVISION_PT_MARKAPUR } from '../lib/scope';
+import { runPatrolCoverageSummary } from './coverage';
 
 export const patrolsRouter = Router();
 
 patrolsRouter.use(requireAuth);
+
+/* ------------------------------------------------------------------ */
+/* Geography enrichment                                                */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Authoritative organizational geography for a patrol, resolved through the
+ * existing database relationships:
+ *
+ *   Patrol.beat (free text from the device)
+ *     → Beat.name      → beat id + rangeName
+ *     → Range.name     → Range.subDivisionId
+ *     → SubDivision    → sub-division name
+ *
+ * Division is the deployment-wide PT Markapur division (scope.ts — this
+ * backend serves a single forest/division deployment, so every patrol
+ * belongs to it).
+ *
+ * Nothing is guessed: a beat whose text does not match a Beat row yields null
+ * range/sub-division fields — never a string-similarity match. The lookup is
+ * batched (one query per hierarchy level for the whole list), never one query
+ * per patrol.
+ */
+export interface PatrolGeography {
+  beatId: string | null;
+  beat: string | null;
+  range: string | null;
+  rangeId: string | null;
+  subDivision: string | null;
+  subDivisionId: string | null;
+  division: string | null;
+}
+
+type GeographyCore = Omit<PatrolGeography, 'beat' | 'division'>;
+
+async function resolvePatrolGeographyIndex(
+  patrols: { beat: string | null }[],
+): Promise<Map<string, GeographyCore>> {
+  const index = new Map<string, GeographyCore>();
+  const names = [...new Set(patrols.map((p) => p.beat).filter((b): b is string => Boolean(b)))];
+  if (names.length === 0) return index;
+
+  const beats = await prisma.beat.findMany({
+    where: { name: { in: names } },
+    select: { id: true, name: true, rangeName: true },
+  });
+  const rangeNames = [...new Set(beats.map((b) => b.rangeName).filter((r): r is string => Boolean(r)))];
+  const ranges = rangeNames.length
+    ? await prisma.range.findMany({
+        where: { name: { in: rangeNames } },
+        select: { id: true, name: true, subDivisionId: true },
+      })
+    : [];
+  const subDivisionIds = [...new Set(ranges.map((r) => r.subDivisionId).filter((s): s is string => Boolean(s)))];
+  const subdivisions = subDivisionIds.length
+    ? await prisma.subDivision.findMany({ where: { id: { in: subDivisionIds } }, select: { id: true, name: true } })
+    : [];
+
+  const rangeByName = new Map(ranges.map((r) => [r.name, r]));
+  const subDivisionById = new Map(subdivisions.map((s) => [s.id, s]));
+  for (const b of beats) {
+    const range = b.rangeName ? rangeByName.get(b.rangeName) : undefined;
+    const subdivision = range?.subDivisionId ? subDivisionById.get(range.subDivisionId) : undefined;
+    index.set(b.name, {
+      beatId: b.id,
+      rangeId: range?.id ?? null,
+      range: range?.name ?? null,
+      subDivisionId: subdivision?.id ?? null,
+      subDivision: subdivision?.name ?? null,
+    });
+  }
+  return index;
+}
+
+function geographyFor(
+  patrol: { beat: string | null },
+  index: Map<string, GeographyCore>,
+): PatrolGeography {
+  const core = patrol.beat ? index.get(patrol.beat) : undefined;
+  return {
+    beat: patrol.beat ?? null,
+    beatId: core?.beatId ?? null,
+    range: core?.range ?? null,
+    rangeId: core?.rangeId ?? null,
+    subDivision: core?.subDivision ?? null,
+    subDivisionId: core?.subDivisionId ?? null,
+    division: DIVISION_PT_MARKAPUR,
+  };
+}
 
 const patrolCreateSchema = z.object({
   id: z.string().min(1).max(50).optional(),
@@ -86,7 +176,10 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
     },
     orderBy: { createdAt: 'desc' },
   });
-  res.json(patrols);
+
+  // Batched geography enrichment (≤1 query per hierarchy level for the list).
+  const geoIndex = await resolvePatrolGeographyIndex(patrols);
+  res.json(patrols.map((p) => ({ ...p, geography: geographyFor(p, geoIndex) })));
 });
 
 patrolsRouter.get('/:id', async (req, res) => {
@@ -148,11 +241,53 @@ patrolsRouter.get('/:id', async (req, res) => {
   // activity segment so old data still reports something sensible.
   const detectedMethod = patrol.detectedMethod ?? latestSegment?.mode ?? 'STILL';
 
+  const [geoIndex] = await Promise.all([resolvePatrolGeographyIndex([patrol])]);
   res.json({
     ...patrol,
+    geography: geographyFor(patrol, geoIndex),
     detectedMethod,
     stats: { points: pointCount, distanceKm, durationSeconds, steps },
   });
+});
+
+// ---------------------------------------------------------------------
+// Coverage summary for ONE patrol (ForestGrid × PostGIS — same spatial
+// semantics as GET /api/coverage/grids). Registered BEFORE the route below
+// so the two contracts stay clearly distinct:
+//
+//   GET /api/patrols/:id/coverage          → CoverageEvent[] (Android sync
+//                                            feed — contract must not change)
+//   GET /api/patrols/:id/coverage/summary  → this summary object
+//
+// Authorization mirrors GET /api/patrols/:id exactly (ownership or
+// organizational scope via patrolVisibleTo).
+// ---------------------------------------------------------------------
+patrolsRouter.get('/:id/coverage/summary', async (req, res) => {
+  const id = param(req, 'id');
+  const patrol = await prisma.patrol.findUnique({
+    where: { id },
+    select: { id: true, userId: true, beat: true, forestId: true },
+  });
+  if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
+  if (!(await patrolVisibleTo(req.user!, patrol))) {
+    throw new HttpError(403, 'forbidden', 'You can only view patrols within your scope');
+  }
+
+  // The cell universe is bounded by the patrol's beat ONLY when that beat
+  // text matches an actual Beat row; otherwise it falls back to the whole
+  // deployment grid (the same default universe a division-wide user gets
+  // from /api/coverage/grids). No fuzzy matching.
+  const beatName = patrol.beat
+    ? ((await prisma.beat.findFirst({ where: { name: patrol.beat }, select: { name: true } }))?.name ?? null)
+    : null;
+
+  const { totalCells, patrolledCells, pointCount } = await runPatrolCoverageSummary(
+    id,
+    beatName,
+    patrol.forestId,
+  );
+  const coveragePercent = totalCells > 0 ? Math.round((patrolledCells / totalCells) * 1000) / 10 : 0;
+  res.json({ patrolId: id, totalCells, patrolledCells, coveragePercent, pointCount });
 });
 
 // Lightweight point feed for drawing a patrol's route on the report screen.

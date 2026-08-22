@@ -117,7 +117,7 @@ export default function DashboardPage() {
         <KpiCard label="Authorized patrols" value={data.authorizedToday} icon="lock" tone="info" tillDate={data.authorizedTotal} today={data.authorizedToday} onClick={() => router.push("/patrols?area=authorized")} />
         <KpiCard label="Open incidents" value={data.openIncidents} icon="alert" tone="danger" tillDate={data.incidentsTotal} today={data.openIncidents} onClick={() => router.push("/observations")} />
         <KpiCard label="Rangers on duty" value={data.rangersOnDuty} unit={`/${data.rangersTotal}`} icon="users" tone="khaki" tillDate={data.rangersTotal} today={data.rangersOnDuty} onClick={() => router.push("/rangers")} />
-        <KpiCard label="Coverage" value={data.coveragePct} unit="%" icon="target" tone="warning" tillDate={`${data.coveragePct}%`} today={`${data.coverageToday}%`} onClick={() => router.push("/gis")} />
+        <KpiCard label="Coverage" value={data.coveragePct ?? "—"} unit={data.coveragePct != null ? "%" : undefined} icon="target" tone="warning" tillDate={data.coveragePct != null ? `${data.coveragePct}%` : "—"} today={data.coverageToday != null ? `${data.coverageToday}%` : "—"} onClick={() => router.push("/gis")} />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -218,7 +218,7 @@ export default function DashboardPage() {
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">
                   <span>Coverage</span>
                   <span className="font-semibold text-ink">
-                    {data.coveragePct > 0 ? `${data.coveragePct}%` : "—"}
+                    {data.coveragePct != null && data.coveragePct > 0 ? `${data.coveragePct}%` : "—"}
                   </span>
                 </div>
                 <div className="mt-1.5 flex items-center justify-between text-xs text-ink-soft">

@@ -56,9 +56,12 @@ export default function PatrolsDashboardPage() {
 
   const totalDistance = completed.reduce((a, r) => a + r.patrol.distanceKm, 0);
   const totalDuration = completed.reduce((a, r) => a + r.patrol.durationMin, 0);
-  const avgCoverage = completed.length
-    ? Math.round(completed.reduce((a, r) => a + r.patrol.coveragePct, 0) / completed.length)
-    : 0;
+  // Coverage is detail-only — list-level average is shown only when the
+  // backend actually provides per-patrol values.
+  const coverageValues = completed.map((r) => r.patrol.coveragePct).filter((c): c is number => c != null);
+  const avgCoverage = coverageValues.length
+    ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
+    : null;
   const completedToday = completed.filter(
     (r) => new Date(r.patrol.endActual ?? r.patrol.startScheduled).toDateString() === new Date().toDateString()
   ).length;
@@ -167,7 +170,7 @@ export default function PatrolsDashboardPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">{patrol.title}</p>
                   <p className="text-xs text-ink-soft">
-                    {patrolTypeLabels[patrol.type]} · {patrol.leader} · {patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "in progress"}
+                    {patrol.type ? patrolTypeLabels[patrol.type] : "Field"} · {patrol.leader} · {patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "in progress"}
                   </p>
                   {jurisdiction.state !== "normal" && (
                     <p className="mt-1"><JurisdictionBadge state={jurisdiction.state} /></p>
@@ -220,7 +223,7 @@ export default function PatrolsDashboardPage() {
               <dl className="space-y-1.5 border-t border-line pt-2 text-xs">
                 <div className="flex justify-between"><dt className="text-ink-soft">Distance (completed)</dt><dd className="font-semibold text-ink">{formatKm(totalDistance)}</dd></div>
                 <div className="flex justify-between"><dt className="text-ink-soft">Field time (completed)</dt><dd className="font-semibold text-ink">{formatMinutes(totalDuration)}</dd></div>
-                <div className="flex justify-between"><dt className="text-ink-soft">Avg coverage</dt><dd className="font-semibold text-ink">{avgCoverage}%</dd></div>
+                <div className="flex justify-between"><dt className="text-ink-soft">Avg coverage</dt><dd className="font-semibold text-ink">{avgCoverage != null ? `${avgCoverage}%` : "—"}</dd></div>
               </dl>
             </div>
           </div>

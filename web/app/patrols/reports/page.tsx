@@ -49,7 +49,11 @@ export default function PatrolReportsPage() {
   if (loading || !data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
-  const avgCoverage = Math.round(filtered.reduce((a, r) => a + r.coveragePct, 0) / Math.max(filtered.length, 1));
+  // Only average over reports that actually carry coverage.
+  const coverageValues = filtered.map((r) => r.coveragePct).filter((c): c is number => c != null);
+  const avgCoverage = coverageValues.length
+    ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
+    : null;
   const totalDistance = filtered.reduce((a, r) => a + r.distanceKm, 0);
   const totalIncidents = filtered.reduce((a, r) => a + r.incidents, 0);
 
@@ -57,7 +61,7 @@ export default function PatrolReportsPage() {
     code: r.code,
     patrolId: r.patrolId,
     title: r.title,
-    type: patrolTypeLabels[r.type],
+    type: r.type ? patrolTypeLabels[r.type] : "",
     division: r.division,
     range: r.range,
     beat: r.beat,
@@ -127,7 +131,7 @@ export default function PatrolReportsPage() {
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <KpiCard label="Reports" value={filtered.length} icon="file" tone="forest" />
-        <KpiCard label="Avg coverage" value={avgCoverage} unit="%" icon="target" tone="info" />
+        <KpiCard label="Avg coverage" value={avgCoverage ?? "—"} unit={avgCoverage != null ? "%" : undefined} icon="target" tone="info" />
         <KpiCard label="Distance covered" value={formatKm(totalDistance)} icon="route" tone="khaki" />
         <KpiCard label="Incidents logged" value={totalIncidents} icon="alert" tone="danger" />
       </div>
@@ -153,14 +157,16 @@ export default function PatrolReportsPage() {
               render: (r) => (
                 <div>
                   <p className="font-medium text-ink">{r.title}</p>
-                  <p className="text-xs text-ink-soft">{patrolTypeLabels[r.type]} · {unitName(r.range)} · {unitName(r.beat)}</p>
+                  <p className="text-xs text-ink-soft">{r.type ? patrolTypeLabels[r.type] : "Field"} · {unitName(r.range)} · {unitName(r.beat)}</p>
                 </div>
               ) },
             { key: "leader", header: "Leader", render: (r) => <span className="text-ink-soft">{r.leader}</span> },
             { key: "duration", header: "Duration", sortValue: (r) => r.durationMin,
               render: (r) => <span className="text-ink-soft">{r.durationMin > 0 ? formatMinutes(r.durationMin) : "—"}</span> },
-            { key: "coverage", header: "Coverage", sortValue: (r) => r.coveragePct,
-              render: (r) => <Badge tone={r.coveragePct >= 80 ? "success" : r.coveragePct >= 40 ? "warning" : "danger"}>{r.coveragePct}%</Badge> },
+            { key: "coverage", header: "Coverage", sortValue: (r) => r.coveragePct ?? -1,
+              render: (r) => (r.coveragePct != null
+                ? <Badge tone={r.coveragePct >= 80 ? "success" : r.coveragePct >= 40 ? "warning" : "danger"}>{r.coveragePct}%</Badge>
+                : <span className="text-xs text-ink-faint">—</span>) },
             { key: "incidents", header: "Incidents", sortValue: (r) => r.incidents,
               render: (r) => (r.incidents > 0 ? <Badge tone="danger">{r.incidents}</Badge> : <span className="text-ink-faint">0</span>) },
             {
@@ -190,7 +196,7 @@ export default function PatrolReportsPage() {
               icon="file"
               actions={
                 <div className="flex items-center gap-2">
-                  <Badge tone="forest">{patrolTypeLabels[r.type]}</Badge>
+                  <Badge tone="forest">{r.type ? patrolTypeLabels[r.type] : "Field"}</Badge>
                   <button
                     onClick={() => downloadReport(r)}
                     aria-label={`Download ${r.code}`}
@@ -205,7 +211,7 @@ export default function PatrolReportsPage() {
               <p className="text-sm text-ink-soft">{r.summary}</p>
               <div className="grid grid-cols-4 gap-2 border-t border-line pt-3 text-center">
                 <ReportStat label="Distance" value={formatKm(r.distanceKm)} />
-                <ReportStat label="Checkpoints" value={r.checkpoints} />
+                <ReportStat label="Checkpoints" value={r.checkpoints ?? "—"} />
                 <ReportStat label="Observations" value={r.observations} />
                 <ReportStat label="Photos" value={r.photos} />
               </div>

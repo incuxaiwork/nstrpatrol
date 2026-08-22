@@ -140,17 +140,25 @@ export default function RangerDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Coverage vs beat target" icon="target" subtitle="Field coverage vs team average (mock)" />
+            <CardHeader title="Coverage vs beat target" icon="target" subtitle="Per-ranger coverage has no backend aggregate yet" />
             <div className="space-y-3 p-5">
-              <Progress value={s.coveragePct} tone={s.coveragePct >= 80 ? "forest" : "warning"} />
-              <p className="text-xs text-ink-soft">
-                {ranger.name} covers <strong className="text-ink">{s.coveragePct}%</strong> of their home beat —
-                {s.coveragePct >= 80 ? " above the forest average." : " below the forest average, consider schedule review."}
-              </p>
-              <p className="text-xs text-ink-soft">
-                Cross-jurisdiction patrols are not counted here; they are flagged{" "}
-                <strong className="text-ink">&quot;review&quot;</strong> until validated against an authorization.
-              </p>
+              {s.coveragePct == null ? (
+                <p className="text-sm text-ink-soft">
+                  Coverage unavailable — the backend does not publish per-ranger coverage.
+                </p>
+              ) : (
+                <>
+                  <Progress value={s.coveragePct} tone={s.coveragePct >= 80 ? "forest" : "warning"} />
+                  <p className="text-xs text-ink-soft">
+                    {ranger.name} covers <strong className="text-ink">{s.coveragePct}%</strong> of their home beat —
+                    {s.coveragePct >= 80 ? " above the forest average." : " below the forest average, consider schedule review."}
+                  </p>
+                  <p className="text-xs text-ink-soft">
+                    Cross-jurisdiction patrols are not counted here; they are flagged{" "}
+                    <strong className="text-ink">&quot;review&quot;</strong> until validated against an authorization.
+                  </p>
+                </>
+              )}
             </div>
           </Card>
 

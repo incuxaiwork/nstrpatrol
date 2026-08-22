@@ -3,7 +3,7 @@
 /** Users (PRD §11.2) — accounts, roles and access status */
 
 import { useState } from "react";
-import { admin } from "@/lib/services";
+import { ACCOUNT_OPTIONS, admin } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
 import { Avatar, Badge, Card, Field, Input, PageHeader, SearchInput, Select } from "@/components/ui";
@@ -23,6 +23,19 @@ const statusTone: Record<string, "success" | "info" | "danger" | "neutral"> = {
 };
 const statusLabel: Record<string, string> = { active: "Active", invited: "Invited", disabled: "Disabled" };
 
+/**
+ * Cryptographically secure temporary password (no email infrastructure
+ * exists — the administrator hands these credentials to the new user).
+ * ~103 bits of entropy from CSPRNG bytes over an unambiguous alphabet.
+ */
+function generateTemporaryPassword(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+  const bytes = new Uint32Array(18);
+  crypto.getRandomValues(bytes);
+  const base = Array.from(bytes, (b) => alphabet[b % alphabet.length]).join("");
+  return `${base}9A!`;
+}
+
 export default function AdminUsersPage() {
   const { pushToast } = useApp();
   const users = useAsyncData(() => admin.users());
@@ -35,8 +48,11 @@ export default function AdminUsersPage() {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [roleId, setRoleId] = useState("forest-officer");
+  const [cader, setCader] = useState("FBO");
   const [busy, setBusy] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  /** Shown ONCE after successful creation — never persisted or logged. */
+  const [createdCreds, setCreatedCreds] = useState<{ name: string; email: string; password: string; role: string } | null>(null);
   const [actionUser, setActionUser] = useState<AdminUser | null>(null);
   const [intent, setIntent] = useState<"toggle" | "remove" | null>(null);
 
@@ -53,6 +69,7 @@ export default function AdminUsersPage() {
 
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id;
   const validInvite = name.trim().length >= 3 && email.includes("@");
+  const selectedAccount = ACCOUNT_OPTIONS.find((o) => o.value === cader);
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `admin-users-${stamp()}`, filtered.map((u) => ({
@@ -140,7 +157,7 @@ export default function AdminUsersPage() {
                   )}
                   <button
                     onClick={() => { setActionUser(u); setIntent("remove"); }}
-                    title="Remove user"
+                    title="Deactivate user"
                     className="flex size-7 items-center justify-center rounded-md text-ink-soft hover:bg-danger/10 hover:text-danger"
                   >
                     <Icon name="trash" size={14} />
@@ -154,21 +171,34 @@ export default function AdminUsersPage() {
         <Pagination page={page} pageSize={8} total={filtered.length} onChange={setPage} />
       </Card>
 
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} title="Invite user" icon="mail">
+      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} title="Create user" icon="users">
         <div className="space-y-4">
+          <p className="rounded-card border border-line bg-surface px-3 py-2 text-xs text-ink-soft">
+            No email/SMS is sent — the portal has no messaging infrastructure. After
+            creation you will see a one-time temporary password to hand over securely.
+          </p>
           <Field label="Full name" required>
             <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Neha Gupta" />
           </Field>
           <Field label="Work email" required>
             <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="neha.gupta@nstr.gov.in" />
           </Field>
-          <Field label="Role" required>
-            <Select value={roleId} onChange={(e) => setRoleId(e.target.value)}>
-              {(roles.data ?? []).filter((r) => !r.system || r.id !== "admin").map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
+          <Field label="Cadre / role" required>
+            <Select value={cader} onChange={(e) => setCader(e.target.value)}>
+              {ACCOUNT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </Select>
           </Field>
+          <p className="text-xs text-ink-soft">
+            Creates a <strong className="text-ink">{selectedAccount?.role}</strong> account with cadre{" "}
+            <strong className="text-ink">{cader}</strong>, exactly as the backend role model supports.
+          </p>
+          {createError && (
+            <p className="rounded-card border border-danger/30 bg-danger-soft px-3 py-2 text-xs font-medium text-danger">
+              {createError}
+            </p>
+          )}
         </div>
         <div className="mt-5 flex justify-end gap-2">
           <button onClick={() => setInviteOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">Cancel</button>
@@ -176,16 +206,73 @@ export default function AdminUsersPage() {
             disabled={!validInvite || busy}
             onClick={async () => {
               setBusy(true);
-              await admin.createUser({ name: name.trim(), email: email.trim(), roleId });
-              setBusy(false);
-              setInviteOpen(false);
-              setName(""); setEmail("");
-              users.reload();
-              pushToast("success", "Invitation sent", `Invite dispatched to ${email.trim()} (mock store)`);
+              setCreateError(null);
+              const password = generateTemporaryPassword();
+              try {
+                await admin.createUser({ name: name.trim(), email: email.trim(), cader, password });
+                setInviteOpen(false);
+                setName(""); setEmail("");
+                users.reload();
+                // Displayed once; not stored in app state beyond this view.
+                setCreatedCreds({
+                  name: name.trim(),
+                  email: email.trim(),
+                  password,
+                  role: selectedAccount?.role ?? "RANGER",
+                });
+                pushToast("success", "User created", "Share the temporary credentials securely.");
+              } catch (err) {
+                setCreateError(err instanceof Error ? err.message : "User creation failed");
+              } finally {
+                setBusy(false);
+              }
             }}
             className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            Send invite
+            {busy ? "Creating…" : "Create user"}
+          </button>
+        </div>
+      </Dialog>
+
+      {/* One-time credential reveal — never persisted, never re-shown. */}
+      <Dialog open={createdCreds !== null} onClose={() => setCreatedCreds(null)} title="Temporary credentials" icon="lock">
+        <div className="space-y-4">
+          <p className="text-sm text-ink">
+            User created. Share these temporary credentials securely (in person or via an
+            approved channel). They will not be shown again.
+          </p>
+          <div className="grid gap-2 rounded-card border border-line bg-surface p-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-soft">User</span>
+              <span className="font-medium text-ink">{createdCreds?.name} · {createdCreds?.email}</span>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-soft">Role / cadre</span>
+              <Badge tone="forest">{createdCreds?.role}</Badge>
+            </div>
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-xs text-ink-soft">Temporary password</span>
+              <code className="rounded bg-white px-2 py-1 font-mono text-xs font-semibold text-ink ring-1 ring-line">
+                {createdCreds?.password}
+              </code>
+            </div>
+          </div>
+          <button
+            onClick={() => {
+              if (createdCreds) navigator.clipboard?.writeText(`${createdCreds.email}: ${createdCreds.password}`).catch(() => undefined);
+            }}
+            className="inline-flex h-8 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-xs font-medium text-ink hover:border-forest-600"
+          >
+            <Icon name="file" size={12} /> Copy credentials
+          </button>
+          <p className="text-xs text-ink-soft">
+            The new user should change this password after first sign-in. The portal does not
+            store or display it again.
+          </p>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button onClick={() => setCreatedCreds(null)} className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700">
+            Done — I&apos;ve shared it securely
           </button>
         </div>
       </Dialog>
@@ -196,19 +283,19 @@ export default function AdminUsersPage() {
         danger={intent === "remove"}
         title={
           intent === "remove"
-            ? `Remove ${actionUser?.name}`
+            ? `Deactivate ${actionUser?.name}`
             : actionUser?.status === "disabled"
-              ? `Enable ${actionUser?.name}`
-              : `Disable ${actionUser?.name}`
+              ? `Reactivate ${actionUser?.name}`
+              : `Deactivate ${actionUser?.name}`
         }
         message={
           intent === "remove"
-            ? `Delete ${actionUser?.name}'s account permanently? Their audit history is kept.`
+            ? `${actionUser?.name}'s account will be deactivated — sign-in is disabled immediately. The account can be reactivated later and all records are kept. Nothing is permanently deleted.`
             : actionUser?.status === "disabled"
               ? `Reactivate ${actionUser?.name}? They regain access per their role.`
-              : `${actionUser?.name} will be locked out until re-enabled.`
+              : `${actionUser?.name} will be locked out until reactivated.`
         }
-        confirmLabel={intent === "remove" ? "Remove user" : actionUser?.status === "disabled" ? "Enable user" : "Disable user"}
+        confirmLabel={intent === "remove" ? "Deactivate user" : actionUser?.status === "disabled" ? "Enable user" : "Disable user"}
         onConfirm={async () => {
           if (!actionUser) return;
           const u = actionUser;
@@ -217,11 +304,11 @@ export default function AdminUsersPage() {
           setIntent(null);
           if (nextAction === "remove") {
             await admin.removeUser(u.id);
-            pushToast("warning", "User removed", `${u.name} removed from the system (mock store)`);
+            pushToast("warning", "User deactivated", `${u.name} can no longer sign in. Reactivate any time.`);
           } else {
             const next = u.status === "disabled" ? "active" : "disabled";
             await admin.setUserStatus(u.id, next);
-            pushToast("info", "User updated", `${u.name} is now ${statusLabel[next].toLowerCase()} (mock store)`);
+            pushToast("info", "User updated", `${u.name} is now ${statusLabel[next].toLowerCase()}`);
           }
           users.reload();
         }}

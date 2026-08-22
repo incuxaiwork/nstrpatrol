@@ -122,7 +122,7 @@ export function patrolInfoRows(r: IndividualPatrolReport): Record<string, unknow
       "Patrol": p.code,
       "Code": p.code,
       "Title": p.title,
-      "Type": patrolTypeLabels[p.type] ?? p.type,
+      "Type": p.type ? patrolTypeLabels[p.type] ?? p.type : "—",
       "Method": p.method ? patrolMethodLabels[p.method] ?? p.method : "—",
       "Status": patrolStatusLabel[p.status] ?? p.status,
       "Objective": p.objective,
@@ -203,6 +203,8 @@ export interface PatrolSummary {
 }
 
 export function patrolsSummary(rows: PatrolRow[]): PatrolSummary {
+  let coverageSum = 0;
+  let coverageCount = 0;
   const s: PatrolSummary = { total: 0, ongoing: 0, completed: 0, planned: 0, cancelled: 0, delayed: 0, assigned: 0, totalKm: 0, totalHours: 0, avgCoverage: 0, checkpoints: 0, observations: 0, incidents: 0 };
   for (const r of rows) {
     const p = r.patrol;
@@ -215,12 +217,13 @@ export function patrolsSummary(rows: PatrolRow[]): PatrolSummary {
     else if (p.status === "assigned") s.assigned += 1;
     s.totalKm += p.distanceKm || 0;
     s.totalHours += (p.durationMin || 0) / 60;
-    s.checkpoints += p.checkpoints;
+    s.checkpoints += p.checkpoints ?? 0;
     s.observations += p.observations;
     s.incidents += p.incidents;
-    s.avgCoverage += p.coveragePct;
+    if (p.coveragePct != null) { coverageSum += p.coveragePct; coverageCount += 1; }
   }
-  s.avgCoverage = rows.length ? Math.round(s.avgCoverage / rows.length) : 0;
+  // Average only over patrols that actually report coverage.
+  s.avgCoverage = coverageCount ? Math.round(coverageSum / coverageCount) : 0;
   return s;
 }
 
@@ -275,7 +278,7 @@ export function patrolsReportRows(report: PatrolsReport, rangers: Ranger[]): Rec
       "Patrol": p.code,
       Title: p.title,
       Status: patrolStatusLabel[p.status] ?? p.status,
-      Type: patrolTypeLabels[p.type] ?? p.type,
+      Type: p.type ? patrolTypeLabels[p.type] ?? p.type : "—",
       Method: p.method ? patrolMethodLabels[p.method] ?? p.method : "—",
       Leader: nameOf(p.leader),
       "Division": p.division,
@@ -406,6 +409,8 @@ export interface RangerWorkSummary {
 }
 
 export function rangerSummary(rows: RangerActivityRow[]): RangerWorkSummary {
+  let coverageSum = 0;
+  let coverageCount = 0;
   const s: RangerWorkSummary = { patrols: 0, completed: 0, ongoing: 0, totalKm: 0, totalHours: 0, avgCoverage: 0, observations: 0, incidents: 0, photos: 0, crossJurisdiction: 0 };
   for (const r of rows) {
     const p = r.patrol;
@@ -414,13 +419,13 @@ export function rangerSummary(rows: RangerActivityRow[]): RangerWorkSummary {
     else if (p.status === "ongoing") s.ongoing += 1;
     s.totalKm += p.distanceKm || 0;
     s.totalHours += (p.durationMin || 0) / 60;
-    s.avgCoverage += p.coveragePct;
+    if (p.coveragePct != null) { coverageSum += p.coveragePct; coverageCount += 1; }
     s.observations += p.observations;
     s.incidents += p.incidents;
     s.photos += p.photos;
     if (r.jurisdiction.state !== "normal") s.crossJurisdiction += 1;
   }
-  s.avgCoverage = rows.length ? Math.round(s.avgCoverage / rows.length) : 0;
+  s.avgCoverage = coverageCount ? Math.round(coverageSum / coverageCount) : 0;
   return s;
 }
 
@@ -477,7 +482,7 @@ export function rangerPatrolRows(report: RangerReport): Record<string, unknown>[
       "Patrol": p.code,
       Title: p.title,
       Status: patrolStatusLabel[p.status] ?? p.status,
-      Type: patrolTypeLabels[p.type] ?? p.type,
+      Type: p.type ? patrolTypeLabels[p.type] ?? p.type : "—",
       Method: p.method ? patrolMethodLabels[p.method] ?? p.method : "—",
       "Division": p.division,
       "Range": p.range,

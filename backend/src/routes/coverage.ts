@@ -228,6 +228,64 @@ export async function runGridCoverage(ctx: CoverageRequestContext, q: GridCovera
   return rows;
 }
 
+export interface PatrolCoverageSummary {
+  totalCells: number;
+  patrolledCells: number;
+  pointCount: number;
+}
+
+/**
+ * Coverage of ONE patrol over the authoritative ForestGrid — identical
+ * spatial semantics to runGridCoverage (cell universe = ForestGrid ∩ Beat
+ * geometry, point attribution via PostGIS ST_Intersects), restricted to the
+ * given patrol's points. Never consults PatrolPoint.gridId or any analysis
+ * grid; coverage is derived per request and never stored.
+ *
+ * When beatName is null (patrol without a resolvable beat) the cell universe
+ * falls back to the full deployment grid — the same default universe a
+ * division-wide user gets from GET /api/coverage/grids.
+ */
+export async function runPatrolCoverageSummary(
+  patrolId: string,
+  beatName: string | null,
+  forestId: string | null,
+): Promise<PatrolCoverageSummary> {
+  const cellConds: Prisma.Sql[] = [Prisma.sql`fg.geom IS NOT NULL`];
+  if (forestId) cellConds.push(Prisma.sql`fg."forestId" = ${forestId}`);
+  if (beatName) {
+    cellConds.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Beat" b WHERE b.name = ${beatName} AND ST_Intersects(fg.geom, b.geom))`,
+    );
+  }
+
+  const rows = await prisma.$queryRaw<{ totalCells: number; patrolledCells: number; pointCount: number }[]>`
+    WITH scoped_cells AS (
+      SELECT fg.id AS "cellId", fg.geom
+      FROM "ForestGrid" fg
+      WHERE ${Prisma.join(cellConds, ' AND ')}
+    ),
+    attrib AS (
+      SELECT sc."cellId",
+             COUNT(pp.id)::int AS "pointCount"
+      FROM scoped_cells sc
+      LEFT JOIN "PatrolPoint" pp
+        ON pp."patrolId" = ${patrolId}
+       AND ST_Intersects(sc.geom, pp.geom)
+      GROUP BY sc."cellId"
+    )
+    SELECT COUNT(*)::int AS "totalCells",
+           COUNT(*) FILTER (WHERE COALESCE(a."pointCount", 0) > 0)::int AS "patrolledCells",
+           COALESCE(SUM(COALESCE(a."pointCount", 0)), 0)::bigint AS "pointCount"
+    FROM attrib a
+  `;
+  const row = rows[0];
+  return {
+    totalCells: Number(row?.totalCells ?? 0),
+    patrolledCells: Number(row?.patrolledCells ?? 0),
+    pointCount: Number(row?.pointCount ?? 0n),
+  };
+}
+
 /** GET /api/coverage/grids?forestId=&rangeId=&beatId=&from=&to= */
 coverageRouter.get('/grids', async (req, res) => {
   // Parse here (not via the query-validation middleware): Express 5 exposes

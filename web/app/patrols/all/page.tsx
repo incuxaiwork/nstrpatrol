@@ -20,7 +20,6 @@ import { resolveJurisdiction, type JurisdictionResolution } from "@/lib/jurisdic
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolMethodLabels, patrolTypeLabels } from "@/lib/mock/patrols";
-import { mockDivisions, mockRanges, mockBeats, unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatMinutes, formatKm } from "@/lib/utils";
 import type { Patrol } from "@/lib/types";
 
@@ -48,8 +47,9 @@ export default function AllPatrolsPage() {
 
   const resolved = useMemo(() => {
     if (!data || !auths.data) return [];
-    return data.map((p) => ({ id: p.id, patrol: p, jurisdiction: resolveJurisdiction(p, auths.data ?? []) }));
-  }, [data, auths.data]);
+    // Real roster only — mock people must never drive jurisdiction decisions.
+    return data.map((p) => ({ id: p.id, patrol: p, jurisdiction: resolveJurisdiction(p, auths.data ?? [], roster.data ?? []) }));
+  }, [data, auths.data, roster.data]);
 
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -62,6 +62,7 @@ export default function AllPatrolsPage() {
       if (status && patrol.status !== status) return false;
       if (jurisdiction === "authorized" && j.state !== "authorized-exception") return false;
       if (jurisdiction === "review" && j.state !== "requires-review" && j.state !== "pending-review") return false;
+      if (jurisdiction === "unknown" && j.state !== "unknown") return false;
       if (type && patrol.type !== type) return false;
       if (method && patrol.method !== method) return false;
       if (division && patrol.division !== division) return false;
@@ -85,8 +86,27 @@ export default function AllPatrolsPage() {
   const teamName = (id: string) => teams.data?.find((t) => t.id === id)?.name ?? id;
   const rangerByPatrol = (p: Patrol) => roster.data?.find((r) => r.id === p.rangerId || r.name === p.leader);
 
-  const rangesFor = division ? (mockRanges[division] ?? []) : [];
-  const beatsFor = range ? (mockBeats[range] ?? []) : [];
+  // Filter options derived from REAL loaded values only — no fabricated
+  // choices that can never match.
+  const typeOptions = [...new Set(data.map((p) => p.type).filter((t): t is NonNullable<Patrol["type"]> => Boolean(t)))];
+  const divisionOptions = [...new Set(data.map((p) => p.division).filter(Boolean))];
+  const rangeOptions = [
+    ...new Set(
+      data
+        .filter((p) => !division || p.division === division)
+        .map((p) => p.range)
+        .filter(Boolean)
+    ),
+  ];
+  const beatOptions = [
+    ...new Set(
+      data
+        .filter((p) => (!division || p.division === division) && (!range || p.range === range))
+        .map((p) => p.beat)
+        .filter(Boolean)
+    ),
+  ];
+  const areaText = (p: Patrol) => [p.division, p.range, p.beat].filter(Boolean).join(" / ") || "—";
 
   return (
     <div>
@@ -118,17 +138,21 @@ export default function AllPatrolsPage() {
             options={[
               { value: "authorized", label: "Authorized exception" },
               { value: "review", label: "Requires review / pending" },
+              { value: "unknown", label: "Unknown / Unassigned" },
             ]} />
-          <FilterSelect label="Type" value={type} onChange={(v) => { setType(v); setPage(1); }}
-            options={Object.entries(patrolTypeLabels).map(([v, l]) => ({ value: v, label: l }))} />
+          {/* Type options appear only when real patrol-type data exists. */}
+          {typeOptions.length > 0 && (
+            <FilterSelect label="Type" value={type} onChange={(v) => { setType(v); setPage(1); }}
+              options={typeOptions.map((t) => ({ value: t, label: patrolTypeLabels[t] }))} />
+          )}
           <FilterSelect label="Method" value={method} onChange={(v) => { setMethod(v); setPage(1); }}
             options={Object.entries(patrolMethodLabels).map(([v, l]) => ({ value: v, label: l }))} />
           <FilterSelect label="Division" value={division} onChange={(v) => { setDivision(v); setRange(""); setBeat(""); setPage(1); }}
-            options={mockDivisions.map((d) => ({ value: d.id, label: d.name }))} />
+            options={divisionOptions.map((d) => ({ value: d, label: d }))} />
           <FilterSelect label="Range" value={range} onChange={(v) => { setRange(v); setBeat(""); setPage(1); }}
-            options={rangesFor.map((r) => ({ value: r.id, label: r.name }))} />
+            options={rangeOptions.map((r) => ({ value: r, label: r }))} />
           <FilterSelect label="Beat" value={beat} onChange={(v) => { setBeat(v); setPage(1); }}
-            options={beatsFor.map((b) => ({ value: b.id, label: b.name }))} />
+            options={beatOptions.map((b) => ({ value: b, label: b }))} />
           <FilterSelect label="Ranger" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
             options={roster.data.map((r) => ({ value: r.id, label: r.name }))} />
           <FilterSelect label="Date" value={dateRange} onChange={(v) => { setDateRange(v); setPage(1); }}
@@ -166,9 +190,9 @@ export default function AllPatrolsPage() {
                 },
                 { key: "area", header: "Area", sortValue: (r) => r.patrol.beat,
                   render: (r) => (
-                    <span className="text-ink-soft">{unitName(r.patrol.division)} / {unitName(r.patrol.range)} / {unitName(r.patrol.beat)}</span>
+                    <span className="text-ink-soft">{areaText(r.patrol)}</span>
                   ) },
-                { key: "type", header: "Type", sortValue: (r) => r.patrol.type, render: (r) => <span className="text-ink-soft">{patrolTypeLabels[r.patrol.type]}</span> },
+                { key: "type", header: "Type", sortValue: (r) => r.patrol.type ?? "", render: (r) => <span className="text-ink-soft">{r.patrol.type ? patrolTypeLabels[r.patrol.type] : "—"}</span> },
                 { key: "start", header: "Start", sortValue: (r) => new Date(r.patrol.startScheduled).getTime(),
                   render: (r) => <span className="text-ink-soft">{timeAgo(r.patrol.startScheduled)}</span> },
                 { key: "duration", header: "Duration", sortValue: (r) => r.patrol.durationMin,

@@ -52,7 +52,6 @@ import {
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
-  registerRoleFromWeb,
   unionExtent,
   type BoundaryPolygon,
   type CompartmentPolygon,
@@ -135,12 +134,15 @@ export const patrols = {
     remoteOnly(async () => (await api.patrols.list()).map((p) => patrolFromApi(p))),
   get: async (id: string): Promise<Patrol | undefined> =>
     remoteOnly(async () => {
-      const [p, points, incidents] = await Promise.all([
+      const [p, points, incidents, coverage] = await Promise.all([
         api.patrols.get(id),
         api.patrols.points(id).catch(() => [] as { lat: number; lng: number; t?: string | null }[]),
         api.incidents.list().catch(() => []),
+        // Real ForestGrid coverage — detail-only (never per list row).
+        api.patrols.coverageSummary(id).catch(() => null),
       ]);
-      return patrolFromApi(p, points, incidents);
+      const patrol = patrolFromApi(p, points, incidents);
+      return coverage ? { ...patrol, coveragePct: coverage.coveragePercent } : patrol;
     }),
   // API GAP: no status-filtered patrol endpoint beyond the shared list
   // (backend list supports ?status, but no page consumes this yet).
@@ -161,17 +163,14 @@ export const patrols = {
           patrolId: p.id,
           code: `PT-${p.id.slice(-6).toUpperCase()}`,
           title: p.name ?? `Patrol ${p.id.slice(0, 8)}`,
-          type: "general-duties",
-          division: "",
-          range: "",
-          beat: "",
+          division: p.geography?.division ?? "",
+          range: p.geography?.range ?? "",
+          beat: p.geography?.beat ?? "",
           leader: p.user?.fullName ?? "Unassigned",
           reportDate: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
           period: "—",
           durationMin: 0,
           distanceKm: 0,
-          coveragePct: 0,
-          checkpoints: 0,
           observations: mine.length,
           incidents: mine.length,
           photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
@@ -474,13 +473,16 @@ async function dashboardRemote(): Promise<DashboardSummary> {
   ).length;
 
   // Coverage only when the beat layer actually carries coverage values.
+  // Otherwise null → the UI renders "—"; a data gap must never read as "0%".
   const withCoverage = beatList.filter((b) => b.coveragePct != null);
   const coveragePct =
     withCoverage.length > 0
       ? Math.round(withCoverage.reduce((a, b) => a + (b.coveragePct ?? 0), 0) / withCoverage.length)
-      : 0;
+      : null;
+  // No fabricated day counts — the beat layer flags low coverage, but no
+  // backend source states how long a beat has gone unpatrolled.
   const zeroPatrolList = withCoverage.length
-    ? withCoverage.filter((b) => b.isZeroPatrol).map((b) => ({ beat: b.name, days: 14 }))
+    ? withCoverage.filter((b) => b.isZeroPatrol).map((b) => ({ beat: b.name }))
     : [];
 
   // Jurisdiction requires region data + authorizations; backend patrols carry
@@ -940,6 +942,25 @@ const createdSpecies: { id: string; name: string; category: string; status: Spec
 
 type SpeciesStatus = "present" | "rare" | "introduced" | "threatened";
 
+/**
+ * Authoritative account options mirroring the backend exactly
+ * (Prisma `Cader` enum + auth/register zod schema). The UI must never offer
+ * a role the backend cannot honor: each option states the DB role it maps to
+ * (DFO/DyDFO are administrative accounts; every field cadre is RANGER).
+ */
+export const ACCOUNT_OPTIONS: { value: string; label: string; role: "ADMIN" | "RANGER" }[] = [
+  { value: "DFO", label: "Divisional Forest Officer (DFO)", role: "ADMIN" },
+  { value: "DyDFO", label: "Deputy Director, Field (DyDFO)", role: "ADMIN" },
+  { value: "FRO", label: "Forest Range Officer (FRO)", role: "RANGER" },
+  { value: "DyRO", label: "Deputy Range Officer (DyRO)", role: "RANGER" },
+  { value: "FSO", label: "Forest Section Officer (FSO)", role: "RANGER" },
+  { value: "FBO", label: "Forest Beat Officer (FBO)", role: "RANGER" },
+  { value: "ABO", label: "Assistant Beat Officer (ABO)", role: "RANGER" },
+];
+
+const roleForCader = (cader: string): "ADMIN" | "RANGER" =>
+  ACCOUNT_OPTIONS.find((o) => o.value === cader)?.role ?? "RANGER";
+
 const roleRecord = (id: string): Role | undefined => {
   if (removedRoleIds.has(id)) return undefined;
   const created = createdRoles.find((r) => r.id === id);
@@ -993,16 +1014,27 @@ export const admin = {
     templateEnabledOverride.set(id, enabled);
   },
   /**
-   * Onboarding: backend has no "invite" concept — the user is created as an
-   * active account via the admin-gated register endpoint (temporary password).
+   * Admin-created account (no email infrastructure exists — nothing is ever
+   * "sent"). The caller generates a cryptographically random temporary
+   * password, shows it to the administrator exactly once, and is responsible
+   * for passing it on securely. The password is forwarded straight to the
+   * backend (which salts+hashes it) and never stored or logged here.
    */
-  createUser: async (input: { name: string; email: string; roleId: string; division?: string }): Promise<AdminUser> =>
+  createUser: async (input: {
+    name: string;
+    email: string;
+    cader: string;
+    phone?: string;
+    password: string;
+  }): Promise<AdminUser> =>
     remoteOnly(async () => {
       const created = await api.auth.register({
         email: input.email,
-        password: `Nstr@${Date.now().toString(36)}`,
+        password: input.password,
         fullName: input.name,
-        role: registerRoleFromWeb(input.roleId),
+        role: roleForCader(input.cader),
+        cader: input.cader,
+        phone: input.phone?.trim() ? input.phone.trim() : undefined,
       });
       return adminUserFromApi(created);
     }),

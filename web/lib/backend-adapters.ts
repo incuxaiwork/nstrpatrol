@@ -399,8 +399,18 @@ export function patrolFromApi(
     startedAt?: string | null;
     endedAt?: string | null;
     createdAt?: string;
+    beat?: string | null;
     forest?: { code?: string } | null;
     user?: { fullName?: string } | null;
+    geography?: {
+      beatId: string | null;
+      beat: string | null;
+      range: string | null;
+      rangeId: string | null;
+      subDivision: string | null;
+      subDivisionId: string | null;
+      division: string | null;
+    } | null;
     stats?: { points?: number; distanceKm?: number; durationSeconds?: number };
   },
   points: { lat: number; lng: number; t?: string | null }[] = [],
@@ -416,13 +426,18 @@ export function patrolFromApi(
     id: p.id,
     code: `PT-${p.id.slice(-6).toUpperCase()}`,
     title: p.name ?? (p.forest?.code ? `${p.forest.code} patrol` : "Field patrol"),
-    type: "general-duties",
+    // No semantic patrol-type entity exists in the backend — leave undefined
+    // ("—" / "Unavailable" in the UI). The device's movement mode is mapped
+    // separately into `method`.
+    type: undefined,
     method: p.type ? patrolMethodMap[p.type] ?? undefined : undefined,
     status: (p.status ? patrolStatusMap[p.status] : undefined) ?? "ongoing",
     objective: p.description ?? "",
-    division: "",
-    range: "",
-    beat: "",
+    // Authoritative server-resolved geography only. Unresolved levels stay
+    // "" (rendered "—"), never guessed.
+    division: p.geography?.division ?? "",
+    range: p.geography?.range ?? "",
+    beat: p.geography?.beat ?? p.beat ?? "",
     teamId: "",
     leader: p.user?.fullName ?? "",
     members: [],
@@ -431,8 +446,9 @@ export function patrolFromApi(
     endActual: lastPoint?.t ?? p.endedAt ?? undefined,
     distanceKm: p.stats?.distanceKm ?? 0,
     durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
-    coveragePct: 0,
-    checkpoints: 0,
+    // Real coverage arrives only via GET /api/patrols/:id/coverage/summary on
+    // the DETAIL view (services.patrols.get merges it); lists never carry it.
+    checkpoints: undefined,
     incidents: mine.length,
     observations: mine.length,
     photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
@@ -560,10 +576,6 @@ export function adminUserFromApi(u: {
   };
 }
 
-export function registerRoleFromWeb(roleId: string): "ADMIN" | "RANGER" {
-  return roleId === "admin" ? "ADMIN" : "RANGER";
-}
-
 /* ------------------------------------------------------------------ */
 /* Users → rangers                                                     */
 /* ------------------------------------------------------------------ */
@@ -583,6 +595,7 @@ export function rangerFromApi(
     phone?: string | null;
     isActive?: boolean;
     createdAt?: string | null;
+    beatId?: string | null;
   },
   patrols: { userId: string; status: string; startedAt: string | null; endedAt: string | null }[] = []
 ): Ranger {
@@ -606,12 +619,16 @@ export function rangerFromApi(
     division: "",
     range: "",
     beat: "",
+    // Real DB assignment id when the backend has finalized a beat assignment
+    // (users API). No name resolution exists yet — never fabricated.
+    assignedBeatId: u.beatId ?? undefined,
     teamId: "",
     stats: {
       patrols: mine.length,
       distanceKm: 0,
       fieldHours: Math.round(fieldHours * 10) / 10,
-      coveragePct: 0,
+      // No per-ranger coverage aggregate exists in the backend — the field
+      // stays undefined ("—") rather than a fabricated 0%.
       observations: 0,
       incidents: 0,
     },
