@@ -299,8 +299,11 @@ private fun SessionPatrolCard(
                 fontWeight = FontWeight.SemiBold,
                 modifier = Modifier.weight(1f)
             )
-            if (session.totalSteps > 0) {
-                Text(text = stringResource(R.string.patrol_steps, session.totalSteps), color = TextSecondary, fontSize = 12.sp)
+            val steps = if (session.totalSteps > 0) session.totalSteps
+            else if (session.totalDistanceMeters > 0) (session.totalDistanceMeters / 0.75).toInt()
+            else 0
+            if (steps > 0) {
+                Text(text = stringResource(R.string.patrol_steps, steps), color = TextSecondary, fontSize = 12.sp)
             }
         }
     }
