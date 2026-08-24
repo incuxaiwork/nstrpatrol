@@ -302,33 +302,24 @@ fun PatrolReportScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ReportStatCard("Duration", formatDurationMillis(effectiveDurationMs), Modifier.weight(1f))
-                ReportStatCard("Avg speed", String.format("%.1f km/h", s?.avgSpeedKmh ?: 0.0), Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
                 ReportStatCard("Move min", "$calculatedMoveMinutes", Modifier.weight(1f))
-                // Live GPS speed while travelling; sits at 0.0 when there is
-                // no fresh fix (e.g. indoors).
-                ReportStatCard("Speed now", String.format("%.1f km/h", liveSpeedKmh), Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                // Single live speed value — updates with every GPS fix.
+                ReportStatCard("Speed", String.format("%.1f km/h", liveSpeedKmh), Modifier.weight(1f))
                 ReportStatCard("GPS points", "${s?.pointCount ?: points.size}", Modifier.weight(1f))
-                ReportStatCard("Sync status", s?.syncStatus ?: "—", Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                ReportStatCard("Sync status", s?.syncStatus ?: "—", Modifier.weight(1f))
                 ReportStatCard("Detected", s?.detectedMethod ?: "—", Modifier.weight(1f))
-                ReportStatCard("Avg speed", String.format("%.1f km/h", s?.avgSpeedKmh ?: 0.0), Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(16.dp))
