@@ -92,9 +92,14 @@ async function importCompartments(compartments: GeoFeatureCollection): Promise<n
     if (!compNo) continue;
 
     const beatName = asText(p['BEAT'], '')?.toUpperCase() ?? '';
-    const beat = beatName
+    let beat = beatName
       ? await prisma.beat.findFirst({ where: { name: beatName }, select: { id: true } })
       : null;
+    // Fuzzy match: "G V PALLI" → "G.V.PALLI" (strip dots for lookup, or try with dots)
+    if (!beat && beatName) {
+      const normalized = beatName.replace(/\s+/g, '.');
+      beat = await prisma.beat.findFirst({ where: { name: normalized }, select: { id: true } });
+    }
 
     const comp = await prisma.compartment.create({
       data: {

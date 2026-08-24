@@ -78,20 +78,30 @@ class ForestGisRepository(private val context: Context) {
         // 1. Backend, fresh copy synced to disk.
         val backendBeats = api.getText("/api/gis/beats")
         if (backendBeats != null) {
-            val backendComps = api.getText("/api/gis/compartments")
             writeCache("beats.geojson", backendBeats)
+
+            // Try compartments; on failure, retry independently (large 3 MB
+            // payload is prone to timeout on slow connections).
+            var backendComps = api.getText("/api/gis/compartments")
+            if (backendComps == null) {
+                Log.w("ForestGisRepository", "Compartments fetch failed, retrying...")
+                backendComps = api.getText("/api/gis/compartments")
+            }
             backendComps?.let { writeCache("compartments.geojson", it) }
-            applyData(backendBeats, backendComps ?: readCache("compartments.geojson") ?: "")
+
+            // Use whatever we have — cached compartments are fine as fallback.
+            val compData = backendComps ?: readCache("compartments.geojson") ?: loadAssetComps()
+            applyData(backendBeats, compData)
 
             isDataLoaded = beatGeoJsonString.isNotEmpty()
-            Log.d("ForestGisRepository", "Loaded beats/compartments from backend")
+            Log.d("ForestGisRepository", "Loaded beats/compartments from backend (comps=${compartmentsList.size})")
             return
         }
 
         // 2. Cached copy from a previous sync (offline mode).
         val cachedBeats = readCache("beats.geojson")
         if (cachedBeats != null) {
-            applyData(cachedBeats, readCache("compartments.geojson") ?: "")
+            applyData(cachedBeats, readCache("compartments.geojson") ?: loadAssetComps())
             source = "cache"
             isDataLoaded = beatGeoJsonString.isNotEmpty()
             Log.d("ForestGisRepository", "Loaded beats/compartments from cache")
@@ -229,5 +239,12 @@ class ForestGisRepository(private val context: Context) {
             Log.w("ForestGisRepository", "Failed reading cache $fileName", e)
             null
         }
+    }
+
+    private fun loadAssetComps(): String = try {
+        context.assets.open("mark_comp.json").bufferedReader().use { it.readText() }
+    } catch (e: Exception) {
+        Log.e("ForestGisRepository", "Error reading mark_comp.json", e)
+        ""
     }
 }

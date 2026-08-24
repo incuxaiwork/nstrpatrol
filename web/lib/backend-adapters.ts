@@ -40,11 +40,22 @@ export interface GeoExtent {
 }
 
 function ringOf(feature: { geometry: { type: string; coordinates: unknown } | null }): LngLatRing[] {
-  if (feature.geometry?.type !== "Polygon") return [];
-  const coords = feature.geometry.coordinates as unknown[];
-  const outer = coords[0];
-  if (!Array.isArray(outer)) return [];
-  return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+  const g = feature.geometry;
+  if (!g) return [];
+  if (g.type === "Polygon") {
+    const coords = g.coordinates as unknown[];
+    const outer = coords[0];
+    if (!Array.isArray(outer)) return [];
+    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+  }
+  if (g.type === "MultiPolygon") {
+    const polygons = g.coordinates as unknown[];
+    const first = polygons[0] as unknown[][] | undefined;
+    const outer = first?.[0];
+    if (!Array.isArray(outer)) return [];
+    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+  }
+  return [];
 }
 
 /** Union extent across multiple feature collections, or null when empty. */
@@ -187,7 +198,8 @@ export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExten
 
 export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentPolygon[] {
   const features = fc.features.filter(
-    (f) => f.geometry?.type === "Polygon" && Array.isArray((f.geometry.coordinates as unknown[])[0])
+    (f) => (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
