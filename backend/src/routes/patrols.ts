@@ -30,6 +30,7 @@ const patrolCreateSchema = z.object({
   moveMinutes: z.number().int().min(0).max(24 * 60).nullish(),
   faceVerified: z.boolean().nullish(),
   faceMatchScore: z.number().finite().min(0).max(1).nullish(),
+  deviceId: z.string().trim().max(255).nullish(),
 });
 
 // Rangers start patrols on their own initiative. The creating user is the
@@ -63,6 +64,7 @@ patrolsRouter.post('/', validateBody(patrolCreateSchema), async (req, res) => {
       moveMinutes: body.moveMinutes ?? null,
       faceVerified: body.faceVerified ?? false,
       faceMatchScore: body.faceMatchScore ?? null,
+      deviceId: body.deviceId ?? null,
       syncStatus: 'SYNCED',
     },
   });

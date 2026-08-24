@@ -30,12 +30,12 @@ object SyncController {
     private val _state = MutableStateFlow<SyncState>(SyncState.Idle)
     val state: StateFlow<SyncState> = _state
 
-    fun sync(dao: TelemetryDao, api: BackendApiClient) {
+    fun sync(dao: TelemetryDao, api: BackendApiClient, deviceId: String? = null) {
         if (_state.value is SyncState.Syncing) return
         scope.launch {
             _state.value = SyncState.Syncing(0f)
             val result = runCatching {
-                SyncManager.syncNow(dao, api) { progress ->
+                SyncManager.syncNow(dao, api, deviceId) { progress ->
                     _state.value = SyncState.Syncing(progress.coerceIn(0f, 1f))
                 }
             }

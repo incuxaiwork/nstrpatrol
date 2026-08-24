@@ -71,7 +71,8 @@ fun AllPatrolsScreen(
     onTabSelected: (BottomTab) -> Unit,
     onOpenPatrol: (String) -> Unit,
     dao: TelemetryDao,
-    api: BackendApiClient
+    api: BackendApiClient,
+    deviceId: String? = null
 ) {
     var selectedFilter by remember { mutableStateOf("All") }
     var sessions by remember { mutableStateOf(emptyList<PatrolSessionEntity>()) }
@@ -89,7 +90,7 @@ fun AllPatrolsScreen(
             syncing = true
             statusMessage = null
             try {
-                val summary = withContext(Dispatchers.IO) { SyncManager.syncNow(dao, api) }
+                val summary = withContext(Dispatchers.IO) { SyncManager.syncNow(dao, api, deviceId) }
                 statusMessage = when {
                     summary.error != null -> "Sync failed: ${summary.error}"
                     summary.syncedItems > 0 -> "Synced ${summary.syncedItems} items to server"

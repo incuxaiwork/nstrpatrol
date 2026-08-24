@@ -257,7 +257,7 @@ fun NstrApp() {
                 withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }
             }
             // ...then best-effort sync; failures must not block navigation above.
-            SyncController.sync(dao, api)
+            SyncController.sync(dao, api, auth.deviceId())
             runCatching { api.completePatrol(pid) }
         }
     }
@@ -368,7 +368,7 @@ fun NstrApp() {
             online && mode == SettingsStore.MODE_AUTO
         }.collect { shouldSync ->
             if (shouldSync) {
-                SyncController.sync(database.telemetryDao(), api)
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
             }
         }
     }
@@ -380,7 +380,7 @@ fun NstrApp() {
     LaunchedEffect(patrolTimer.running.value) {
         while (patrolTimer.running.value) {
             if (NetworkStatus.online.value && settings.syncMode.value == SettingsStore.MODE_AUTO) {
-                SyncController.sync(database.telemetryDao(), api)
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
             }
             delay(3 * 60 * 1000L)
         }
@@ -422,7 +422,7 @@ fun NstrApp() {
         if (isOnline) {
             isExiting = true
             syncScope.launch {
-                SyncController.sync(database.telemetryDao(), api)
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
                 SyncController.state.first {
                     it is SyncController.SyncState.Success || it is SyncController.SyncState.Failed
                 }
@@ -501,7 +501,8 @@ fun NstrApp() {
             onTabSelected = nav::selectTab,
             onOpenPatrol = { patrolId -> nav.navigateTo(Route.PatrolReport(patrolId)) },
             dao = database.telemetryDao(),
-            api = api
+            api = api,
+            deviceId = auth.deviceId()
         )
 
         Route.Reports -> ReportsScreen(

@@ -241,6 +241,9 @@ interface TelemetryDao {
     @Query("SELECT * FROM patrol_sessions WHERE patrolId = :patrolId")
     suspend fun patrolSession(patrolId: String): PatrolSessionEntity?
 
+    @Query("SELECT COUNT(*) FROM patrol_points WHERE patrolId = :patrolId")
+    suspend fun patrolPointCount(patrolId: String): Int
+
     @Query("SELECT * FROM patrol_sessions ORDER BY startTime DESC")
     fun allPatrolSessions(): Flow<List<PatrolSessionEntity>>
 
