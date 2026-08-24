@@ -108,6 +108,12 @@ model Patrol {
   heartPointsEstimate   Float?
   avgSpeedKmh           Float?
   detectedMethod        String?
+  /// Officer-reported step count (from the device step counter). Nullable:
+  /// legacy patrols and pulls without sensor data have none.
+  totalSteps            Int?
+  /// Non-stationary minutes reported by the device; server stats derive this
+  /// from point timestamps when absent.
+  moveMinutes           Int?
   faceVerified          Boolean                @default(false)
   faceMatchScore        Float?
   accelerometerReadings AccelerometerReading[]

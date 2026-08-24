@@ -148,7 +148,12 @@ fun sendSos(
     context: Context,
     onOutcome: (SosOutcome) -> Unit
 ) {
-    val entity = buildSosEntity(patrolId, lastKnownLocation(context))
+    val location = lastKnownLocation(context)
+    val entity = buildSosEntity(
+        patrolId = patrolId,
+        location = location?.let { it.latitude to it.longitude },
+        accuracyMeters = location?.accuracy
+    )
     CoroutineScope(Dispatchers.IO).launch {
         val outcome = try {
             deliverSos(dao, entity) { api.postJson("/api/sos", it) }

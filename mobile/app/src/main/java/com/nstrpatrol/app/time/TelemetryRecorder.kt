@@ -68,7 +68,10 @@ class TelemetryRecorder(
     private val _arPermissionGranted = MutableStateFlow(hasActivityRecognitionPermission())
     val arPermissionGranted: StateFlow<Boolean> = _arPermissionGranted.asStateFlow()
 
-    private var patrolId: String? = null
+    /** Patrol this recorder is sampling into; null when idle. Read by
+     *  [TelemetryRegistry] when neutralizing abandoned instances. */
+    var patrolId: String? = null
+        private set
 
     @Volatile
     private var running = false
@@ -93,6 +96,7 @@ class TelemetryRecorder(
     private var lastIntegrityLogAt: Long = 0L
     private var arPendingIntent: PendingIntent? = null
     private var sensorsRegistered = false
+    private var stepSensorRegistered = false
 
     init {
         ActivityRecognitionReceiver.onActivityResult = { result ->
@@ -107,7 +111,13 @@ class TelemetryRecorder(
 
     fun onPermissionResult(granted: Boolean) {
         _arPermissionGranted.value = granted
-        if (granted && running) registerArUpdates()
+        if (granted && running) {
+            registerArUpdates()
+            // TYPE_STEP_COUNTER is gated behind ACTIVITY_RECOGNITION on API 29+;
+            // the grant usually arrives after startPatrol() already ran, so the
+            // step sensor must be (re)registered here or steps stay at zero.
+            registerStepCounter()
+        }
     }
 
     fun hasActivityRecognitionPermission(): Boolean {
@@ -142,6 +152,17 @@ class TelemetryRecorder(
                 )
             }
         }
+        // Refuse to sample for a finalized patrol and cancel any abandoned
+        // predecessor recorder still holding the sampling loop.
+        val mayRecord = patrolId == null || TelemetryRegistry.recorderStarted(patrolId!!, this)
+        if (!mayRecord) {
+            Log.w(TAG, "Refusing to record into finalized patrol $patrolId")
+            running = false
+            unregisterArUpdates()
+            unregisterSensors()
+            patrolId = null
+            return
+        }
         sampleJob = scope.launch {
             while (running) {
                 try {
@@ -154,6 +175,14 @@ class TelemetryRecorder(
         }
     }
 
+    /** Cancels the sampler without touching sensors — used by
+     *  [TelemetryRegistry] to neutralize an abandoned recorder instance. */
+    fun cancelSampling() {
+        running = false
+        sampleJob?.cancel()
+        sampleJob = null
+    }
+
     private fun stopPatrol() {
         running = false
         sampleJob?.cancel()
@@ -163,23 +192,16 @@ class TelemetryRecorder(
         val pid = patrolId
         if (pid != null) {
             scope.launch {
+                // Final forced point so the trace ends at the true stop moment.
                 tryRecordPoint(pid, timeManager.trustedUtcNow(), force = true)
-                PatrolDataGenerator.generateForPatrol(pid, dao)
-                val metrics = ActivitySummary.computeForPatrol(pid, dao)
-                val endTime = timeManager.trustedUtcNow()
-                dao.completePatrol(
-                    patrolId = pid,
-                    endTime = endTime,
-                    distance = metrics.distanceMeters,
-                    steps = metrics.steps,
-                    moveMin = metrics.moveMinutes,
-                    calories = metrics.caloriesEstimate,
-                    heartPoints = metrics.heartPointsEstimate,
-                    avgSpeed = metrics.avgSpeedKmh,
-                    points = _samplesRecorded.value.toInt()
-                )
             }
         }
+        // NOTE: session completion (endTime, metrics, status flip) is written
+        // ONLY by MainActivity.stopActivePatrol(). This path used to write a
+        // competing completePatrol() with a different clock; the race between
+        // the two writers corrupted session windows in prod. Recording must
+        // also never outlive a completed session — see TelemetryRegistry.
+        TelemetryRegistry.recorderStopped(pid, this)
         patrolId = null
     }
 
@@ -331,7 +353,13 @@ class TelemetryRecorder(
 
     /** Updates the rolling step delta/cadence from the cumulative step counter. */
     private fun stepSample() {
-        if (stepsValue < 0) return
+        if (stepsValue < 0) {
+            // No counter events yet — the sensor may have become registrable
+            // mid-patrol (permission grant raced the start). Retry each tick;
+            // registerStepCounter() is idempotent and cheap once registered.
+            registerStepCounter()
+            return
+        }
         val now = SystemClock.elapsedRealtime()
         if (prevSteps >= 0 && now > prevStepsElapsed) {
             lastStepDelta = stepsValue - prevSteps
@@ -401,24 +429,35 @@ class TelemetryRecorder(
     }
 
     private fun registerSensors() {
-        if (sensorsRegistered) return
-        val sensors = listOfNotNull(
-            sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
-            sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
-            sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
-            sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE),
-            sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)
-        )
-        sensors.forEach { sensor ->
-            sensorManager.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+        if (!sensorsRegistered) {
+            val sensors = listOfNotNull(
+                sensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER),
+                sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE),
+                sensorManager.getDefaultSensor(Sensor.TYPE_MAGNETIC_FIELD),
+                sensorManager.getDefaultSensor(Sensor.TYPE_PRESSURE)
+            )
+            sensors.forEach { sensor ->
+                sensorManager.registerListener(sensorListener, sensor, SensorManager.SENSOR_DELAY_NORMAL)
+            }
+            sensorsRegistered = true
         }
-        sensorsRegistered = true
+        registerStepCounter()
+    }
+
+    /** The step counter is registered separately: it is a no-op until the
+     *  ACTIVITY_RECOGNITION permission is granted, which can happen mid-patrol. */
+    private fun registerStepCounter() {
+        if (stepSensorRegistered || !hasActivityRecognitionPermission()) return
+        val stepSensor = sensorManager.getDefaultSensor(Sensor.TYPE_STEP_COUNTER) ?: return
+        sensorManager.registerListener(sensorListener, stepSensor, SensorManager.SENSOR_DELAY_NORMAL)
+        stepSensorRegistered = true
     }
 
     private fun unregisterSensors() {
-        if (!sensorsRegistered) return
+        if (!sensorsRegistered && !stepSensorRegistered) return
         sensorManager.unregisterListener(sensorListener)
         sensorsRegistered = false
+        stepSensorRegistered = false
         accelValues.fill(0f)
         gyroValues.fill(0f)
         magValues.fill(0f)

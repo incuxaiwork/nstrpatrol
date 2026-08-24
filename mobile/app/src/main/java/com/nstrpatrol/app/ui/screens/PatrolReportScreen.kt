@@ -44,6 +44,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import com.nstrpatrol.app.AppConfig
 import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.db.MovementSample
@@ -51,6 +53,7 @@ import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
+import com.nstrpatrol.app.time.ActivitySummary
 import com.nstrpatrol.app.time.MovementMode
 import com.nstrpatrol.app.ui.components.ActivityRings
 import com.nstrpatrol.app.ui.components.NstrScaffold
@@ -107,7 +110,9 @@ fun PatrolReportScreen(
 ) {
     var backendSession by remember { mutableStateOf<PatrolSessionEntity?>(null) }
     var backendPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
+    var backendStatsModes by remember { mutableStateOf(emptyList<Pair<String, Int>>()) }
     var moveMinutes by remember { mutableStateOf(0) }
+    var estimatedSteps by remember { mutableStateOf<Int?>(null) }
     var locallyEnded by remember { mutableStateOf(false) }
     var showEndConfirm by remember { mutableStateOf(false) }
     var movementSegments by remember { mutableStateOf(emptyList<MovementSegment>()) }
@@ -121,12 +126,33 @@ fun PatrolReportScreen(
     val localPoints by dao.patrolPointsFlow(patrolId)
         .collectAsStateWithLifecycle(emptyList())
 
+    // Merged point set (local recording wins; cloud-pulled otherwise). Needed
+    // by the metric effects below, so it is defined before them.
+    val points = localPoints.ifEmpty { backendPoints }
+
     // Exact timeline of movement: consecutive same-mode samples form a segment
     // with a precise from/to time (readings are recorded once per sampling tick).
     // Keyed on the points flow so a live (in-progress) report keeps updating.
-    LaunchedEffect(patrolId, localPoints.size) {
-        val samples = dao.movementSamplesForPatrol(patrolId)
-        movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
+    LaunchedEffect(patrolId, points.size) {
+        withContext(Dispatchers.IO) {
+            val samples = dao.movementSamplesForPatrol(patrolId)
+            movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
+            val metrics = ActivitySummary.computeForPatrol(patrolId, dao)
+            if (metrics.moveMinutes > 0) {
+                moveMinutes = metrics.moveMinutes
+            }
+            // Mode-aware step estimate (real counter > cadence estimate for
+            // foot-dominant patrols > zero). Dominance prefers local sensor
+            // samples and falls back to the cloud per-mode breakdown — local
+            // points/modes are absent for patrols pulled from another device.
+            val localDominant = if (samples.isEmpty()) null else ActivitySummary.isVehicleDominant(dao, patrolId)
+            estimatedSteps = ActivitySummary.estimateSteps(
+                recordedSteps = metrics.steps,
+                distanceMeters = computeReportDistance(points),
+                localVehicleDominant = localDominant,
+                cloudVehicleDominant = ActivitySummary.isCloudVehicleDominant(backendStatsModes)
+            )
+        }
     }
 
     LaunchedEffect(patrolId) {
@@ -139,6 +165,16 @@ fun PatrolReportScreen(
                 val stats = obj.optJSONObject("stats")
                 val durationSeconds = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
                 moveMinutes = (durationSeconds / 60).toInt()
+                // Per-mode seconds breakdown from the cloud (drives step
+                // dominance for patrols recorded on another device). Assigned
+                // before the points so it is ready when the metrics effect
+                // re-runs on the new point count.
+                backendStatsModes = stats?.optJSONArray("modes")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { i ->
+                        val m = arr.optJSONObject(i) ?: return@mapNotNull null
+                        m.optString("mode") to m.optInt("seconds")
+                    }
+                } ?: emptyList()
                 backendSession = patrolSessionFromBackend(obj)
                 backendPoints = api.getPatrolPoints(patrolId)
             }
@@ -146,10 +182,33 @@ fun PatrolReportScreen(
     }
 
     val session = localSession ?: backendSession
-    val points = localPoints.ifEmpty { backendPoints }
     val totalDistance = computeReportDistance(points)
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded
+
+    // Steps: device-reported total, then the mode-aware estimate computed
+    // above; never a blind distance/0.75 fallback.
+    val calculatedSteps = estimatedSteps
+        ?: if ((s?.totalSteps ?: 0) > 0) s!!.totalSteps else 0
+
+    // Duration source of truth is the telemetry span: session start/end were
+    // written by multiple components/clocks and prod has patrols whose stored
+    // window (3 s) is wildly shorter than their GPS track (28 min).
+    val sessionWindowMs = if (s?.startTime != null && s.endTime != null) s.endTime - s.startTime else null
+    val pointsSpanMs = if (points.size >= 2) points.last().timestamp - points.first().timestamp else 0L
+    val effectiveDurationMs = maxOf(sessionWindowMs ?: 0L, pointsSpanMs)
+
+    val calculatedMoveMinutes = when {
+        moveMinutes > 0 -> moveMinutes
+        (s?.moveMinutes ?: 0) > 0 -> s!!.moveMinutes
+        effectiveDurationMs > 0 -> {
+            val sessionAvgSpeed = s?.avgSpeedKmh?.takeIf { it > 0f }
+            val avgSpeed = sessionAvgSpeed
+                ?: ((totalDistance / 1000.0) / (effectiveDurationMs / 3_600_000.0))
+            if (avgSpeed >= 0.5 && effectiveDurationMs > 0) (effectiveDurationMs / 60_000).toInt() else 0
+        }
+        else -> 0
+    }
 
     val detectedCategory = patrolMethodCategory(s?.detectedMethod)
     val expectedCategory = patrolMethodCategory(s?.patrolMethod)
@@ -179,10 +238,14 @@ fun PatrolReportScreen(
         onTabSelected = onTabSelected
     ) {
         Spacer(Modifier.height(12.dp))
+            // Priority alert if detected movement doesn't match selected patrol method
+            if (methodMismatch) {
+                MovementMismatchBanner(
+                    detectedLabel = detectedLabel,
+                    selectedMethod = s?.patrolMethod ?: "—"
+                )
+            }
 
-        Column(
-            modifier = Modifier
-        ) {
             if (onEndPatrol != null && isActive) {
                 Button(
                     onClick = { showEndConfirm = true },
@@ -192,14 +255,6 @@ fun PatrolReportScreen(
                     Text("End Patrol", color = Color.White, fontWeight = FontWeight.Bold)
                 }
                 Spacer(Modifier.height(12.dp))
-            }
-
-            if (methodMismatch) {
-                Spacer(Modifier.height(12.dp))
-                MovementMismatchBanner(
-                    detectedLabel = detectedLabel,
-                    selectedMethod = s?.patrolMethod ?: "—"
-                )
             }
 
             // Route map
@@ -228,14 +283,14 @@ fun PatrolReportScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ReportStatCard("Distance", distText, Modifier.weight(1f))
-                ReportStatCard("Steps", "${s?.totalSteps ?: 0}", Modifier.weight(1f))
+                ReportStatCard("Steps", "$calculatedSteps", Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ReportStatCard("Duration", formatDuration(s?.startTime, s?.endTime), Modifier.weight(1f))
+                ReportStatCard("Duration", formatDurationMillis(effectiveDurationMs), Modifier.weight(1f))
                 ReportStatCard("Avg speed", String.format("%.1f km/h", s?.avgSpeedKmh ?: 0.0), Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
@@ -243,7 +298,7 @@ fun PatrolReportScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ReportStatCard("Move min", "$moveMinutes", Modifier.weight(1f))
+                ReportStatCard("Move min", "$calculatedMoveMinutes", Modifier.weight(1f))
                 ReportStatCard("GPS points", "${s?.pointCount ?: points.size}", Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
@@ -261,9 +316,9 @@ fun PatrolReportScreen(
             SectionHeader(text = "Activity")
             Spacer(Modifier.height(8.dp))
             ActivityRings(
-                steps = s?.totalSteps ?: 0,
+                steps = calculatedSteps,
                 stepsGoal = 10000,
-                moveMinutes = moveMinutes,
+                moveMinutes = calculatedMoveMinutes,
                 moveGoal = 60,
                 calories = s?.caloriesEstimate ?: 0.0,
                 calGoal = 500
@@ -355,7 +410,6 @@ fun PatrolReportScreen(
                     TextButton(onClick = { showEndConfirm = false }) { Text("Cancel") }
                 }
             )
-        }
         }
 
         if (fullscreenMap) {
@@ -519,7 +573,12 @@ private fun formatMoveDuration(millis: Long): String {
 private fun formatDuration(startMs: Long?, endMs: Long?): String {
     if (startMs == null) return "—"
     val end = endMs ?: System.currentTimeMillis()
-    val totalSec = (end - startMs) / 1000
+    return formatDurationMillis(end - startMs)
+}
+
+private fun formatDurationMillis(durationMs: Long): String {
+    if (durationMs <= 0L) return "—"
+    val totalSec = durationMs / 1000
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     return if (h > 0) "${h}h ${m}m" else "${m}m"

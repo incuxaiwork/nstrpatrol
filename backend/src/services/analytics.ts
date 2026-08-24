@@ -32,13 +32,6 @@ function testIdExclusion(alias: string): Prisma.Sql {
   return Prisma.sql`${Prisma.raw(alias)}.id NOT LIKE ${TEST_ID_PREFIX + '%'}`;
 }
 
-/** ALL/ANY membership over a non-empty array, or a never-match clause when empty. */
-function inSql(column: string, values: string[]): Prisma.Sql {
-  return values.length > 0
-    ? Prisma.sql`${Prisma.raw(column)} = ANY(${values})`
-    : Prisma.sql`1 = 0`;
-}
-
 /**
  * Resolve the SQL predicate that mirrors this user's patrol/incident scope
  * (identical semantics to the Prisma filters in scope.ts). Field users

@@ -65,3 +65,17 @@ class PatrolTimer {
         }
     }
 }
+
+/**
+ * Process-wide patrol state owner.
+ *
+ * The timer used to be created with `remember { }` inside the Activity, so an
+ * Activity recreation silently replaced it with a blank instance (no patrolId,
+ * not running) while the foreground service kept the process — and the real
+ * patrol — alive. Stop flows then fell back to wall-clock time and orphan
+ * recovery could finalize a live patrol. Holding the instance here keeps one
+ * authoritative timer for the whole process lifetime.
+ */
+object PatrolState {
+    val timer: PatrolTimer = PatrolTimer()
+}

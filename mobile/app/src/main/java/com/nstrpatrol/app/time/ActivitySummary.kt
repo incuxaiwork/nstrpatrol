@@ -27,25 +27,37 @@ object ActivitySummary {
 
     suspend fun computeForPatrol(patrolId: String, dao: TelemetryDao): PatrolMetrics {
         val points = dao.patrolPointsOrdered(patrolId)
-        val steps = dao.stepsForPatrol(patrolId)
+        val recordedSteps = dao.stepsForPatrol(patrolId)
         val activeSamples = dao.activeMovementSamplesForPatrol(patrolId)
 
         val distance = haversineDistance(points)
         val startTime = points.firstOrNull()?.timestamp
         val endTime = points.lastOrNull()?.timestamp
-        val durationMs = if (startTime != null && endTime != null) endTime - startTime else 0L
+        val durationMs = if (startTime != null && endTime != null) (endTime - startTime).coerceAtLeast(0L) else 0L
         val avgSpeedKmh = if (durationMs > 0) (distance / 1000.0) / (durationMs / 3_600_000.0) else 0.0
-        val moveMinutes = (activeSamples * AppConfig.METRICS_SAMPLE_INTERVAL_MS) / 60_000
+
+        var moveMinutes = (activeSamples * AppConfig.METRICS_SAMPLE_INTERVAL_MS) / 60_000
+        if (moveMinutes == 0L && durationMs > 0L) {
+            moveMinutes = computeMovingMinutesFromPoints(points, durationMs, avgSpeedKmh)
+        }
+
+        var steps = recordedSteps.toInt()
+        if (steps == 0 && distance > 0 && !isVehicleDominant(dao, patrolId)) {
+            // Cadence-based step estimation is only meaningful for foot-dominant
+            // patrols: a trace that is mostly vehicle/cycling says nothing about
+            // walking (4.2 km driven once became "5,680 steps" in prod).
+            steps = (distance / 0.75).toInt()
+        }
 
         val calories = estimateCalories(
-            moveMinutes = moveMinutes.toLong(),
+            moveMinutes = moveMinutes,
             durationMs = durationMs,
             walkingSteps = steps.toLong()
         )
-        val heartPoints = estimateHeartPoints(activeSamples)
+        val heartPoints = estimateHeartPoints(activeSamples.coerceAtLeast((moveMinutes * 60_000 / AppConfig.METRICS_SAMPLE_INTERVAL_MS).toInt()))
 
         return PatrolMetrics(
-            steps = steps.toInt(),
+            steps = steps,
             distanceMeters = distance,
             moveMinutes = moveMinutes.toInt(),
             caloriesEstimate = calories,
@@ -55,6 +67,85 @@ object ActivitySummary {
             startTimeMs = startTime,
             endTimeMs = endTime
         )
+    }
+
+    /**
+     * True when the patrol's movement samples are dominated by vehicle/cycling
+     * rather than walking/running — used to suppress step estimation.
+     */
+    suspend fun isVehicleDominant(dao: TelemetryDao, patrolId: String): Boolean {
+        val counts = dao.movementModeCountsForPatrol(patrolId)
+        if (counts.isEmpty()) return false
+        var foot = 0
+        var ride = 0
+        for (c in counts) {
+            when (c.value) {
+                MovementMode.WALKING.code, MovementMode.RUNNING.code -> foot += c.count
+                MovementMode.VEHICLE.code, MovementMode.CYCLING.code -> ride += c.count
+            }
+        }
+        return ride > foot
+    }
+
+    /**
+     * Shared step estimator for report surfaces: real counter readings win,
+     * then cadence-based estimation for foot-dominant patrols, and zero for
+     * vehicle-dominant ones (never invent steps someone "walked" in a jeep).
+     *
+     * [localVehicleDominant] is null when no local movement samples exist
+     * (e.g. patrols pulled from the cloud); callers resolve dominance from the
+     * backend's per-mode segment breakdown in that case.
+     */
+    fun estimateSteps(
+        recordedSteps: Int,
+        distanceMeters: Double,
+        localVehicleDominant: Boolean?,
+        cloudVehicleDominant: Boolean? = null
+    ): Int {
+        if (recordedSteps > 0) return recordedSteps
+        if (distanceMeters <= 0.0) return 0
+        val dominant = localVehicleDominant == true ||
+            (localVehicleDominant == null && cloudVehicleDominant == true)
+        return if (!dominant) (distanceMeters / 0.75).toInt() else 0
+    }
+
+    /** Dominance test over a cloud per-mode seconds breakdown. */
+    fun isCloudVehicleDominant(modes: List<Pair<String, Int>>): Boolean? {
+        if (modes.isEmpty()) return null
+        var footSeconds = 0
+        var rideSeconds = 0
+        for ((mode, seconds) in modes) {
+            when (mode.uppercase()) {
+                "WALK", "RUNNING", "WALKING", "ON_FOOT" -> footSeconds += seconds
+                "VEHICLE", "BICYCLE", "CYCLING", "ON_BICYCLE" -> rideSeconds += seconds
+            }
+        }
+        if (footSeconds == 0 && rideSeconds == 0) return null
+        return rideSeconds > footSeconds
+    }
+
+    private fun computeMovingMinutesFromPoints(
+        points: List<com.nstrpatrol.app.data.db.PatrolPointEntity>,
+        durationMs: Long,
+        avgSpeedKmh: Double
+    ): Long {
+        if (points.size < 2) return if (avgSpeedKmh >= 0.5) (durationMs / 60_000L) else 0L
+        var movingMs = 0L
+        for (i in 1 until points.size) {
+            val p1 = points[i - 1]
+            val p2 = points[i]
+            val dt = p2.timestamp - p1.timestamp
+            if (dt in 1..300_000) {
+                val dist = singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+                val speedKmh = (dist / 1000.0) / (dt / 3_600_000.0)
+                if (speedKmh >= 0.5) {
+                    movingMs += dt
+                }
+            }
+        }
+        val mins = movingMs / 60_000L
+        if (mins > 0L) return mins
+        return if (avgSpeedKmh >= 0.5) (durationMs / 60_000L) else 0L
     }
 
     suspend fun computeForToday(dao: TelemetryDao): DailyActivityEntity {
@@ -102,16 +193,20 @@ object ActivitySummary {
         for (i in 1 until points.size) {
             val p1 = points[i - 1]
             val p2 = points[i]
-            val dLat = Math.toRadians(p2.latitude - p1.latitude)
-            val dLon = Math.toRadians(p2.longitude - p1.longitude)
-            val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(p1.latitude)) *
-                cos(Math.toRadians(p2.latitude)) *
-                sin(dLon / 2).pow(2)
-            val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-            total += EARTH_RADIUS_M * c
+            total += singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
         }
         return total
+    }
+
+    private fun singleHaversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+        val dLat = Math.toRadians(lat2 - lat1)
+        val dLon = Math.toRadians(lon2 - lon1)
+        val a = sin(dLat / 2).pow(2) +
+            cos(Math.toRadians(lat1)) *
+            cos(Math.toRadians(lat2)) *
+            sin(dLon / 2).pow(2)
+        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return EARTH_RADIUS_M * c
     }
 
     /**
