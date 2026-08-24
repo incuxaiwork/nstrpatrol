@@ -75,6 +75,7 @@ object ActivitySummary {
      */
     suspend fun isVehicleDominant(dao: TelemetryDao, patrolId: String): Boolean {
         val counts = dao.movementModeCountsForPatrol(patrolId)
+        if (counts.isEmpty()) return false
         var foot = 0
         var ride = 0
         for (c in counts) {
@@ -90,16 +91,37 @@ object ActivitySummary {
      * Shared step estimator for report surfaces: real counter readings win,
      * then cadence-based estimation for foot-dominant patrols, and zero for
      * vehicle-dominant ones (never invent steps someone "walked" in a jeep).
+     *
+     * [localVehicleDominant] is null when no local movement samples exist
+     * (e.g. patrols pulled from the cloud); callers resolve dominance from the
+     * backend's per-mode segment breakdown in that case.
      */
-    suspend fun estimateSteps(
-        dao: TelemetryDao,
-        patrolId: String,
+    fun estimateSteps(
         recordedSteps: Int,
-        distanceMeters: Double
+        distanceMeters: Double,
+        localVehicleDominant: Boolean?,
+        cloudVehicleDominant: Boolean? = null
     ): Int {
         if (recordedSteps > 0) return recordedSteps
         if (distanceMeters <= 0.0) return 0
-        return if (!isVehicleDominant(dao, patrolId)) (distanceMeters / 0.75).toInt() else 0
+        val dominant = localVehicleDominant == true ||
+            (localVehicleDominant == null && cloudVehicleDominant == true)
+        return if (!dominant) (distanceMeters / 0.75).toInt() else 0
+    }
+
+    /** Dominance test over a cloud per-mode seconds breakdown. */
+    fun isCloudVehicleDominant(modes: List<Pair<String, Int>>): Boolean? {
+        if (modes.isEmpty()) return null
+        var footSeconds = 0
+        var rideSeconds = 0
+        for ((mode, seconds) in modes) {
+            when (mode.uppercase()) {
+                "WALK", "RUNNING", "WALKING", "ON_FOOT" -> footSeconds += seconds
+                "VEHICLE", "BICYCLE", "CYCLING", "ON_BICYCLE" -> rideSeconds += seconds
+            }
+        }
+        if (footSeconds == 0 && rideSeconds == 0) return null
+        return rideSeconds > footSeconds
     }
 
     private fun computeMovingMinutesFromPoints(

@@ -110,6 +110,7 @@ fun PatrolReportScreen(
 ) {
     var backendSession by remember { mutableStateOf<PatrolSessionEntity?>(null) }
     var backendPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
+    var backendStatsModes by remember { mutableStateOf(emptyList<Pair<String, Int>>()) }
     var moveMinutes by remember { mutableStateOf(0) }
     var estimatedSteps by remember { mutableStateOf<Int?>(null) }
     var locallyEnded by remember { mutableStateOf(false) }
@@ -125,10 +126,14 @@ fun PatrolReportScreen(
     val localPoints by dao.patrolPointsFlow(patrolId)
         .collectAsStateWithLifecycle(emptyList())
 
+    // Merged point set (local recording wins; cloud-pulled otherwise). Needed
+    // by the metric effects below, so it is defined before them.
+    val points = localPoints.ifEmpty { backendPoints }
+
     // Exact timeline of movement: consecutive same-mode samples form a segment
     // with a precise from/to time (readings are recorded once per sampling tick).
     // Keyed on the points flow so a live (in-progress) report keeps updating.
-    LaunchedEffect(patrolId, localPoints.size) {
+    LaunchedEffect(patrolId, points.size) {
         withContext(Dispatchers.IO) {
             val samples = dao.movementSamplesForPatrol(patrolId)
             movementSegments = buildMovementSegments(samples, AppConfig.METRICS_SAMPLE_INTERVAL_MS)
@@ -137,13 +142,15 @@ fun PatrolReportScreen(
                 moveMinutes = metrics.moveMinutes
             }
             // Mode-aware step estimate (real counter > cadence estimate for
-            // foot-dominant patrols > zero). Replaces the old blind
-            // distance/0.75 fallback that fabricated steps while driving.
+            // foot-dominant patrols > zero). Dominance prefers local sensor
+            // samples and falls back to the cloud per-mode breakdown — local
+            // points/modes are absent for patrols pulled from another device.
+            val localDominant = if (samples.isEmpty()) null else ActivitySummary.isVehicleDominant(dao, patrolId)
             estimatedSteps = ActivitySummary.estimateSteps(
-                dao = dao,
-                patrolId = patrolId,
                 recordedSteps = metrics.steps,
-                distanceMeters = computeReportDistance(localPoints)
+                distanceMeters = computeReportDistance(points),
+                localVehicleDominant = localDominant,
+                cloudVehicleDominant = ActivitySummary.isCloudVehicleDominant(backendStatsModes)
             )
         }
     }
@@ -158,6 +165,16 @@ fun PatrolReportScreen(
                 val stats = obj.optJSONObject("stats")
                 val durationSeconds = stats?.optDouble("durationSeconds", 0.0) ?: 0.0
                 moveMinutes = (durationSeconds / 60).toInt()
+                // Per-mode seconds breakdown from the cloud (drives step
+                // dominance for patrols recorded on another device). Assigned
+                // before the points so it is ready when the metrics effect
+                // re-runs on the new point count.
+                backendStatsModes = stats?.optJSONArray("modes")?.let { arr ->
+                    (0 until arr.length()).mapNotNull { i ->
+                        val m = arr.optJSONObject(i) ?: return@mapNotNull null
+                        m.optString("mode") to m.optInt("seconds")
+                    }
+                } ?: emptyList()
                 backendSession = patrolSessionFromBackend(obj)
                 backendPoints = api.getPatrolPoints(patrolId)
             }
@@ -165,7 +182,6 @@ fun PatrolReportScreen(
     }
 
     val session = localSession ?: backendSession
-    val points = localPoints.ifEmpty { backendPoints }
     val totalDistance = computeReportDistance(points)
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded

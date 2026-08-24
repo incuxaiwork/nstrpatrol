@@ -158,11 +158,23 @@ patrolsRouter.get('/:id', async (req, res) => {
   // point-span so multi-mode (vehicle/bike) patrols are not undercounted to
   // walking-only segment sums.
   const movingMinutes = patrol.moveMinutes ?? Math.round(durationSeconds / 60);
+  // Per-mode time breakdown so clients can judge what kind of patrol this was
+  // even when the sensor rows stayed on another device (cloud pulls).
+  // Non-fatal: an aggregation hiccup must never break the detail payload.
+  let modes: { mode: string; seconds: number }[] = [];
+  try {
+    modes = await prisma.$queryRaw<{ mode: string; seconds: number }[]>`
+      SELECT mode, COALESCE(SUM(EXTRACT(EPOCH FROM ("endTime" - "startTime"))), 0)::int AS seconds
+      FROM "ActivitySegment" WHERE "patrolId" = ${id} GROUP BY mode ORDER BY 2 DESC
+    `;
+  } catch {
+    modes = [];
+  }
 
   res.json({
     ...patrol,
     detectedMethod,
-    stats: { points: pointCount, distanceKm, durationSeconds, steps, moveMinutes: movingMinutes },
+    stats: { points: pointCount, distanceKm, durationSeconds, steps, moveMinutes: movingMinutes, modes },
   });
 });
 
