@@ -142,8 +142,9 @@ fun MapsScreen(
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             mbtilesServer.start()
-            gisRepo.loadGisData()
         }
+        // Assets load instantly; backend syncs in background.
+        gisRepo.loadGisData()
     }
 
     DisposableEffect(Unit) {
