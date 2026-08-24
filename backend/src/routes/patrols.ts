@@ -26,6 +26,8 @@ const patrolCreateSchema = z.object({
   heartPointsEstimate: z.number().finite().nullish(),
   avgSpeedKmh: z.number().finite().nullish(),
   detectedMethod: z.string().trim().max(80).nullish(),
+  totalSteps: z.number().int().min(0).max(500_000).nullish(),
+  moveMinutes: z.number().int().min(0).max(24 * 60).nullish(),
   faceVerified: z.boolean().nullish(),
   faceMatchScore: z.number().finite().min(0).max(1).nullish(),
 });
@@ -57,6 +59,8 @@ patrolsRouter.post('/', validateBody(patrolCreateSchema), async (req, res) => {
       heartPointsEstimate: body.heartPointsEstimate ?? null,
       avgSpeedKmh: body.avgSpeedKmh ?? null,
       detectedMethod: body.detectedMethod ?? null,
+      totalSteps: body.totalSteps ?? null,
+      moveMinutes: body.moveMinutes ?? null,
       faceVerified: body.faceVerified ?? false,
       faceMatchScore: body.faceMatchScore ?? null,
       syncStatus: 'SYNCED',
@@ -137,7 +141,6 @@ patrolsRouter.get('/:id', async (req, res) => {
     where: { patrolId: id },
     _sum: { steps: true },
   });
-  const steps = stepsAgg._sum.steps ?? 0;
 
   const latestSegment = await prisma.activitySegment.findFirst({
     where: { patrolId: id },
@@ -148,10 +151,18 @@ patrolsRouter.get('/:id', async (req, res) => {
   // activity segment so old data still reports something sensible.
   const detectedMethod = patrol.detectedMethod ?? latestSegment?.mode ?? 'STILL';
 
+  // Steps: sensor readings win; otherwise the device-reported total (new
+  // clients push it with create/complete). Never fabricate steps here.
+  const steps = stepsAgg._sum.steps ?? patrol.totalSteps ?? 0;
+  // Moving minutes: device-reported when present; else fall back to the whole
+  // point-span so multi-mode (vehicle/bike) patrols are not undercounted to
+  // walking-only segment sums.
+  const movingMinutes = patrol.moveMinutes ?? Math.round(durationSeconds / 60);
+
   res.json({
     ...patrol,
     detectedMethod,
-    stats: { points: pointCount, distanceKm, durationSeconds, steps },
+    stats: { points: pointCount, distanceKm, durationSeconds, steps, moveMinutes: movingMinutes },
   });
 });
 
@@ -431,23 +442,50 @@ patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => 
   res.status(200).json({ status: updated.status, startedAt });
 });
 
-const completeSchema = z.object({ endedAt: z.coerce.date().optional() });
+const completeSchema = z.object({
+  endedAt: z.coerce.date().optional(),
+  totalSteps: z.number().int().min(0).max(500_000).nullish(),
+  moveMinutes: z.number().int().min(0).max(24 * 60).nullish(),
+  caloriesEstimate: z.number().finite().min(0).nullish(),
+  heartPointsEstimate: z.number().finite().min(0).nullish(),
+  avgSpeedKmh: z.number().finite().min(0).max(300).nullish(),
+  detectedMethod: z.string().trim().max(80).nullish(),
+});
 
 patrolsRouter.post('/:id/complete', validateBody(completeSchema), async (req, res) => {
   const id = param(req, 'id');
-  const patrol = await prisma.patrol.findUnique({ where: { id }, select: { id: true, userId: true, beat: true } });
+  const body = req.body;
+  const patrol = await prisma.patrol.findUnique({ where: { id }, select: { id: true, userId: true, beat: true, startedAt: true } });
   if (!patrol) throw new HttpError(404, 'not_found', 'Patrol not found');
   if (!(await patrolVisibleTo(req.user!, patrol))) {
     throw new HttpError(403, 'forbidden', 'You can only manage patrols within your scope');
   }
 
+  // Devices with broken session clocks have synced endedAt values that predate
+  // their own GPS trace (one prod patrol recorded "ended" 27 min before its
+  // last point). The telemetry is the source of truth: never let endedAt fall
+  // before either the declared start or the last recorded point.
   const lastPoint = await prisma.$queryRaw<{ t: Date | null }[]>`
     SELECT COALESCE(MAX(timestamp), CURRENT_TIMESTAMP)::timestamptz AS t FROM "PatrolPoint" WHERE "patrolId" = ${id}
   `;
-  const endedAt = req.body.endedAt ?? lastPoint[0]?.t ?? new Date();
+  let endedAt = req.body.endedAt ?? lastPoint[0]?.t ?? new Date();
+  const startedAt = patrol.startedAt ?? endedAt;
+  if (endedAt < startedAt) endedAt = lastPoint[0]?.t ?? startedAt;
+  if (lastPoint[0]?.t && endedAt < lastPoint[0].t) endedAt = lastPoint[0].t;
+
   const updated = await prisma.patrol.update({
     where: { id },
-    data: { status: 'COMPLETED', endedAt, syncStatus: 'SYNCED' },
+    data: {
+      status: 'COMPLETED',
+      endedAt,
+      syncStatus: 'SYNCED',
+      totalSteps: body.totalSteps ?? undefined,
+      moveMinutes: body.moveMinutes ?? undefined,
+      caloriesEstimate: body.caloriesEstimate ?? undefined,
+      heartPointsEstimate: body.heartPointsEstimate ?? undefined,
+      avgSpeedKmh: body.avgSpeedKmh ?? undefined,
+      detectedMethod: body.detectedMethod ?? undefined,
+    },
   });
   res.status(200).json({ status: updated.status, endedAt });
 });

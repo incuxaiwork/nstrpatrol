@@ -46,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.R
 import com.nstrpatrol.app.data.AuthSession
 import com.nstrpatrol.app.data.AppUpdater
+import com.nstrpatrol.app.data.PatrolState
 import com.nstrpatrol.app.data.UpdateInfo
 import com.nstrpatrol.app.i18n.SupportedLanguages
 import com.nstrpatrol.app.data.ConnectivityObserver
@@ -62,6 +63,7 @@ import com.nstrpatrol.app.time.GpsTelemetryManager
 import com.nstrpatrol.app.time.PatrolForegroundService
 import com.nstrpatrol.app.time.PatrolMetrics
 import com.nstrpatrol.app.time.TelemetryRecorder
+import com.nstrpatrol.app.time.TelemetryRegistry
 import com.nstrpatrol.app.time.TrustedTimeManager
 import com.nstrpatrol.app.ui.navigation.NstrNavState
 import com.nstrpatrol.app.ui.navigation.Route
@@ -164,7 +166,9 @@ fun NstrApp() {
     val timeManager = remember { TrustedTimeManager(context.applicationContext) }
     val settings = remember { SettingsStore(context.applicationContext) }
     val telemetryManager = remember { GpsTelemetryManager(context.applicationContext, settings) }
-    val patrolTimer = remember { PatrolTimer() }
+    // Process-scoped timer: survives Activity recreation so stop flows and
+    // orphan recovery always see the real patrol state (see PatrolState doc).
+    val patrolTimer = PatrolState.timer
     val database = remember { NstrDatabase.getInstance(context.applicationContext) }
     val telemetryRecorder = remember {
         TelemetryRecorder(
@@ -192,9 +196,18 @@ fun NstrApp() {
         withContext(Dispatchers.IO) {
             val dao = database.telemetryDao()
             dao.patrolSessionsByStatus("ACTIVE").first().forEach { s ->
+                // Skip the session a live timer is actually tracking (process
+                // survived, Activity was recreated) — finalizing it would kill
+                // an in-progress patrol.
+                if (patrolTimer.patrolId == s.patrolId && patrolTimer.isRunning()) return@forEach
                 val lastTs = dao.patrolPointsOrdered(s.patrolId).lastOrNull()?.timestamp
                 dao.finalizeStaleActivePatrol(s.patrolId, lastTs ?: s.startTime)
+                TelemetryRegistry.markFinalized(s.patrolId)
             }
+            // If nothing is being tracked but the keep-alive service is up,
+            // stop it so the process can die like any normal app's.
+            val tracked = patrolTimer.patrolId != null && patrolTimer.isRunning()
+            if (!tracked) PatrolForegroundService.stop(context)
         }
     }
 
@@ -206,10 +219,13 @@ fun NstrApp() {
         // Real stop time must come from the patrol timer (start + elapsed),
         // NOT the last telemetry sample — otherwise a partial GPS trace makes
         // the patrol look like it ended after only a few minutes.
+        // The fallback uses the SAME trusted clock family as patrol start;
+        // mixing in the device wall clock produced sessions that "ended"
+        // before their own GPS trace (negative durations in prod).
         val endTime = if (patrolTimer.patrolId == pid && patrolTimer.isRunning()) {
             patrolTimer.trustedNow()
         } else {
-            System.currentTimeMillis()
+            timeManager.trustedUtcNow()
         }
         if (patrolTimer.patrolId == pid) {
             patrolTimer.stop()
@@ -233,6 +249,9 @@ fun NstrApp() {
                 avgSpeed = metrics.avgSpeedKmh,
                 points = dao.patrolPointsOrdered(pid).size
             )
+            // Single completion writer: from here on no recorder may sample
+            // into this session (prevents post-completion "ghost" points).
+            TelemetryRegistry.markFinalized(pid)
             // Navigate first so the UI leaves the report screen immediately...
             if (navigateToAllPatrols) {
                 withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }

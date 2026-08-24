@@ -42,7 +42,10 @@ object ActivitySummary {
         }
 
         var steps = recordedSteps.toInt()
-        if (steps == 0 && distance > 0) {
+        if (steps == 0 && distance > 0 && !isVehicleDominant(dao, patrolId)) {
+            // Cadence-based step estimation is only meaningful for foot-dominant
+            // patrols: a trace that is mostly vehicle/cycling says nothing about
+            // walking (4.2 km driven once became "5,680 steps" in prod).
             steps = (distance / 0.75).toInt()
         }
 
@@ -64,6 +67,39 @@ object ActivitySummary {
             startTimeMs = startTime,
             endTimeMs = endTime
         )
+    }
+
+    /**
+     * True when the patrol's movement samples are dominated by vehicle/cycling
+     * rather than walking/running — used to suppress step estimation.
+     */
+    suspend fun isVehicleDominant(dao: TelemetryDao, patrolId: String): Boolean {
+        val counts = dao.movementModeCountsForPatrol(patrolId)
+        var foot = 0
+        var ride = 0
+        for (c in counts) {
+            when (c.value) {
+                MovementMode.WALKING.code, MovementMode.RUNNING.code -> foot += c.count
+                MovementMode.VEHICLE.code, MovementMode.CYCLING.code -> ride += c.count
+            }
+        }
+        return ride > foot
+    }
+
+    /**
+     * Shared step estimator for report surfaces: real counter readings win,
+     * then cadence-based estimation for foot-dominant patrols, and zero for
+     * vehicle-dominant ones (never invent steps someone "walked" in a jeep).
+     */
+    suspend fun estimateSteps(
+        dao: TelemetryDao,
+        patrolId: String,
+        recordedSteps: Int,
+        distanceMeters: Double
+    ): Int {
+        if (recordedSteps > 0) return recordedSteps
+        if (distanceMeters <= 0.0) return 0
+        return if (!isVehicleDominant(dao, patrolId)) (distanceMeters / 0.75).toInt() else 0
     }
 
     private fun computeMovingMinutesFromPoints(

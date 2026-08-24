@@ -134,6 +134,8 @@ object SyncManager {
                 put("caloriesEstimate", session.caloriesEstimate)
                 put("heartPointsEstimate", session.heartPointsEstimate)
                 put("avgSpeedKmh", session.avgSpeedKmh)
+                put("totalSteps", session.totalSteps)
+                put("moveMinutes", session.moveMinutes)
                 session.detectedMethod?.let { put("detectedMethod", it) }
             }
             // Idempotent: create first; if that fails (e.g. the patrol already
@@ -142,15 +144,12 @@ object SyncManager {
             // PENDING and is retried on the next sync.
             val created = runCatching { withNetworkRetry { api.createPatrol(body); true } }.getOrElse { e -> fail(1, e); false }
             val completed = if (created) true
-            else runCatching { withNetworkRetry { api.completePatrol(session.patrolId); true } }.getOrElse { e -> fail(1, e); false }
+            else runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBodyFor(session)); true } }.getOrElse { e -> fail(1, e); false }
             if (created || completed) {
                 dao.updateSessionSyncStatus(session.patrolId, "SYNCED")
                 ok(1)
                 if (session.status == "COMPLETED") {
-                    val completeBody = JSONObject().apply {
-                        session.endTime?.let { put("endedAt", it) }
-                    }
-                    runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBody) } }
+                    runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBodyFor(session)) } }
                 }
             } else {
                 // Both create and complete failed — mark as SYNCED locally
@@ -926,6 +925,19 @@ object SyncManager {
         "MOVEMENT_MODE" -> "movement-mode"
         else -> null
     }
+
+    /** Completion payload carrying the locally-computed metrics so the backend
+     *  can persist them (the create call happens before metrics exist). */
+    private fun completeBodyFor(session: com.nstrpatrol.app.data.db.PatrolSessionEntity): JSONObject =
+        JSONObject().apply {
+            session.endTime?.let { put("endedAt", it) }
+            if (session.totalSteps > 0) put("totalSteps", session.totalSteps)
+            if (session.moveMinutes > 0) put("moveMinutes", session.moveMinutes)
+            if (session.caloriesEstimate > 0.0) put("caloriesEstimate", session.caloriesEstimate)
+            if (session.heartPointsEstimate > 0.0) put("heartPointsEstimate", session.heartPointsEstimate)
+            if (session.avgSpeedKmh > 0.0) put("avgSpeedKmh", session.avgSpeedKmh)
+            if (!session.detectedMethod.isNullOrEmpty()) put("detectedMethod", session.detectedMethod)
+        }
 
     private fun mapPatrolType(type: String?): String = when (type) {
         "BICYCLE", "Cycle" -> "BICYCLE"

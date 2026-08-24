@@ -111,6 +111,7 @@ fun PatrolReportScreen(
     var backendSession by remember { mutableStateOf<PatrolSessionEntity?>(null) }
     var backendPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
     var moveMinutes by remember { mutableStateOf(0) }
+    var estimatedSteps by remember { mutableStateOf<Int?>(null) }
     var locallyEnded by remember { mutableStateOf(false) }
     var showEndConfirm by remember { mutableStateOf(false) }
     var movementSegments by remember { mutableStateOf(emptyList<MovementSegment>()) }
@@ -135,6 +136,15 @@ fun PatrolReportScreen(
             if (metrics.moveMinutes > 0) {
                 moveMinutes = metrics.moveMinutes
             }
+            // Mode-aware step estimate (real counter > cadence estimate for
+            // foot-dominant patrols > zero). Replaces the old blind
+            // distance/0.75 fallback that fabricated steps while driving.
+            estimatedSteps = ActivitySummary.estimateSteps(
+                dao = dao,
+                patrolId = patrolId,
+                recordedSteps = metrics.steps,
+                distanceMeters = computeReportDistance(localPoints)
+            )
         }
     }
 
@@ -160,18 +170,28 @@ fun PatrolReportScreen(
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded
 
-    val calculatedSteps = if ((s?.totalSteps ?: 0) > 0) s!!.totalSteps
-    else if (totalDistance > 0) (totalDistance / 0.75).toInt()
-    else 0
+    // Steps: device-reported total, then the mode-aware estimate computed
+    // above; never a blind distance/0.75 fallback.
+    val calculatedSteps = estimatedSteps
+        ?: if ((s?.totalSteps ?: 0) > 0) s!!.totalSteps else 0
 
-    val calculatedMoveMinutes = if (moveMinutes > 0) moveMinutes
-    else if ((s?.moveMinutes ?: 0) > 0) s!!.moveMinutes
-    else {
-        val durationMs = if (s?.startTime != null && s.endTime != null) s.endTime - s.startTime
-            else if (points.size >= 2) points.last().timestamp - points.first().timestamp
-            else 0L
-        val avgSpeed = s?.avgSpeedKmh ?: (if (durationMs > 0) (totalDistance / 1000.0) / (durationMs / 3_600_000.0) else 0.0)
-        if (avgSpeed >= 0.5 && durationMs > 0) (durationMs / 60_000).toInt() else 0
+    // Duration source of truth is the telemetry span: session start/end were
+    // written by multiple components/clocks and prod has patrols whose stored
+    // window (3 s) is wildly shorter than their GPS track (28 min).
+    val sessionWindowMs = if (s?.startTime != null && s.endTime != null) s.endTime - s.startTime else null
+    val pointsSpanMs = if (points.size >= 2) points.last().timestamp - points.first().timestamp else 0L
+    val effectiveDurationMs = maxOf(sessionWindowMs ?: 0L, pointsSpanMs)
+
+    val calculatedMoveMinutes = when {
+        moveMinutes > 0 -> moveMinutes
+        (s?.moveMinutes ?: 0) > 0 -> s!!.moveMinutes
+        effectiveDurationMs > 0 -> {
+            val sessionAvgSpeed = s?.avgSpeedKmh?.takeIf { it > 0f }
+            val avgSpeed = sessionAvgSpeed
+                ?: ((totalDistance / 1000.0) / (effectiveDurationMs / 3_600_000.0))
+            if (avgSpeed >= 0.5 && effectiveDurationMs > 0) (effectiveDurationMs / 60_000).toInt() else 0
+        }
+        else -> 0
     }
 
     val detectedCategory = patrolMethodCategory(s?.detectedMethod)
@@ -254,7 +274,7 @@ fun PatrolReportScreen(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                ReportStatCard("Duration", formatDuration(s?.startTime, s?.endTime), Modifier.weight(1f))
+                ReportStatCard("Duration", formatDurationMillis(effectiveDurationMs), Modifier.weight(1f))
                 ReportStatCard("Avg speed", String.format("%.1f km/h", s?.avgSpeedKmh ?: 0.0), Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
@@ -537,7 +557,12 @@ private fun formatMoveDuration(millis: Long): String {
 private fun formatDuration(startMs: Long?, endMs: Long?): String {
     if (startMs == null) return "—"
     val end = endMs ?: System.currentTimeMillis()
-    val totalSec = (end - startMs) / 1000
+    return formatDurationMillis(end - startMs)
+}
+
+private fun formatDurationMillis(durationMs: Long): String {
+    if (durationMs <= 0L) return "—"
+    val totalSec = durationMs / 1000
     val h = totalSec / 3600
     val m = (totalSec % 3600) / 60
     return if (h > 0) "${h}h ${m}m" else "${m}m"
