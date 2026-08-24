@@ -155,6 +155,18 @@ const VIJAYAPURI_SOUTH: Entry[] = [
   ),
 ];
 
+const NEKKANTI: Entry[] = [
+  ['FRO_Nekkanti', 'NEKKANTI', null],
+  ['DyRO_Guttalachenu', 'NEKKANTI', null],
+  ['FSO_Nekkanti', 'NEKKANTI', null],
+  ['FBO_Chinnarutla', 'NEKKANTI', 'CHINNARUTLA'],
+  ['FBO_Nekkanti', 'NEKKANTI', 'NEKKANTI'],
+  ['FBO_Guttalachenu', 'NEKKANTI', 'GUTTALACHENU'],
+  ['ABO_Chinnarutla', 'NEKKANTI', 'CHINNARUTLA'],
+  ['ABO_Nekkanti', 'NEKKANTI', 'NEKKANTI'],
+  ['ABO_Guttalachenu', 'NEKKANTI', 'GUTTALACHENU'],
+];
+
 const ROSTER: Entry[] = [
   ...MARKAPUR,
   ...DORNAL,
@@ -162,6 +174,7 @@ const ROSTER: Entry[] = [
   ...GANJIVARIPALLI,
   ...YERRAGONDAPALEM,
   ...VIJAYAPURI_SOUTH,
+  ...NEKKANTI,
 ];
 
 // ---------------------------------------------------------------------------
