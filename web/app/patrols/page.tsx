@@ -117,23 +117,6 @@ export default function PatrolsDashboardPage() {
 
       {/* Main Patrol Registry with Filter Chips */}
       <Card>
-        <CardHeader
-          title="All Patrols"
-          subtitle={`Showing ${filteredRows.length} of ${rows.length} forest patrols`}
-          icon="route"
-          iconTone="forest"
-          actions={
-            <div className="flex items-center gap-2">
-              <input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search patrol, leader or code…"
-                className="h-8 w-44 rounded-field border border-line bg-white px-2.5 text-xs text-ink outline-none placeholder:text-ink-faint focus:border-forest-600 md:w-56"
-              />
-            </div>
-          }
-        />
-
         {/* Small Filter Chips Bar */}
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line bg-surface px-4 py-2.5">
           <div className="flex items-center gap-2 text-xs font-semibold text-ink-soft">
