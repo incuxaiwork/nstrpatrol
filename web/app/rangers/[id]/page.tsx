@@ -20,7 +20,7 @@ import { authStatusLabel, authStatusTone, resolveJurisdiction } from "@/lib/juri
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone, patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { timeAgo, formatKm, formatMinutes, geoLabel } from "@/lib/utils";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { RangerReportDialog } from "@/components/reports/dialogs";
 
@@ -98,7 +98,7 @@ export default function RangerDetailPage() {
         <div className="flex-1">
           <h2 className="text-lg font-semibold text-ink">{ranger.name}</h2>
           <p className="text-sm text-ink-soft">
-            {unitName(ranger.division)} · {unitName(ranger.range)} · {unitName(ranger.beat)}
+            {geoLabel(ranger.division)} · {geoLabel(ranger.range)} · {geoLabel(ranger.beat)}
           </p>
           <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs text-ink-soft">
             <span>Blood group: {ranger.bloodGroup ?? "—"}</span>
@@ -176,7 +176,7 @@ export default function RangerDetailPage() {
                   <Badge tone={patrolStatusTone[currentPatrol.status]} dot>{patrolStatusLabel[currentPatrol.status]}</Badge>
                 </div>
                 <p className="mt-2 text-sm text-ink-soft">
-                  {unitName(currentPatrol.beat)} · started {timeAgo(currentPatrol.startScheduled)}
+                  {geoLabel(currentPatrol.beat)} · started {timeAgo(currentPatrol.startScheduled)}
                   {currentPatrol.distanceKm > 0 && ` · ${formatKm(currentPatrol.distanceKm)} covered`}
                 </p>
                 <div className="mt-3 flex gap-2">
@@ -234,7 +234,7 @@ export default function RangerDetailPage() {
               <Timeline
                 items={[
                   ...(currentPatrol
-                    ? [{ time: timeAgo(currentPatrol.startScheduled), title: `Started ${currentPatrol.title.toLowerCase()}`, detail: `${currentPatrol.code} · ${unitName(currentPatrol.beat)}`, tone: "forest" as const }]
+                    ? [{ time: timeAgo(currentPatrol.startScheduled), title: `Started ${currentPatrol.title.toLowerCase()}`, detail: `${currentPatrol.code} · ${geoLabel(currentPatrol.beat)}`, tone: "forest" as const }]
                     : []),
                   { time: "2h ago", title: "Completed morning beat patrol", detail: "Patrol P-2026-0118", tone: "forest" },
                   { time: "6h ago", title: "Logged tiger pugmark sighting", detail: "Indirect sign S8", tone: "warning" },
@@ -249,9 +249,9 @@ export default function RangerDetailPage() {
           <Card>
             <CardHeader title="Normal jurisdiction" icon="map" />
             <dl className="space-y-2.5 p-4 text-sm">
-              <DetailRow label="Division" value={unitName(ranger.division)} />
-              <DetailRow label="Range" value={unitName(ranger.range)} />
-              <DetailRow label="Beat" value={unitName(ranger.beat)} />
+              <DetailRow label="Division" value={geoLabel(ranger.division)} />
+              <DetailRow label="Range" value={geoLabel(ranger.range)} />
+              <DetailRow label="Beat" value={geoLabel(ranger.beat)} />
             </dl>
             <p className="border-t border-line p-4 text-xs text-ink-soft">
               Patrols outside this jurisdiction are out of authorization until approved through{" "}
@@ -320,9 +320,9 @@ export default function RangerDetailPage() {
             <dl className="space-y-2.5 p-4 text-sm">
               <DetailRow label="Duty status" value={<Badge tone={dutyStatusTone[ranger.dutyStatus]} dot>{dutyStatusLabel[ranger.dutyStatus]}</Badge>} />
               <DetailRow label="Designation" value={ranger.designation} />
-              <DetailRow label="Division" value={unitName(ranger.division)} />
-              <DetailRow label="Range" value={unitName(ranger.range)} />
-              <DetailRow label="Beat" value={unitName(ranger.beat)} />
+              <DetailRow label="Division" value={geoLabel(ranger.division)} />
+              <DetailRow label="Range" value={geoLabel(ranger.range)} />
+              <DetailRow label="Beat" value={geoLabel(ranger.beat)} />
               <DetailRow label="Phone" value={ranger.phone ?? "—"} />
               <DetailRow label="Blood group" value={ranger.bloodGroup ?? "—"} />
               <DetailRow label="Join year" value={String(ranger.joinYear)} />

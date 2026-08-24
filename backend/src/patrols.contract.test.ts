@@ -107,12 +107,18 @@ function renderSql(piece: unknown): { text: string; values: unknown[] } {
 }
 
 let capturedRaw: { text: string; values: unknown[] } | null = null;
+let rawQueue: unknown[][] = [];
 
-function mockRaw(rows: unknown[]) {
+/**
+ * Queue raw-SQL results per call: the first call gets `rows`, later calls
+ * (e.g. the per-mode breakdown) resolve to an empty set unless queued too.
+ */
+function mockRaw(rows: unknown[], ...subsequent: unknown[][]) {
   capturedRaw = null;
+  rawQueue = [rows, ...subsequent];
   prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
     capturedRaw = renderSql({ strings, values });
-    return Promise.resolve(rows);
+    return Promise.resolve(rawQueue.length > 1 ? (rawQueue.shift() as unknown[]) : rawQueue[0]);
   });
 }
 
@@ -203,13 +209,22 @@ describe('patrol geography enrichment (GET /api/patrols)', () => {
     prisma.beat.findMany.mockResolvedValue([{ id: 'b-1', name: 'CHILAKACHERLA', rangeName: 'DORNAL' }]);
     prisma.range.findMany.mockResolvedValue([{ id: 'r1', name: 'DORNAL', subDivisionId: 'sd-1' }]);
     prisma.subDivision.findMany.mockResolvedValue([{ id: 'sd-1', name: 'Dornala' }]);
-    mockRaw([{ points: 12n, distanceKm: 4.2, durationSeconds: 7200 }]);
+    mockRaw([{ points: 12n, distanceKm: 4.2, durationSeconds: 7200 }], []);
     prisma.stepReading.aggregate.mockResolvedValue({ _sum: { steps: 9000 } });
     prisma.activitySegment.findFirst.mockResolvedValue(null);
 
     const res = await request(app).get('/api/patrols/p-1').set('Authorization', 'Bearer tok');
     expect(res.status).toBe(200);
     expect(res.body.geography).toMatchObject({ beatId: 'b-1', range: 'DORNAL', subDivision: 'Dornala' });
+    // Telemetry stats keep their documented shape (never raw driver rows).
+    expect(res.body.stats).toEqual({
+      points: 12,
+      distanceKm: 4.2,
+      durationSeconds: 7200,
+      steps: 9000,
+      moveMinutes: 120,
+      modes: [],
+    });
   });
 });
 
@@ -305,9 +320,11 @@ describe('GET /api/patrols/:id/coverage/summary (ForestGrid coverage)', () => {
     // Point attribution is scoped to this patrol only.
     expect(raw.text).toContain('pp."patrolId" = ?');
     expect(raw.values).toContain('p-1');
-    // Contract guardrails: no gridId column, no client analysis-grid table.
+    // Contract guardrails: no gridId column, no client analysis-grid table,
+    // and point attribution joins on geometry only — never PatrolPoint.gridId.
     expect(raw.text).not.toContain('"gridId"');
     expect(raw.text).not.toContain('AnalysisGrid');
+    expect(raw.text).toContain('LEFT JOIN "PatrolPoint" pp');
     // Coverage is derived, never written back.
     expect(raw.text.toLowerCase()).not.toContain('update');
     expect(raw.text.toLowerCase()).not.toContain('insert');
@@ -338,6 +355,64 @@ describe('GET /api/patrols/:id/coverage/summary (ForestGrid coverage)', () => {
       .set('Authorization', 'Bearer tok');
     expect(res.status).toBe(200);
     expect(res.body.coveragePercent).toBe(100);
+  });
+
+  it('DyDFO (sub-division) sees a patrol whose beat lies inside their sub-division', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      baseUser('DyDFO', { role: 'ADMIN', isAdmin: true, subDivisionId: 'sd-1' }),
+    );
+    prisma.patrol.findUnique.mockResolvedValue(patrolRow({ userId: 'other-ranger' }));
+    // Scope resolution: ranges of sd-1 → their beats include this patrol's beat.
+    prisma.range.findMany.mockResolvedValue([{ name: 'DORNAL' }]);
+    prisma.beat.findMany.mockResolvedValue([{ name: 'CHILAKACHERLA' }, { name: 'CHINTHALA' }]);
+    prisma.beat.findFirst.mockResolvedValue({ name: 'CHILAKACHERLA' });
+    mockRaw([{ totalCells: 22, patrolledCells: 2, pointCount: 6 }]);
+    const res = await request(app)
+      .get('/api/patrols/p-1/coverage/summary')
+      .set('Authorization', 'Bearer tok');
+    expect(res.status).toBe(200);
+    // 2 of 22 → 9.0909…% → 9.1 at the established one-decimal rounding.
+    expect(res.body).toMatchObject({ totalCells: 22, patrolledCells: 2, coveragePercent: 9.1 });
+  });
+
+  it('FRO (range) sees a patrol whose beat belongs to their range', async () => {
+    prisma.user.findUnique.mockResolvedValue(baseUser('FRO', { rangeId: 'r-1' }));
+    prisma.patrol.findUnique.mockResolvedValue(patrolRow({ userId: 'other-ranger' }));
+    prisma.range.findUnique.mockResolvedValue({ id: 'r-1', name: 'DORNAL' });
+    prisma.beat.findMany.mockResolvedValue([{ name: 'CHILAKACHERLA' }]);
+    prisma.beat.findFirst.mockResolvedValue({ name: 'CHILAKACHERLA' });
+    mockRaw([{ totalCells: 43, patrolledCells: 5, pointCount: 11 }]);
+    const res = await request(app)
+      .get('/api/patrols/p-1/coverage/summary')
+      .set('Authorization', 'Bearer tok');
+    expect(res.status).toBe(200);
+    // 5 of 43 → 11.627…% → 11.6.
+    expect(res.body).toMatchObject({ totalCells: 43, patrolledCells: 5, coveragePercent: 11.6 });
+  });
+
+  it('the denominator is bounded by the PATROL beat, never by the requester scope', async () => {
+    // The exact same patrol requested by a division-wide officer and by the
+    // owning beat officer must produce the IDENTICAL cell-universe SQL.
+    prisma.patrol.findUnique.mockResolvedValue(patrolRow({ userId: 'me' }));
+    prisma.beat.findFirst.mockResolvedValue({ name: 'CHILAKACHERLA' });
+    mockRaw([{ totalCells: 22, patrolledCells: 3, pointCount: 4 }]);
+
+    prisma.user.findUnique.mockResolvedValue(dfoUser());
+    await request(app).get('/api/patrols/p-1/coverage/summary').set('Authorization', 'Bearer tok');
+    const dfoSql = lastRawCall();
+
+    mockRaw([{ totalCells: 22, patrolledCells: 3, pointCount: 4 }]);
+    prisma.user.findUnique.mockResolvedValue(fboUser());
+    await request(app).get('/api/patrols/p-1/coverage/summary').set('Authorization', 'Bearer tok');
+    const fboSql = lastRawCall();
+
+    expect(dfoSql.text).toBe(fboSql.text);
+    expect(dfoSql.values).toContain('CHILAKACHERLA');
+    expect(fboSql.values).toContain('CHILAKACHERLA');
+    // The only bound parameters are deployment geography + this patrol:
+    // forestId, resolved beat name, patrolId — nothing requester-derived.
+    expect(dfoSql.values).toEqual(['f-1', 'CHILAKACHERLA', 'p-1']);
+    expect(fboSql.values).toEqual(['f-1', 'CHILAKACHERLA', 'p-1']);
   });
 });
 

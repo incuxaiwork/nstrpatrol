@@ -19,8 +19,7 @@ import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo, geoLabel } from "@/lib/utils";
 
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
@@ -41,7 +40,7 @@ export default function ObservationDetailPage() {
     <div>
       <PageHeader
         title={obs.title}
-        subtitle={`${obs.code} · ${categoryMeta[obs.category].label} · ${unitName(obs.range)} · ${timeAgo(obs.recordedAt)} by ${obs.recordedBy}`}
+        subtitle={`${obs.code} · ${categoryMeta[obs.category].label} · ${geoLabel(obs.range)} · ${timeAgo(obs.recordedAt)} by ${obs.recordedBy}`}
         actions={
           <>
             {obs.priority === "urgent" && <Badge tone="danger">Urgent</Badge>}
@@ -132,9 +131,9 @@ export default function ObservationDetailPage() {
               <DetailRow label="Subcategory" value={obs.subcategory} />
               <DetailRow label="Species" value={obs.species ?? "—"} />
               <DetailRow label="Group size" value={obs.groupSize ?? "—"} />
-              <DetailRow label="Division" value={unitName(obs.division)} />
-              <DetailRow label="Range" value={unitName(obs.range)} />
-              <DetailRow label="Beat" value={unitName(obs.beat)} />
+            <DetailRow label="Division" value={geoLabel(obs.division)} />
+            <DetailRow label="Range" value={geoLabel(obs.range)} />
+            <DetailRow label="Beat" value={geoLabel(obs.beat)} />
               <DetailRow label="Recorded by" value={obs.recordedBy} />
               <DetailRow label="Patrol" value={obs.patrolId ?? "—"} />
             </dl>

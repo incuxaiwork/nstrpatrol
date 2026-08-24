@@ -16,7 +16,6 @@ import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
@@ -109,7 +108,7 @@ function ObservationsList() {
       status: observationStatusLabel[o.status],
       recordedBy: o.recordedBy,
       recordedAt: new Date(o.recordedAt).toISOString(),
-      division: unitName(o.division),
+      division: o.division || "—",
       patrolId: o.patrolId ?? "",
     })));
   };

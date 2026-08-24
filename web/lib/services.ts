@@ -18,7 +18,6 @@ import {
   rangerTrends,
 } from "@/lib/mock/people";
 import { categoryMeta } from "@/lib/mock/observations";
-import { defaultLayers } from "@/lib/mock/gis";
 import {
   beatCoverage,
   comparativeSeries,
@@ -68,7 +67,6 @@ import type {
   EquipmentItem,
   JurisdictionState,
   KpiSeries,
-  MapLayerDef,
   MasterData,
   NotificationItem,
   NotificationTemplate,
@@ -86,8 +84,7 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
-import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
 /* Mock paths resolve on the next microtask — no artificial latency. */
@@ -514,6 +511,7 @@ async function dashboardRemote(): Promise<DashboardSummary> {
     .sort((a, b) => (b.severity > a.severity ? 1 : -1))
     .slice(0, 3)
     .map((i) => ({
+      id: i.id,
       title: i.title,
       severity: severityLabelFromApi[i.severity] ?? "medium",
       time: new Date(i.occurredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -585,11 +583,98 @@ export const dashboard = {
 /* GIS                                                               */
 /* ------------------------------------------------------------------ */
 
+/** Duration in minutes between two recorded timestamps — null when either
+ *  side is missing/unparsable (the UI then shows "—"). */
+function traceDurationMinutes(
+  start?: string | null,
+  end?: string | null
+): number | null {
+  if (!start || !end) return null;
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.round((ms / 60_000) * 10) / 10;
+}
+
+/** Great-circle distance over the RECORDED GPS fixes only (haversine). */
+function haversineKm(
+  pts: { lat: number; lng: number }[]
+): number | null {
+  if (pts.length < 2) return null;
+  const R = 6371;
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) continue;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const la1 = (a.lat * Math.PI) / 180;
+    const la2 = (b.lat * Math.PI) / 180;
+    const h =
+      Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+    total += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/* Live tracking view models (GET /api/patrols/live) ---------------------- */
+
+export interface GisLivePathPoint {
+  lat: number;
+  lng: number;
+  t: string;
+}
+
+/** One ACTIVE patrol as consumed by the GIS page. Every field is real
+ *  backend data; distance/duration derive only from recorded fixes. */
+export interface GisLivePatrol {
+  patrolId: string;
+  name: string | null;
+  patrolType: string;
+  beat: string | null;
+  rangerId: string;
+  rangerName: string;
+  startedAt: string | null;
+  /** Latest VALID fix — null when the device has not delivered usable GPS. */
+  latest: (GisLivePathPoint & { accuracy: number | null; speed: number | null }) | null;
+  lastPointAt: string | null;
+  pointCount: number;
+  path: GisLivePathPoint[];
+  pathDistanceKm: number | null;
+  pathMinutes: number | null;
+}
+
+export interface GisLiveFeed {
+  serverTime: string;
+  /** Client−server clock offset at fetch time (ms): clientNow − serverTime. */
+  skewMs: number;
+  /** Every ACTIVE patrol in scope, newest fix first. */
+  patrols: GisLivePatrol[];
+  /** One entry per RANGER (newest-fix patrol wins) — marker-safe. */
+  rangers: GisLivePatrol[];
+}
+
+/** Same validity rule as the backend SQL + isUsable guard: WGS-84 bounds,
+ *  finite values, never the (0,0) null-island sentinel. */
+function isUsableFix(f: { lat: number; lng: number }): boolean {
+  return (
+    Number.isFinite(f.lat) &&
+    Number.isFinite(f.lng) &&
+    f.lat >= -90 &&
+    f.lat <= 90 &&
+    f.lng >= -180 &&
+    f.lng <= 180 &&
+    !(f.lat === 0 && f.lng === 0)
+  );
+}
+
+/** Recency sort key from a real GPS timestamp (0 when absent/unparsable). */
+const liveSortKey = (iso: string | null): number => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isFinite(t) ? t : 0;
+};
+
 export const gis = {
-  layers: async (): Promise<MapLayerDef[]> => {
-    await delay();
-    return defaultLayers.map((l) => ({ ...l }));
-  },
   /**
    * Beats + compartments + forest boundary + reference grids from the backend
    * GIS API (GeoJSON → SVG polygons, viewBox 1000×700). All collections
@@ -630,11 +715,18 @@ export const gis = {
   extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => api.gis.assets(),
-  /** Incident markers projected into the shared SVG space — real records. */
+  /** Incident markers projected into the shared SVG space — real records.
+   *  Only geolocated records are plotted; (0,0) is treated as missing GPS,
+   *  never rendered. Popup fields are carried verbatim from the record. */
   markers: async (): Promise<GisMarker[]> => {
     const incidents = await api.incidents.list();
     return incidents
-      .filter((i) => i.latitude != null && i.longitude != null)
+      .filter(
+        (i) =>
+          i.latitude != null &&
+          i.longitude != null &&
+          !(i.latitude === 0 && i.longitude === 0)
+      )
       .map((i) => {
         const { x, y } = lngLatToSvg(i.longitude!, i.latitude!);
         const sos = isSosIncident(i);
@@ -644,20 +736,34 @@ export const gis = {
           label: `${i.title}${i.user?.fullName ? ` · ${i.user.fullName}` : ""}`,
           x,
           y,
+          category: i.type,
+          severity: i.severity,
+          status: i.status,
+          occurredAt: i.occurredAt ?? null,
+          reporter: i.user?.fullName ?? null,
+          accuracyM: i.accuracy ?? null,
         };
       });
   },
-  /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG. */
+  /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG.
+   *  Duration/distance are DERIVED FROM THE RECORDED TRACE ONLY (point
+   *  timestamps / haversine over recorded fixes) — never fabricated. */
   routes: async (): Promise<GisRoute[]> => {
     const patrols = await api.patrols.list();
     const recent = patrols.slice(0, 10);
     const pointSets = await Promise.all(
-      recent.map((p) => api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number }[]))
+      recent.map((p) =>
+        api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number; t?: string | null }[])
+      )
     );
     return recent.flatMap((p, i) => {
-      const pts = pointSets[i].filter((pt) => pt.lat != null && pt.lng != null);
+      const pts = pointSets[i].filter((pt) => pt.lat != null && pt.lng != null && !(pt.lat === 0 && pt.lng === 0));
       if (pts.length < 2) return [];
       const projected = pts.map((pt) => lngLatToSvg(pt.lng, pt.lat));
+      const first = pts[0];
+      const last = pts[pts.length - 1];
+      const durationMinutes = traceDurationMinutes(first.t ?? p.startedAt ?? null, last.t ?? p.endedAt ?? null);
+      const distanceKm = haversineKm(pts);
       return [
         {
           id: `rt-${p.id}`,
@@ -667,9 +773,75 @@ export const gis = {
           points: projected.map((pt) => `${Math.round(pt.x)},${Math.round(pt.y)}`).join(" "),
           color: p.status === "ACTIVE" ? "#2E7D32" : "#4A6572",
           timedPoints: projected.map((pt, idx) => ({ ...pt, t: idx / Math.max(pts.length - 1, 1) })),
+          patrolType: p.type ?? null,
+          rangerName: p.user?.fullName ?? null,
+          startedAt: p.startedAt ?? first.t ?? null,
+          endedAt: p.status !== "ACTIVE" ? (p.endedAt ?? last.t ?? null) : null,
+          durationMinutes,
+          distanceKm,
+          pointCount: pts.length,
         },
       ];
     });
+  },
+  /**
+   * Live tracking feed (GET /api/patrols/live) — ACTIVE patrols with their
+   * latest VALID GPS fix plus a bounded recent path. Strict remote; scope is
+   * applied by the backend (applyPatrolWhere). Nothing is synthesized here:
+   * invalid fixes are dropped again client-side (belt-and-braces), distance
+   * and duration derive ONLY from recorded fixes (haversine / timestamps),
+   * and a patrol without a usable fix keeps latest: null — never a marker.
+   * One entry per RANGER: when a ranger holds several ACTIVE patrols the
+   * patrol with the newest lastPointAt wins (no duplicate/conflicting
+   * markers); the losing patrols stay in the feed untouched.
+   */
+  live: async (): Promise<GisLiveFeed> => {
+    const res = await remoteOnly(() => api.patrols.live());
+    const serverMs = new Date(res.serverTime).getTime();
+    // Client−server clock offset at fetch time — used to age real GPS
+    // timestamps against THIS browser's clock without trusting it blindly.
+    const skewMs = Number.isFinite(serverMs) ? Date.now() - serverMs : 0;
+
+    const byRanger = new Map<string, GisLivePatrol>();
+    const patrols: GisLivePatrol[] = [];
+    // Newest-first so the first sighting of a ranger wins the dedupe.
+    const ordered = [...res.patrols].sort(
+      (a, b) => liveSortKey(b.lastPointAt) - liveSortKey(a.lastPointAt)
+    );
+    for (const p of ordered) {
+      const path = p.path.filter(isUsableFix).map((f) => ({ lat: f.lat, lng: f.lng, t: f.t }));
+      const usableLatest =
+        p.latestPoint && isUsableFix(p.latestPoint)
+          ? {
+              lat: p.latestPoint.lat,
+              lng: p.latestPoint.lng,
+              t: p.latestPoint.t,
+              accuracy: p.latestPoint.accuracy,
+              speed: p.latestPoint.speed,
+            }
+          : null;
+      const view: GisLivePatrol = {
+        patrolId: p.id,
+        name: p.name,
+        patrolType: p.type,
+        beat: p.beat,
+        rangerId: p.ranger.id,
+        rangerName: p.ranger.fullName,
+        startedAt: p.startedAt,
+        lastPointAt: usableLatest ? usableLatest.t : null,
+        pointCount: typeof p.pointCount === "number" ? p.pointCount : 0,
+        latest: usableLatest,
+        path,
+        pathDistanceKm: haversineKm(path),
+        pathMinutes: traceDurationMinutes(path[0]?.t ?? null, path[path.length - 1]?.t ?? null),
+      };
+      patrols.push(view);
+      const prev = byRanger.get(view.rangerId);
+      if (!prev || liveSortKey(view.lastPointAt) > liveSortKey(prev.lastPointAt)) {
+        byRanger.set(view.rangerId, view);
+      }
+    }
+    return { serverTime: res.serverTime, skewMs, patrols, rangers: [...byRanger.values()] };
   },
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.
@@ -958,9 +1130,6 @@ export const ACCOUNT_OPTIONS: { value: string; label: string; role: "ADMIN" | "R
   { value: "ABO", label: "Assistant Beat Officer (ABO)", role: "RANGER" },
 ];
 
-const roleForCader = (cader: string): "ADMIN" | "RANGER" =>
-  ACCOUNT_OPTIONS.find((o) => o.value === cader)?.role ?? "RANGER";
-
 const roleRecord = (id: string): Role | undefined => {
   if (removedRoleIds.has(id)) return undefined;
   const created = createdRoles.find((r) => r.id === id);
@@ -1019,6 +1188,7 @@ export const admin = {
    * password, shows it to the administrator exactly once, and is responsible
    * for passing it on securely. The password is forwarded straight to the
    * backend (which salts+hashes it) and never stored or logged here.
+   * The portal role is derived server-side from the cader — never sent.
    */
   createUser: async (input: {
     name: string;
@@ -1032,7 +1202,6 @@ export const admin = {
         email: input.email,
         password: input.password,
         fullName: input.name,
-        role: roleForCader(input.cader),
         cader: input.cader,
         phone: input.phone?.trim() ? input.phone.trim() : undefined,
       });

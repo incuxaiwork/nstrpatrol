@@ -228,13 +228,94 @@ export async function runGridCoverage(ctx: CoverageRequestContext, q: GridCovera
   return rows;
 }
 
+export interface BeatCoverageRow {
+  beat: string;
+  rangeName: string | null;
+  totalCells: number;
+  patrolledCells: number;
+  pointCount: number;
+  lastPatrolledAt: Date | null;
+}
+
+/**
+ * Per-beat coverage in a single PostGIS pass — the same cell universe and
+ * point-attribution semantics as runGridCoverage, grouped by beat. A beat is
+ * ZERO-PATROL when none of its ForestGrid cells received a visible patrol
+ * point in the window (patrolledCells = 0), never a percentage proxy.
+ * Cells intersecting several beats count under each of them.
+ */
+export async function runBeatCoverage(ctx: CoverageRequestContext, q: GridCoverageQuery): Promise<BeatCoverageRow[]> {
+  const visibleCond: Prisma.Sql[] = [];
+  if (ctx.ownOnly) {
+    visibleCond.push(Prisma.sql`p."userId" = ${ctx.user.id}`);
+  } else if (ctx.visibleUserIds.length > 0 || ctx.visibleBeatNames.length > 0) {
+    const parts: Prisma.Sql[] = [];
+    if (ctx.visibleUserIds.length > 0) parts.push(Prisma.sql`p."userId" = ANY(${ctx.visibleUserIds})`);
+    if (ctx.visibleBeatNames.length > 0) parts.push(Prisma.sql`p."beat" = ANY(${ctx.visibleBeatNames})`);
+    visibleCond.push(Prisma.sql`(${Prisma.join(parts, ' OR ')})`);
+  }
+
+  const beatConds: Prisma.Sql[] = [Prisma.sql`b.geom IS NOT NULL`];
+  if (ctx.forestId) beatConds.push(Prisma.sql`b.division IS NOT NULL AND EXISTS (
+    SELECT 1 FROM "ForestBoundary" fb WHERE fb."forestId" = ${ctx.forestId} AND ST_Intersects(fb.geom, b.geom)
+  )`);
+
+  const pointConds: Prisma.Sql[] = [
+    Prisma.sql`pp."patrolId" IN (SELECT id FROM visible)`,
+    Prisma.sql`ST_Intersects(c.geom, pp.geom)`,
+  ];
+  if (q.from) pointConds.push(Prisma.sql`pp."timestamp" >= ${q.from.toISOString()}::timestamp`);
+  if (q.to) pointConds.push(Prisma.sql`pp."timestamp" <= ${q.to.toISOString()}::timestamp`);
+
+  const visibleSql =
+    visibleCond.length > 0 ? Prisma.sql`WHERE ${Prisma.join(visibleCond, ' AND ')}` : Prisma.empty;
+
+  // Cell universe restriction: named beats only when scope/filter demands it
+  // (empty list = division-wide → every beat with grid cells).
+  const universeCond =
+    ctx.cellBeatNames.length > 0
+      ? Prisma.sql`AND b.name = ANY(${ctx.cellBeatNames})`
+      : Prisma.empty;
+
+  const rows = await prisma.$queryRaw<BeatCoverageRow[]>`
+    WITH visible AS (
+      SELECT p.id FROM "Patrol" p
+      ${visibleSql}
+    ),
+    cells AS (
+      SELECT b.name AS beat, b."rangeName" AS "rangeName", fg.id AS "cellId", fg.geom
+      FROM "Beat" b
+      JOIN "ForestGrid" fg ON ST_Intersects(fg.geom, b.geom)
+      WHERE ${Prisma.join(beatConds, ' AND ')}
+      ${universeCond}
+    ),
+    attrib AS (
+      SELECT c."cellId",
+             COUNT(pp.id)::int AS pts,
+             MAX(pp."timestamp") AS last_ts
+      FROM cells c
+      LEFT JOIN "PatrolPoint" pp ON ${Prisma.join(pointConds, ' AND ')}
+      GROUP BY c."cellId"
+    )
+    SELECT c.beat,
+           MAX(c."rangeName") AS "rangeName",
+           COUNT(DISTINCT c."cellId")::int AS "totalCells",
+           COUNT(DISTINCT c."cellId") FILTER (WHERE COALESCE(a.pts, 0) > 0)::int AS "patrolledCells",
+           COALESCE(SUM(COALESCE(a.pts, 0)), 0)::bigint AS "pointCount",
+           MAX(a.last_ts) AS "lastPatrolledAt"
+    FROM cells c
+    LEFT JOIN attrib a ON a."cellId" = c."cellId"
+    GROUP BY c.beat
+    ORDER BY c.beat
+  `;
+  return rows.map((r) => ({ ...r, pointCount: Number(r.pointCount) }));
+}
+
 export interface PatrolCoverageSummary {
   totalCells: number;
   patrolledCells: number;
   pointCount: number;
-}
-
-/**
+}/**
  * Coverage of ONE patrol over the authoritative ForestGrid — identical
  * spatial semantics to runGridCoverage (cell universe = ForestGrid ∩ Beat
  * geometry, point attribution via PostGIS ST_Intersects), restricted to the
@@ -324,6 +405,47 @@ coverageRouter.get('/grids', async (req, res) => {
       forestId: r.forestId,
       forestCode: r.forestCode,
       covered: r.covered,
+      pointCount: r.pointCount,
+      lastPatrolledAt: r.lastPatrolledAt ? r.lastPatrolledAt.toISOString() : null,
+    })),
+  });
+});
+
+/** GET /api/coverage/beats?rangeId=&beatId=&from=&to= */
+coverageRouter.get('/beats', async (req, res) => {
+  const q = gridCoverageQuery.parse(req.query) as GridCoverageQuery;
+  const ctx = await resolveCoverageContext(req.user!, q);
+
+  let rows = await runBeatCoverage(ctx, q);
+  if (ctx.ownOnly) rows = rows.filter((r) => r.patrolledCells > 0);
+
+  const totalCells = rows.reduce((sum, r) => sum + r.totalCells, 0);
+  const patrolledCells = rows.reduce((sum, r) => sum + r.patrolledCells, 0);
+  const zeroPatrolBeats = rows.filter((r) => r.totalCells > 0 && r.patrolledCells === 0).length;
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    scope: {
+      kind: ctx.scope.kind,
+      subDivisionId: ctx.scope.subDivisionId ?? null,
+      rangeId: ctx.scope.rangeId ?? null,
+      beatId: ctx.scope.beatId ?? null,
+    },
+    summary: {
+      beats: rows.length,
+      totalCells,
+      patrolledCells,
+      unpatrolledCells: totalCells - patrolledCells,
+      zeroPatrolBeats,
+      pointCount: rows.reduce((sum, r) => sum + r.pointCount, 0),
+    },
+    rows: rows.map((r) => ({
+      beat: r.beat,
+      rangeName: r.rangeName,
+      totalCells: r.totalCells,
+      patrolledCells: r.patrolledCells,
+      coveragePercent:
+        r.totalCells > 0 ? Math.round((r.patrolledCells / r.totalCells) * 1000) / 10 : null,
       pointCount: r.pointCount,
       lastPatrolledAt: r.lastPatrolledAt ? r.lastPatrolledAt.toISOString() : null,
     })),

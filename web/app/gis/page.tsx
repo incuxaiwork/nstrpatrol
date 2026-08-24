@@ -9,9 +9,11 @@ import { useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { gis, rangers as servicesRangers, observations as servicesObservations, hierarchy as hierarchyService, sos as sosService } from "@/lib/services";
+import type { GisLivePatrol } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { api, invalidateCache, ApiError } from "@/lib/api";
 import type { ApiGridCoverage } from "@/lib/api";
+import { fixFreshness, useLiveTracking, useTicker } from "@/lib/use-live-tracking";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
 import { MapWorkspace } from "@/components/map-loader";
@@ -28,12 +30,15 @@ import { RegionReportDialog } from "@/components/reports/dialogs";
 import { FOREST_CONTEXT, GRID_SIZES, DEFAULT_GRID_SIZE, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
 import { tagBeats, tagCompartments, tagGrids, type TaggedGrid } from "@/lib/grid-regions";
 import { buildAnalysisGrid } from "@/lib/gis/grid";
-import type { GridCoverageInfo } from "@/lib/map-space";
+import type { GridCoverageInfo, LivePathFeature, LiveRangerFeature } from "@/lib/map-space";
 import type { GisMarker, GisRoute } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
   return b.isZeroPatrol === true;
 }
+
+/** Path window requested from GET /api/patrols/live (backend default). */
+const LIVE_PATH_WINDOW_MIN = 15;
 
 function heatTone(v: number): number {
   return 0.12 + v * 0.55;
@@ -84,15 +89,47 @@ function selectedDetail(
   grids: { id: string; gridCode: string; rangeId?: string; beatId?: string; compId?: string }[],
   names: { rangeName(id?: string): string | undefined; beatName(id?: string): string | undefined; compNo(id?: string): string | undefined },
   coverageById: Record<string, GridCoverageInfo> | null = null,
-  coverageLoaded: boolean = false
+  coverageLoaded: boolean = false,
+  liveById: Map<string, GisLivePatrol> = new Map()
 ) {
   if (!selected) return null;
+  // LIVE patrol selection wins over everything else — an active patrol also
+  // appears in the historical traces, but its card must read as live.
+  const livePatrol = liveById.get(selected);
+  if (livePatrol) {
+    const latest = livePatrol.latest;
+    return {
+      kind: "live" as const,
+      title: livePatrol.name ?? `Patrol ${livePatrol.patrolId.slice(0, 8)}`,
+      body: `${livePatrol.rangerName}${livePatrol.beat ? ` · ${livePatrol.beat}` : ""} · ${livePatrol.patrolType.toLowerCase()}`,
+      href: `/patrols/${livePatrol.patrolId}`,
+      cta: "Open patrol",
+      tone: "neutral" as const,
+      tag: "Live patrol",
+      live: {
+        rangerId: livePatrol.rangerId,
+        rangerName: livePatrol.rangerName,
+        beat: livePatrol.beat,
+        fixAt: latest?.t ?? null,
+        accuracyM: latest?.accuracy ?? null,
+        speedKmh: latest?.speed != null ? Math.round(latest.speed * 36) / 10 : null,
+        pointCount: livePatrol.pointCount,
+        pathDistanceKm: livePatrol.pathDistanceKm,
+        pathMinutes: livePatrol.pathMinutes,
+        lng: latest?.lng ?? null,
+        lat: latest?.lat ?? null,
+      },
+    };
+  }
   const route = routes.find((r) => r.id === selected);
   if (route) {
+    const bits = [route.patrolId, route.status];
+    if (route.distanceKm != null) bits.push(`${route.distanceKm} km`);
+    if (route.durationMinutes != null) bits.push(`${route.durationMinutes} min`);
     return {
       kind: "route" as const,
       title: route.label,
-      body: `${route.patrolId} · ${route.status}`,
+      body: bits.join(" · "),
       href: `/patrols/${route.patrolId}`,
       cta: "Open patrol",
       tone: "neutral" as const,
@@ -147,12 +184,27 @@ function selectedDetail(
   }
   const marker = markers.find((m) => m.id === selected);
   if (!marker) return null;
+  // Ranger last-known position → the ranger's real profile page.
+  if (marker.kind === "ranger") {
+    const when = marker.occurredAt ? formatCoverageTime(marker.occurredAt) : null;    return {
+      kind: "ranger" as const,
+      title: marker.label,
+      body: when ? `Last GPS fix ${when}` : "On patrol — no recent GPS fix time available",
+      href: `/rangers/${marker.id}`,
+      cta: "Open ranger profile",
+      tone: "neutral" as const,
+      tag: "Ranger position",
+    };
+  }
+  // Observation / incident / SOS → that record's own observation page.
   return {
     kind: marker.kind,
     title: marker.label,
-    body: "Incident marker on the live map",
-    href: "/observations/list",
-    cta: "View reports",
+    body:
+      [marker.category, marker.status, marker.severity].filter(Boolean).join(" · ") ||
+      "Geolocated report on the live map",
+    href: `/observations/${marker.id}`,
+    cta: "Open observation",
     tone: "danger" as const,
     tag: marker.kind === "sos" ? "SOS" : marker.kind === "observation" ? "Observation" : "Incident",
   };
@@ -189,6 +241,12 @@ function GisWorkspace() {
   const [hoveredGridId, setHoveredGridId] = useState<string | null>(null);
 
   const markersData = useAsyncData(() => gis.markers());
+  // LIVE tracking (GET /api/patrols/live) — ACTIVE patrols, latest valid fix
+  // and bounded recent path, polled while this page is mounted only.
+  const liveTracking = useLiveTracking();
+  const liveFeed = liveTracking.feed;
+  const liveSkewMs = liveFeed?.skewMs ?? 0;
+  const now = useTicker(5000);
   const routesData = useAsyncData(() => gis.routes());
   const heatData = useAsyncData(() => gis.heat());
   const rangersData = useAsyncData(() => servicesRangers.list());
@@ -273,6 +331,64 @@ function GisWorkspace() {
     [sosCases]
   );
 
+  // Live-tracking view models — real feed data only, re-aged against the
+  // ticker so CURRENT/STALE labels track the actual GPS timestamps.
+  const livePatrols = useMemo(() => liveFeed?.patrols ?? [], [liveFeed]);
+  const locatedLivePatrols = useMemo(
+    () => livePatrols.filter((p) => p.latest != null),
+    [livePatrols]
+  );
+  const liveById = useMemo(
+    () => new Map(livePatrols.map((p) => [p.patrolId, p] as const)),
+    [livePatrols]
+  );
+  const patrolIsCurrent = (p: GisLivePatrol) =>
+    fixFreshness(p.lastPointAt, liveSkewMs, now) === "current";
+
+  const liveRangers = useMemo<LiveRangerFeature[]>(
+    () =>
+      locatedLivePatrols.map((p) => ({
+        id: p.patrolId,
+        patrolId: p.patrolId,
+        rangerName: p.rangerName,
+        patrolLabel: p.name,
+        lng: p.latest!.lng,
+        lat: p.latest!.lat,
+        fixAt: p.latest!.t,
+        accuracyM: p.latest!.accuracy,
+        speedKmh: p.latest!.speed != null ? Math.round(p.latest!.speed * 36) / 10 : null,
+        pointCount: p.pointCount,
+        freshness: patrolIsCurrent(p) ? ("current" as const) : ("stale" as const),
+        pathWindow: `${LIVE_PATH_WINDOW_MIN} min`,
+      })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [locatedLivePatrols, liveSkewMs, now]
+  );
+
+  const livePaths = useMemo<LivePathFeature[]>(
+    () =>
+      livePatrols.flatMap((p) => {
+        if (p.path.length < 2) return [];
+        return [
+          {
+            id: `live-${p.patrolId}`,
+            patrolId: p.patrolId,
+            label: p.name,
+            rangerName: p.rangerName,
+            coordinates: p.path.map((pt) => [pt.lng, pt.lat] as [number, number]),
+            startAt: p.path[0].t,
+            endAt: p.path[p.path.length - 1].t,
+            durationMinutes: p.pathMinutes,
+            distanceKm: p.pathDistanceKm,
+            pointCount: p.path.length,
+            freshness: patrolIsCurrent(p) ? ("current" as const) : ("stale" as const),
+          },
+        ];
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [livePatrols, liveSkewMs, now]
+  );
+
   // ?sos=<id> deep link ("View on Map") — fully derived during render (no
   // effects, no cascading setState): ease the camera to the alert's real
   // coordinates, select its card and force the SOS layer on while the link
@@ -281,11 +397,18 @@ function GisWorkspace() {
     () => (sosParam ? sosCases.find((c) => c.incident.id === sosParam) ?? null : null),
     [sosParam, sosCases]
   );
-  const focus = useMemo(() => {
+  const sosFocus = useMemo(() => {
     if (!sosFocusCase) return null;
     const { latitude, longitude } = sosFocusCase.incident;
     return latitude != null && longitude != null ? { lng: longitude, lat: latitude, zoom: 15 } : null;
   }, [sosFocusCase]);
+  // Explicit "Focus" request from a LIVE ranger card — one-shot camera move
+  // on click only. The map NEVER auto-follows GPS updates (free navigation).
+  const [manualFocus, setManualFocus] = useState<{ lng: number; lat: number; zoom?: number; key: number } | null>(null);
+  const focus = manualFocus ?? sosFocus;
+  const focusLiveRanger = (lng: number, lat: number) => {
+    setManualFocus({ lng, lat, zoom: 15, key: Date.now() });
+  };
   const effectiveLayerState = useMemo(
     () => (focus ? { ...layerState, sos: true } : layerState),
     [layerState, focus]
@@ -329,14 +452,18 @@ function GisWorkspace() {
   const heat = heatData.data ?? [];
   const units = unitsData.data ?? null;
 
-  // Selecting a patrol route on the map arms the replay for that patrol.
+  // Selecting a patrol route on the map arms the replay for that patrol —
+  // EXCEPT a LIVE selection: replaying an active patrol would fight the live
+  // feed and filter the historical layer, so it only opens the live card.
   const handleSelect = (id: string | null) => {
     if (!id) {
       setSelected(null);
       return;
     }
-    const route = routes.find((r) => r.id === id);
-    if (route) setReplayPatrol(route.patrolId);
+    if (!liveById.has(id)) {
+      const route = routes.find((r) => r.id === id);
+      if (route) setReplayPatrol(route.patrolId);
+    }
     setSelected(id);
   };
 
@@ -347,7 +474,66 @@ function GisWorkspace() {
   // Range/Compartment-only selections cannot be sent to the coverage API
   // (no backend id catalog) — surface that honestly next to the summary.
   const coverageMixedScope = regionFilterActive && coverageBeatId == null;
-  const detail = selectedDetail(selected, beats, compartments, routes, markers, taggedGrids, unitNames, coverageById, coverageLoaded);
+  const detail = selectedDetail(selected, beats, compartments, routes, markers, taggedGrids, unitNames, coverageById, coverageLoaded, liveById);
+
+  // Honest operational status strip inside the map — counts of the ENABLED
+  // operational layers, with explicit empty/unavailable wording (never fake).
+  const statusBits: string[] = [];
+  if (effectiveLayerState.markers) {
+    if (markersData.error) statusBits.push("Observation feed unavailable");
+    else {
+      const n = (markersData.data ?? []).filter(
+        (m) => m.kind === "observation" || m.kind === "incident"
+      ).length;
+      statusBits.push(n > 0 ? `${n} geolocated record${n === 1 ? "" : "s"}` : "No geolocated observations available");
+    }
+  }
+  // LIVE tracking status — derived from REAL GPS timestamps (server-skew
+  // adjusted), never from the fetch time. <30s current · ≤90s stale · else
+  // offline. An ACTIVE patrol row without a recent fix is never called live.
+  if (effectiveLayerState.rangers || effectiveLayerState.routes) {
+    if (liveTracking.error) {
+      statusBits.push("Live tracking unavailable");
+    } else if (!liveFeed) {
+      statusBits.push("Loading live tracking…");
+    } else if (livePatrols.length === 0) {
+      statusBits.push("No active patrols");
+    } else if (locatedLivePatrols.length === 0) {
+      statusBits.push("Active patrols found, but no current GPS fixes are available");
+    } else {
+      const currentCount = locatedLivePatrols.filter(patrolIsCurrent).length;
+      const newestFixMs = Math.max(
+        ...locatedLivePatrols.map((p) => new Date(p.lastPointAt ?? p.latest!.t).getTime())
+      );
+      const ageS = Math.max(0, Math.round((now - (newestFixMs + liveSkewMs)) / 1000));
+      const ageLabel = ageS < 90 ? `${ageS}s` : `${Math.round(ageS / 60)} min`;
+      if (currentCount > 0) {
+        const fetchAgeS = liveTracking.lastFetchedAt
+          ? Math.max(0, Math.round((now - liveTracking.lastFetchedAt) / 1000))
+          : null;
+        statusBits.push(
+          `● Live tracking · ${currentCount}/${locatedLivePatrols.length} updating · last GPS ${ageLabel} ago${
+            fetchAgeS != null ? ` · updated ${fetchAgeS}s ago` : ""
+          }`
+        );
+      } else {
+        statusBits.push(`Live tracking stale · last GPS ${ageLabel} ago`);
+      }
+    }
+  }
+  if (effectiveLayerState.routes) {
+    if (routesData.error) statusBits.push("Patrol traces unavailable");
+    else statusBits.push(routes.length > 0 ? `${routes.length} patrol trace${routes.length === 1 ? "" : "s"}` : "No GPS traces yet");
+  }
+  if (effectiveLayerState.sos) {
+    statusBits.push(sosCasesData.error ? "SOS feed unavailable" : sosAlerts.length > 0 ? `${sosAlerts.length} live SOS` : "No live SOS");
+  }
+  const statusChip =
+    statusBits.length > 0 ? (
+      <p className="inline-block max-w-full truncate rounded-md border border-line bg-white/95 px-2.5 py-1.5 text-[11px] text-ink-soft shadow-card">
+        {statusBits.join(" · ")}
+      </p>
+    ) : undefined;
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `gis-catalog-${stamp()}`, [
@@ -455,6 +641,20 @@ function GisWorkspace() {
                 placed on the map; open the report for details instead.
               </p>
             )}
+            {liveTracking.error && (
+              <div className="flex items-center justify-between gap-3 border-b border-line bg-danger-soft px-4 py-2">
+                <p className="text-xs text-danger">
+                  Live tracking unavailable — {liveTracking.error.message}. Forest, range, beat,
+                  compartment and historical layers continue working without it.
+                </p>
+                <button
+                  onClick={() => void liveTracking.refresh()}
+                  className="inline-flex h-7 shrink-0 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50"
+                >
+                  <Icon name="refresh" size={12} /> Retry
+                </button>
+              </div>
+            )}
             <MapWorkspace
               mode="workspace"
               heightClass="h-[560px]"
@@ -474,11 +674,26 @@ function GisWorkspace() {
               onGridHover={setHoveredGridId}
               markers={markers}
               routes={routes}
+              livePaths={livePaths}
+              liveRangers={liveRangers}
               heat={heat}
               selectedId={selected}
               onSelect={handleSelect}
               replayPatrolId={replayPatrol}
-              detailCard={detail ? <SelectedCard detail={detail} onClose={() => setSelected(null)} /> : undefined}
+              detailCard={
+                detail ? (
+                  <SelectedCard
+                    detail={detail}
+                    onClose={() => setSelected(null)}
+                    onFocus={
+                      detail.kind === "live" && detail.live.lng != null && detail.live.lat != null
+                        ? () => focusLiveRanger(detail.live.lng!, detail.live.lat!)
+                        : undefined
+                    }
+                  />
+                ) : undefined
+              }
+              statusChip={statusChip}
               regionFilter={regionFilter}
             />
           </Card>
@@ -823,14 +1038,25 @@ function cn(...args: unknown[]) { return args.filter(Boolean).join(" "); }
 
 type Detail = ReturnType<typeof selectedDetail>;
 
-function SelectedCard({ detail, onClose }: { detail: NonNullable<Detail>; onClose(): void }) {
+function SelectedCard({
+  detail,
+  onClose,
+  onFocus,
+}: {
+  detail: NonNullable<Detail>;
+  onClose(): void;
+  onFocus?(): void;
+}) {
   const isGrid = detail.kind === "grid";
+  const isLive = detail.kind === "live";
   return (
     <div className="overflow-hidden rounded-card border border-line bg-white shadow-pop" role="dialog" aria-label={detail.title}>
       <div className="flex items-start justify-between gap-2 border-b border-line bg-surface px-3 py-2">
         <div className="flex items-center gap-2">
           {detail.tag && (
-            <Badge tone={isGrid ? "forest" : detail.tone === "danger" ? "danger" : "neutral"}>{detail.tag}</Badge>
+            <Badge tone={isLive ? "success" : isGrid ? "forest" : detail.tone === "danger" ? "danger" : "neutral"} dot={isLive || undefined}>
+              {detail.tag}
+            </Badge>
           )}
           <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint">Map selection</p>
         </div>
@@ -841,7 +1067,45 @@ function SelectedCard({ detail, onClose }: { detail: NonNullable<Detail>; onClos
       <div className="p-3">
         <p className="text-sm font-semibold text-ink">{detail.title}</p>
 
-        {isGrid ? (
+        {isLive ? (
+          <div className="mt-2.5 space-y-1.5 text-xs">
+            <InfoRow label="Ranger" value={detail.live.rangerName} />
+            <InfoRow label="Beat" value={detail.live.beat ?? "Not available"} />
+            <InfoRow
+              label="Last GPS"
+              value={
+                detail.live.fixAt
+                  ? formatCoverageTime(detail.live.fixAt) ?? "Not available"
+                  : "No GPS fix received"
+              }
+            />
+            <InfoRow label="Accuracy" value={detail.live.accuracyM != null ? `${Math.round(detail.live.accuracyM)} m` : "—"} />
+            <InfoRow label="Speed" value={detail.live.speedKmh != null ? `${detail.live.speedKmh.toFixed(1)} km/h` : "—"} />
+            <InfoRow label="GPS points (patrol)" value={String(detail.live.pointCount)} />
+            <InfoRow label="Path distance" value={detail.live.pathDistanceKm != null ? `${detail.live.pathDistanceKm} km` : "—"} />
+            <InfoRow label="Path duration" value={detail.live.pathMinutes != null ? `${detail.live.pathMinutes} min` : "—"} />
+            <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+              <Link
+                href={detail.href}
+                onClick={onClose}
+                className="inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700"
+              >
+                <Icon name="chevronRight" size={12} /> {detail.cta}
+              </Link>
+              {onFocus && (
+                <button
+                  onClick={() => {
+                    onFocus();
+                    onClose();
+                  }}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-field border border-line bg-white px-3 text-xs font-medium text-ink transition hover:bg-forest-50"
+                >
+                  <Icon name="target" size={12} /> Focus
+                </button>
+              )}
+            </div>
+          </div>
+        ) : isGrid ? (
           <div className="mt-2.5 space-y-1.5 text-xs">
             <InfoRow label="Division" value={FOREST_CONTEXT.divisionName} />
             <InfoRow label="Range" value={detail.rangeName ?? "Not available"} />
@@ -885,7 +1149,7 @@ function SelectedCard({ detail, onClose }: { detail: NonNullable<Detail>; onClos
           <p className="mt-0.5 text-xs text-ink-soft">{detail.body}</p>
         )}
 
-        {!isGrid && (
+        {!isGrid && !isLive && (
           <Link
             href={detail.href}
             onClick={onClose}

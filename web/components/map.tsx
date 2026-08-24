@@ -60,6 +60,8 @@ import {
   emptyFc,
   gridsToFeatures,
   heatToFeatures,
+  livePathsToFeatures,
+  liveRangersToFeatures,
   markersToFeatures,
   rangeLabelsToFeatures,
   rangesFromBeats,
@@ -68,6 +70,8 @@ import {
   routeToTimed,
   routesToFeatures,
   type GridCoverageInfo,
+  type LivePathFeature,
+  type LiveRangerFeature,
   type TimedPoint,
 } from "@/lib/map-space";
 
@@ -119,6 +123,13 @@ export interface MapProps {
   onGridHover?(id: string | null): void;
   markers?: GisMarker[];
   routes?: GisRoute[];
+  /**
+   * LIVE patrol windows (GET /api/patrols/live) — drawn above historical
+   * routes; toggled by the Patrol Routes switch.
+   */
+  livePaths?: LivePathFeature[];
+  /** Current/stale ranger positions of ACTIVE patrols — Ranger Positions switch. */
+  liveRangers?: LiveRangerFeature[];
   heat?: HeatBlock[];
   selectedId?: string | null;
   onSelect?(id: string | null): void;
@@ -127,6 +138,11 @@ export interface MapProps {
   onProgress?(p: number): void;
   seekSignal?: { value: number } | null;
   detailCard?: ReactNode;
+  /**
+   * Honest operational status strip rendered top-left inside the map (counts
+   * of the enabled operational layers, or their empty/unavailable states).
+   */
+  statusChip?: ReactNode;
   /**
    * Range → Beat → Compartment region filter. Division is NOT part of the
    * filter — Markapur Division is the fixed context (lib/forest-context.ts).
@@ -190,6 +206,8 @@ const CLICKABLE = [
   "gl-beats-outline",
   "gl-compartments-fill",
   "gl-routes",
+  "gl-live-path",
+  "gl-live-ranger-dot",
   "gl-markers-ranger",
   "gl-markers-obs",
   "gl-markers-sos",
@@ -216,13 +234,21 @@ const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]
   grids: ["gl-grids-fill", "gl-grids-line"],
   routes: [
     "gl-routes",
+    "gl-live-path-case",
+    "gl-live-path",
     "gl-replay-case",
     "gl-replay-trail",
     "gl-replay-dots",
     "gl-replay-head-halo",
     "gl-replay-head",
   ],
-  rangers: ["gl-markers-ranger", "gl-markers-ranger-label"],
+  rangers: [
+    "gl-markers-ranger",
+    "gl-markers-ranger-label",
+    "gl-live-ranger-halo",
+    "gl-live-ranger-dot",
+    "gl-live-ranger-label",
+  ],
   markers: ["gl-markers-obs"],
   sos: ["gl-markers-sos", "gl-markers-sos-label", "gl-sos-dot", "gl-sos-ring", "gl-sos-label"],
   zeropatrol: ["gl-beats-zero-dash"],
@@ -696,6 +722,67 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
+  // 9b. LIVE patrol operations (GET /api/patrols/live). Painted AFTER the
+  //     historical routes/replay and BEFORE the ground markers/SOS layers,
+  //     so the active-patrol window reads on top of recorded traces while an
+  //     SOS alert still wins the stack. Amber = live operations color; gray
+  //     = stale feed (last fix older than the freshness threshold).
+  m.addSource("live-paths", { type: "geojson", data: emptyFc() });
+  m.addSource("live-rangers", { type: "geojson", data: emptyFc() });
+  m.addLayer({
+    id: "gl-live-path-case",
+    type: "line",
+    source: "live-paths",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#FFFFFF", "line-width": 8, "line-opacity": 0.85 },
+  });
+  m.addLayer({
+    id: "gl-live-path",
+    type: "line",
+    source: "live-paths",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: {
+      "line-color": ["case", ["==", ["get", "freshness"], "stale"], "#7D8794", "#FF8F00"],
+      "line-width": 4.5,
+      "line-opacity": 0.95,
+    },
+  });
+  m.addLayer({
+    id: "gl-live-ranger-halo",
+    type: "circle",
+    source: "live-rangers",
+    paint: {
+      "circle-radius": 15,
+      "circle-color": ["case", ["==", ["get", "freshness"], "stale"], "#7D8794", "#FF8F00"],
+      "circle-opacity": 0.28,
+    },
+  });
+  m.addLayer({
+    id: "gl-live-ranger-dot",
+    type: "circle",
+    source: "live-rangers",
+    paint: {
+      "circle-radius": 7,
+      "circle-color": ["case", ["==", ["get", "freshness"], "stale"], "#7D8794", "#FF8F00"],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2.5,
+    },
+  });
+  m.addLayer({
+    id: "gl-live-ranger-label",
+    type: "symbol",
+    source: "live-rangers",
+    minzoom: 11,
+    layout: {
+      "text-field": ["get", "rangerName"],
+      "text-size": 10,
+      "text-offset": [0, 1.3],
+      "text-anchor": "top",
+      "text-allow-overlap": false,
+    },
+    paint: { "text-color": "#5B3A00", "text-halo-color": "#ffffff", "text-halo-width": 2 },
+  });
+
   // 10. Ground markers — rangers, sightings/incidents, SOS.
   m.addLayer({
     id: "gl-markers-ranger",
@@ -806,6 +893,142 @@ function setSourceData(m: MapLibreMap, id: string, data: GeoJSON.FeatureCollecti
 }
 
 /* ------------------------------------------------------------------ */
+/* Hover popup (shared by markers + patrol routes)                     */
+/* ------------------------------------------------------------------ */
+
+/** Cursor-anchored hover card. Rows carry ONLY fields that exist on the real
+ *  record; anything absent renders as "—" — never invented. */
+interface HoverCardState {
+  x: number;
+  y: number;
+  alignRight?: boolean;
+  alignBottom?: boolean;
+  title: string;
+  tag: string;
+  rows: [string, string][];
+}
+
+const HOVER_KIND_TITLES: Record<string, string> = {
+  ranger: "Ranger position",
+  observation: "Observation",
+  incident: "Incident report",
+  sos: "SOS alert",
+};
+
+/** Build the hover card from a picked feature's properties. */
+function hoverCardFromProps(
+  props: Record<string, unknown>,
+  pos: { x: number; y: number; alignRight?: boolean; alignBottom?: boolean }
+): HoverCardState {
+  const str = (v: unknown): string | null => {
+    const s = v == null ? "" : String(v).trim();
+    return s.length > 0 ? s : null;
+  };
+  const time = (v: unknown): string | null => {
+    const raw = str(v);
+    if (!raw) return null;
+    const d = new Date(raw);
+    return Number.isFinite(d.getTime())
+      ? d.toLocaleString([], { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })
+      : null;
+  };
+  const row = (label: string, v: unknown, fmt?: (x: unknown) => string | null): [string, string] => [
+    label,
+    (fmt ? fmt(v) : str(v)) ?? "—",
+  ];
+  const numRow = (label: string, v: unknown, suffix: string, digits = 0): [string, string] => [
+    label,
+    typeof v === "number" && Number.isFinite(v) ? `${v.toFixed(digits)}${suffix}` : "—",
+  ];
+
+  // LIVE ranger position (GET /api/patrols/live) — only real feed fields.
+  if (str(props.kind) === "live-ranger") {
+    return {
+      ...pos,
+      title: str(props.rangerName) ?? "Ranger on patrol",
+      tag: str(props.freshness) === "stale" ? "Live position — stale GPS" : "Live ranger position",
+      rows: [
+        row("Patrol", props.patrolLabel),
+        row("Status", "Active"),
+        row("Last GPS", props.fixAt, time),
+        numRow("Accuracy", props.accuracyM as number | undefined, " m"),
+        numRow("Speed", props.speedKmh as number | undefined, " km/h", 1),
+        row("Points", props.pointCount),
+        row("Path window", props.pathWindow),
+      ],
+    };
+  }
+
+  // LIVE patrol path — the bounded recent window of an active patrol.
+  if (str(props.kind) === "live-patrol") {
+    return {
+      ...pos,
+      title: str(props.label) ?? "Live patrol",
+      tag: str(props.freshness) === "stale" ? "Live route — stale GPS" : "Live patrol route",
+      rows: [
+        row("Ranger", props.rangerName),
+        row("Started", props.startedAt, time),
+        ["Latest GPS", str(props.endAt) ? time(props.endAt) ?? "—" : "—"],
+        numRow("Path duration", props.durationMinutes as number | undefined, " min", 1),
+        numRow("Distance", props.distanceKm as number | undefined, " km", 2),
+        row("GPS points", props.pointCount),
+      ],
+    };
+  }
+
+  // Patrol route line
+  if (str(props.patrolId)) {
+    const status = str(props.status);
+    return {
+      ...pos,
+      title: str(props.label) ?? "Patrol track",
+      tag: `Patrol route${status ? ` · ${status}` : ""}`,
+      rows: [
+        row("Type", props.patrolType),
+        row("Ranger", props.rangerName),
+        row("Start", props.startedAt, time),
+        [ "End", str(props.endedAt) ? time(props.endedAt) ?? "—" : "active"],
+        numRow("Duration", props.durationMinutes as number | undefined, " min", 1),
+        numRow("Distance", props.distanceKm as number | undefined, " km", 2),
+        row("GPS fixes", props.pointCount),
+      ],
+    };
+  }
+
+  // Ground marker (ranger / observation / incident / sos)
+  const kind = str(props.kind) ?? "incident";
+  const title = HOVER_KIND_TITLES[kind] ?? "Map feature";
+  const rows: [string, string][] =
+    kind === "ranger"
+      ? [row("Fix", props.category), row("Time", props.occurredAt, time)]
+      : [
+          row("Type", props.category),
+          row("Severity", props.severity),
+          row("Status", props.status),
+          row("When", props.occurredAt, time),
+          row("Reported by", props.reporter),
+          numRow("GPS accuracy", props.accuracyM as number | undefined, " m"),
+        ];
+  return {
+    ...pos,
+    title: str(props.label) ?? title,
+    tag: title,
+    rows,
+  };
+}
+
+/** Operational layers that show a hover card (grid cells keep their own tooltip). */
+const HOVER_LAYERS = [
+  "gl-live-path",
+  "gl-live-ranger-dot",
+  "gl-markers-ranger",
+  "gl-markers-obs",
+  "gl-markers-sos",
+  "gl-sos-dot",
+  "gl-routes",
+];
+
+/* ------------------------------------------------------------------ */
 /* The map                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -830,8 +1053,11 @@ export function MapWorkspace({
   onGridHover,
   markers,
   routes,
+  livePaths,
+  liveRangers,
   heat,
   detailCard,
+  statusChip,
   regionFilter,
   layerState: layerStateProp,
   onLayerStateChange,
@@ -858,6 +1084,9 @@ export function MapWorkspace({
 
   /** Cursor-positioned tooltip for the hovered analysis-grid cell. */
   const [gridTooltip, setGridTooltip] = useState<{ x: number; y: number; code: string } | null>(null);
+
+  /** Cursor-following hover card for operational features (markers/routes). */
+  const [hoverCard, setHoverCard] = useState<HoverCardState | null>(null);
 
   const beats = useMemo(() => liveBeats ?? [], [liveBeats]);
   const comps = useMemo(() => compartments ?? [], [compartments]);
@@ -949,6 +1178,8 @@ export function MapWorkspace({
     [sosAlerts]
   );
   const routesFc = useMemo(() => routesToFeatures(routes ?? []), [routes]);
+  const livePathsFc = useMemo(() => livePathsToFeatures(livePaths ?? []), [livePaths]);
+  const liveRangersFc = useMemo(() => liveRangersToFeatures(liveRangers ?? []), [liveRangers]);
   const heatFc = useMemo(() => heatToFeatures(heat ?? []), [heat]);
   const rangesFc = useMemo(() => rangesToFeatures(ranges), [ranges]);
   const rangeLabelsFc = useMemo(() => rangeLabelsToFeatures(ranges), [ranges]);
@@ -967,6 +1198,8 @@ export function MapWorkspace({
     setSourceData(m, "beats", beatsFc);
     setSourceData(m, "markers", markersFc);
     setSourceData(m, "routes", routesFc);
+    setSourceData(m, "live-paths", livePathsFc);
+    setSourceData(m, "live-rangers", liveRangersFc);
     setSourceData(m, "heat", heatFc);
     setSourceData(m, "ranges", rangesFc);
     setSourceData(m, "range-labels", rangeLabelsFc);
@@ -990,7 +1223,7 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
+  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
 
   // Layer checkbox visibility (overlay groups).
   useEffect(() => {
@@ -1060,10 +1293,26 @@ export function MapWorkspace({
         hoveredGridId = id || null;
         setGridTooltip({ x: e.point.x, y: e.point.y, code });
         onGridHover?.(hoveredGridId);
+        setHoverCard(null);
         m.getCanvas().style.cursor = "pointer";
         return;
       }
       clearGridHover();
+      const hoverHit = m.queryRenderedFeatures(e.point, { layers: HOVER_LAYERS })[0];
+      if (hoverHit) {
+        const rect = m.getContainer().getBoundingClientRect();
+        setHoverCard(
+          hoverCardFromProps(hoverHit.properties ?? {}, {
+            x: e.point.x,
+            y: e.point.y,
+            alignRight: e.point.x > rect.width - 250,
+            alignBottom: e.point.y > rect.height - 240,
+          })
+        );
+        m.getCanvas().style.cursor = "pointer";
+        return;
+      }
+      setHoverCard(null);
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable });
       m.getCanvas().style.cursor = hit.length > 0 ? "pointer" : "";
     };
@@ -1075,6 +1324,7 @@ export function MapWorkspace({
         return;
       }
       setGridTooltip(null);
+      setHoverCard(null);
       onGridHover?.(null);
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable })[0];
       const id = hit?.properties?.id;
@@ -1082,6 +1332,7 @@ export function MapWorkspace({
     };
     const onLeave = () => {
       clearGridHover();
+      setHoverCard(null);
       m.getCanvas().style.cursor = "";
     };
     const canvas = m.getCanvas();
@@ -1194,6 +1445,9 @@ export function MapWorkspace({
       <div ref={wrapRef} className={cn("relative overflow-hidden", heightClass)}>
         <div ref={containerRef} className="h-full w-full" role="img" aria-label="Forest map with beats, patrol routes and markers" />
 
+        {/* Honest operational status strip (counts / empty states of enabled ops layers) */}
+        {statusChip && <div className="absolute left-3 top-3 z-10 max-w-[min(70%,26rem)]">{statusChip}</div>}
+
         {/* Floating controls (app parity — top right) */}
         <div className="absolute right-3 top-3 z-10 flex flex-col gap-2">
           <MapFloatButton label="Zoom in" icon="zoomIn" onClick={() => mapRef.current?.zoomIn()} />
@@ -1274,6 +1528,31 @@ export function MapWorkspace({
           </div>
         )}
 
+        {/* shared operational hover card (observations / incidents / SOS / rangers / routes) */}
+        {hoverCard && (
+          <div
+            className="pointer-events-none absolute z-20 w-60 rounded-md border border-line bg-white/95 px-3 py-2 text-[11px] shadow-pop"
+            style={{
+              left: hoverCard.x,
+              top: hoverCard.y,
+              transform: `${hoverCard.alignRight ? "translateX(calc(-100% - 12px))" : "translateX(14px)"} ${
+                hoverCard.alignBottom ? "translateY(calc(-100% - 12px))" : "translateY(14px)"
+              }`,
+            }}
+          >
+            <p className="text-[10px] font-semibold uppercase tracking-wide text-ink-faint">{hoverCard.tag}</p>
+            <p className="truncate text-xs font-semibold text-ink" title={hoverCard.title}>{hoverCard.title}</p>
+            <dl className="mt-1 space-y-0.5">
+              {hoverCard.rows.map(([k, v]) => (
+                <div key={k} className="flex items-baseline justify-between gap-2">
+                  <dt className="shrink-0 text-ink-soft">{k}</dt>
+                  <dd className="truncate text-right font-medium text-ink">{v}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
+        )}
+
         {/* replay controls — only when a patrol is selected */}
         {replayRoute && layerState.routes && (
           <div className="absolute bottom-3 left-1/2 z-10 flex w-[min(560px,90%)] -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-pop">
@@ -1335,10 +1614,13 @@ function activeLegendRows(s: ForestLayerState): { color: string; label: string; 
   if (s.beats) rows.push({ color: "#0F766E", label: "Beat boundary" });
   if (s.compartments) rows.push({ color: "#E65100", label: "Compartment boundary" });
   if (s.routes) {
+    rows.push({ color: "#FF8F00", label: "Live patrol route (active patrol)" });
     rows.push({ color: "#2E7D32", label: "Patrol route" });
     rows.push({ color: "#2E7BF6", label: "Replay track", isPoint: false });
   }
-  if (s.rangers) rows.push({ color: "#1B365D", label: "Ranger position", isPoint: true });
+  if (s.rangers) {
+    rows.push({ color: "#FF8F00", label: "Ranger position — live GPS", isPoint: true });
+  }
   if (s.markers) {
     rows.push({ color: "#B3261E", label: "Observation / sighting", isPoint: true });
     rows.push({ color: "#FF8F00", label: "Incident marker", isPoint: true });

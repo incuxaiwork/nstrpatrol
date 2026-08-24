@@ -17,7 +17,6 @@ import { JurisdictionBadge } from "@/components/jurisdiction";
 import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatMinutes, formatKm } from "@/lib/utils";
 import type { JurisdictionState } from "@/lib/types";
 
@@ -113,7 +112,7 @@ export default function PatrolHistoryPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">{patrol.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {patrol.leader} · {unitName(patrol.beat)} · {timeAgo(patrol.startScheduled)}
+                        {patrol.leader} · {patrol.beat || "Unknown beat"} · {timeAgo(patrol.startScheduled)}
                         {patrol.durationMin > 0 && ` · ${formatMinutes(patrol.durationMin)}`}
                         {patrol.distanceKm > 0 && ` · ${formatKm(patrol.distanceKm)}`}
                       </span>

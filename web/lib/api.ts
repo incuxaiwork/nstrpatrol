@@ -118,6 +118,13 @@ interface RequestOpts {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   auth?: boolean;
+  /**
+   * Per-request GET cache TTL override (ms). `0` = the shared TTL cache never
+   * serves a hit for this endpoint (live feeds must observe fresh fixes every
+   * poll), while single-flight dedupe of concurrent identical requests still
+   * applies. Omitted → the shared 30 s default; global behavior unchanged.
+   */
+  ttlMs?: number;
 }
 
 async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
@@ -136,8 +143,8 @@ async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     // GETs may be served from the HTTP cache (GIS layers declare max-age);
-    // mutations stay no-store.
-    cache: (opts.method ?? "GET") === "GET" ? "default" : "no-store",
+    // mutations and ttl-0 live feeds stay no-store.
+    cache: (opts.method ?? "GET") === "GET" && opts.ttlMs !== 0 ? "default" : "no-store",
   });
 }
 
@@ -246,8 +253,9 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
     return value;
   }
 
-  // GETs are cached (TTL) and deduped while in flight.
-  return cachedGet<T>(method, url.toString(), DEFAULT_TTL_MS, run);
+  // GETs are cached (TTL) and deduped while in flight. A per-request ttlMs
+  // of 0 keeps the dedupe but can never return a cached value.
+  return cachedGet<T>(method, url.toString(), opts.ttlMs ?? DEFAULT_TTL_MS, run);
 }
 
 /* ------------------------------------------------------------------ */
@@ -308,6 +316,39 @@ export interface ApiPatrolStats {
   points: number;
   distanceKm: number;
   durationSeconds: number;
+}
+
+/** One GPS fix of GET /api/patrols/live (backend `toFix` — real device data). */
+export interface ApiLiveFix {
+  lat: number;
+  lng: number;
+  altitude: number | null;
+  /** Meters/second as recorded by the device GPS (Android location.speed). */
+  speed: number | null;
+  bearing: number | null;
+  accuracy: number | null;
+  /** GPS-recorded timestamp (ISO) — never the fetch/request time. */
+  t: string;
+}
+
+/** One ACTIVE patrol of GET /api/patrols/live. */
+export interface ApiLivePatrol {
+  id: string;
+  name: string | null;
+  type: "WALK" | "BICYCLE" | "VEHICLE" | "STATIONARY";
+  status: "ACTIVE";
+  startedAt: string | null;
+  beat: string | null;
+  ranger: { id: string; fullName: string };
+  lastPointAt: string | null;
+  pointCount: number;
+  latestPoint: ApiLiveFix | null;
+  path: ApiLiveFix[];
+}
+
+export interface ApiLiveFeed {
+  serverTime: string;
+  patrols: ApiLivePatrol[];
 }
 
 /** Response of GET /api/patrols/:id/coverage/summary (ForestGrid coverage). */
@@ -568,7 +609,8 @@ export const auth = {
   // only allows unauthenticated registration for the first-run bootstrap
   // account. Sending auth:false here produced 403 for every post-bootstrap
   // invite. With a token attached the backend enforces its own ADMIN check.
-  register: (input: { email: string; password: string; fullName: string; role?: string; cader?: string; phone?: string }) =>
+  // The role is derived server-side from the cader — never sent by clients.
+  register: (input: { email: string; password: string; fullName: string; cader?: string; phone?: string }) =>
     request<ApiUser>("/api/auth/register", { method: "POST", body: input }),
   refresh: () =>
     request<{ accessToken: string; refreshToken: string }>("/api/auth/refresh", {
@@ -606,6 +648,10 @@ export const patrols = {
   start: (id: string, startedAt?: string) => request<{ status: string; startedAt: string }>(`/api/patrols/${id}/start`, { method: "POST", body: { startedAt } }),
   complete: (id: string, endedAt?: string) =>
     request<{ status: string; endedAt: string }>(`/api/patrols/${id}/complete`, { method: "POST", body: { endedAt } }),
+  /** Live tracking feed — ACTIVE patrols with latest valid fix + bounded
+   *  recent path (backend applies patrol scoping). ttlMs 0: a poll must never
+   *  read the shared 30 s GET cache; concurrent polls still share one flight. */
+  live: () => request<ApiLiveFeed>("/api/patrols/live", { ttlMs: 0 }),
 };
 
 export const incidents = {

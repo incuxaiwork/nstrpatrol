@@ -186,6 +186,137 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
   res.json(patrols.map((p) => ({ ...p, geography: geographyFor(p, geoIndex) })));
 });
 
+const liveQuery = z.object({
+  /** Minutes of recent GPS to include per patrol path (default 15, max 120). */
+  window: z.coerce.number().int().min(1).max(120).optional(),
+});
+
+/**
+ * Live tracking feed — the smallest read-only addition that lets the Admin
+ * Portal poll active patrols efficiently. Existing endpoints cannot do this:
+ * GET / lists patrols without any GPS freshness, and GET /:id/points returns a
+ * patrol's ENTIRE trace (thousands of rows), which must not be re-downloaded
+ * every few seconds.
+ *
+ * Scope-authoritative via applyPatrolWhere (division admin → all, DyDFO/FRO →
+ * their organization, field users → own patrols). Data is strictly what the
+ * devices synchronized: latest stored fix + a bounded recent-path window,
+ * ordered by recorded timestamp ascending. Invalid fixes — including the
+ * (0,0) sentinel — are excluded server-side; nothing is synthesized here.
+ */
+patrolsRouter.get('/live', validateQuery(liveQuery), async (req, res) => {
+  const q = req.query as z.infer<typeof liveQuery>;
+  const windowMin = q.window ?? 15;
+
+  const where = await applyPatrolWhere(req.user!, { status: 'ACTIVE' } as never, { mine: false });
+  const patrols = await prisma.patrol.findMany({
+    where,
+    select: {
+      id: true,
+      name: true,
+      type: true,
+      status: true,
+      startedAt: true,
+      beat: true,
+      userId: true,
+      user: { select: { id: true, fullName: true } },
+    },
+    orderBy: [{ startedAt: 'desc' }, { createdAt: 'desc' }],
+    take: 100,
+  });
+
+  const serverTime = new Date();
+  if (patrols.length === 0) {
+    res.json({ serverTime: serverTime.toISOString(), patrols: [] });
+    return;
+  }
+
+  const ids = patrols.map((p) => p.id);
+  // Valid fix = inside WGS-84 bounds and not the (0,0) null-island sentinel.
+  const validFix = { latitude: { gte: -90, lte: 90, not: 0 }, longitude: { gte: -180, lte: 180, not: 0 } };
+  const pointSelect = {
+    patrolId: true,
+    latitude: true,
+    longitude: true,
+    altitude: true,
+    speed: true,
+    bearing: true,
+    accuracy: true,
+    timestamp: true,
+  } as const;
+
+  const [latestRows, pathRows, counts] = await Promise.all([
+    // Newest stored fix per patrol (DISTINCT ON equivalent).
+    prisma.patrolPoint.findMany({
+      where: { patrolId: { in: ids }, ...validFix },
+      orderBy: [{ patrolId: 'asc' }, { timestamp: 'desc' }],
+      distinct: ['patrolId'],
+      select: pointSelect,
+    }),
+    // Bounded recent window for the live path drawing.
+    prisma.patrolPoint.findMany({
+      where: {
+        patrolId: { in: ids },
+        timestamp: { gte: new Date(serverTime.getTime() - windowMin * 60_000) },
+        ...validFix,
+      },
+      orderBy: { timestamp: 'asc' },
+      select: pointSelect,
+      take: 5000,
+    }),
+    prisma.patrolPoint.groupBy({ by: ['patrolId'], where: { patrolId: { in: ids } }, _count: { _all: true } }),
+  ]);
+
+  // Belt-and-braces: never surface invalid fixes — including the (0,0)
+  // sentinel some devices emit before their first real lock — even if such
+  // rows are already stored. Keeps the map clean without rewriting history.
+  const isUsable = (r: { latitude: number; longitude: number }): boolean =>
+    Number.isFinite(r.latitude) &&
+    Number.isFinite(r.longitude) &&
+    r.latitude >= -90 && r.latitude <= 90 &&
+    r.longitude >= -180 && r.longitude <= 180 &&
+    !(r.latitude === 0 && r.longitude === 0);
+
+  const latestByPatrol = new Map(latestRows.filter(isUsable).map((r) => [r.patrolId, r]));
+  const countByPatrol = new Map(counts.map((c) => [c.patrolId, c._count._all]));
+  const pathByPatrol = new Map<string, typeof pathRows>();
+  for (const row of [...pathRows].filter(isUsable).sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())) {
+    const bucket = pathByPatrol.get(row.patrolId) ?? [];
+    bucket.push(row);
+    pathByPatrol.set(row.patrolId, bucket);
+  }
+
+  const toFix = (r: (typeof latestRows)[number]) => ({
+    lat: r.latitude,
+    lng: r.longitude,
+    altitude: r.altitude,
+    speed: r.speed,
+    bearing: r.bearing,
+    accuracy: r.accuracy,
+    t: r.timestamp,
+  });
+
+  res.json({
+    serverTime: serverTime.toISOString(),
+    patrols: patrols.map((p) => {
+      const latest = latestByPatrol.get(p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        type: p.type,
+        status: p.status,
+        startedAt: p.startedAt,
+        beat: p.beat,
+        ranger: { id: p.user.id, fullName: p.user.fullName },
+        lastPointAt: latest ? latest.timestamp : null,
+        pointCount: countByPatrol.get(p.id) ?? 0,
+        latestPoint: latest ? toFix(latest) : null,
+        path: (pathByPatrol.get(p.id) ?? []).map(toFix),
+      };
+    }),
+  });
+});
+
 patrolsRouter.get('/:id', async (req, res) => {
   const id = param(req, 'id');
   const patrol = await prisma.patrol.findUnique({
@@ -257,10 +388,12 @@ patrolsRouter.get('/:id', async (req, res) => {
   // Non-fatal: an aggregation hiccup must never break the detail payload.
   let modes: { mode: string; seconds: number }[] = [];
   try {
-    modes = await prisma.$queryRaw<{ mode: string; seconds: number }[]>`
+    const rows = await prisma.$queryRaw<{ mode: string; seconds: number }[]>`
       SELECT mode, COALESCE(SUM(EXTRACT(EPOCH FROM ("endTime" - "startTime"))), 0)::int AS seconds
       FROM "ActivitySegment" WHERE "patrolId" = ${id} GROUP BY mode ORDER BY 2 DESC
     `;
+    // Normalize driver output — raw aggregates must never flow unchecked.
+    modes = rows.map((r) => ({ mode: String(r.mode), seconds: Number(r.seconds) }));
   } catch {
     modes = [];
   }

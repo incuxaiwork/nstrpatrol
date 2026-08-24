@@ -24,8 +24,7 @@ import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
-import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo, formatKm, formatMinutes } from "@/lib/utils";
+import { timeAgo, formatKm, formatMinutes, geoLabel } from "@/lib/utils";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { PatrolsReportDialog } from "@/components/reports/dialogs";
 
@@ -138,7 +137,7 @@ export default function PatrolsDashboardPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-ink">{patrol.title}</p>
                   <p className="mt-0.5 text-xs text-ink-soft">
-                    {patrol.leader} · {unitName(patrol.division)} / {unitName(patrol.range)} / {unitName(patrol.beat)} · {timeAgo(patrol.startScheduled)}
+                    {patrol.leader} · {geoLabel(patrol.division)} / {geoLabel(patrol.range)} / {geoLabel(patrol.beat)} · {timeAgo(patrol.startScheduled)}
                   </p>
                   {jurisdiction.authorization && (
                     <p className="mt-0.5 font-mono text-[11px] text-forest-800">
@@ -256,7 +255,7 @@ export default function PatrolsDashboardPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-ink">{a.id}</p>
                   <p className="text-xs text-ink-soft">
-                    {unitName(a.homeBeat)} → {unitName(a.authBeat)} · until {new Date(a.validUntil).toLocaleDateString()}
+                    {geoLabel(a.homeBeat)} → {geoLabel(a.authBeat)} · until {new Date(a.validUntil).toLocaleDateString()}
                   </p>
                 </div>
                 <Badge tone="success">Active</Badge>

@@ -97,6 +97,51 @@ gisRouter.get('/compartments', async (_req, res) => {
   res.send(body);
 });
 
+/**
+ * GET /api/gis/ranges
+ * Forest ranges as a GeoJSON FeatureCollection.
+ *
+ * The Range table carries names only (no geometry), so each range polygon is
+ * derived server-side as the ST_Union of its beats' real geometries grouped by
+ * Beat.rangeName — ONE authoritative derivation in SQL instead of client-side
+ * convex hulls. Properties mirror the beats shape so mobile parsing keeps
+ * working ('Range' carries the verbatim range name).
+ */
+gisRouter.get('/ranges', async (_req, res) => {
+  const body = await cachedGeo('ranges', async () => {
+    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+      SELECT COALESCE(
+        json_build_object(
+          'type', 'FeatureCollection',
+          'features', json_agg(feature)
+        )::text,
+        '{"type":"FeatureCollection","features":[]}'
+      ) AS geojson
+      FROM (
+        SELECT json_build_object(
+          'type', 'Feature',
+          'id', 'range-' || b."rangeName",
+          'geometry', ST_AsGeoJSON(ST_Union(b.geom))::json,
+          'properties', json_build_object(
+            'OBJECTID_1', MIN(b.id),
+            'Range', b."rangeName",
+            'Division', COALESCE(MIN(b.division), ''),
+            'beatCount', COUNT(*)::int,
+            'Area_ha', ROUND(SUM(COALESCE(b."areaHa", 0)))::int
+          )
+        ) AS feature
+        FROM "Beat" b
+        WHERE b.geom IS NOT NULL AND b."rangeName" IS NOT NULL AND b."rangeName" <> ''
+        GROUP BY b."rangeName"
+      ) t
+    `;
+    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+  });
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(body);
+});
+
 const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**

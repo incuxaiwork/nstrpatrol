@@ -17,7 +17,6 @@ import { Donut, DonutLegend } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 
 
@@ -129,7 +128,8 @@ export default function ObservationsDashboardPage() {
                       {o.priority === "urgent" && <Badge tone="danger">Urgent</Badge>}
                     </p>
                     <p className="text-xs text-ink-soft">
-                      {o.code} · {o.recordedBy} · {timeAgo(o.recordedAt)} · {unitName(o.range)}
+                      {o.code} · {o.recordedBy} · {timeAgo(o.recordedAt)}
+                      {o.range && ` · ${o.range}`}
                     </p>
                   </div>
                   <Badge tone={severityTone[o.severity]}>{severityLabel[o.severity]}</Badge>

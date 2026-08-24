@@ -374,7 +374,7 @@ export interface DashboardSummary {
   /** `days` only when the data source actually provides it (never fabricated). */
   zeroPatrolList: { beat: string; days?: number }[];
   byStatus: { status: PatrolStatus; count: number }[];
-  incidentsToday: { title: string; severity: ObservationSeverity; time: string }[];
+  incidentsToday: { id: string; title: string; severity: ObservationSeverity; time: string }[];
   recentReports: Observation[];
   todayPatrols: Patrol[];
   activity: { hour: string; patrols: number; reports: number }[];

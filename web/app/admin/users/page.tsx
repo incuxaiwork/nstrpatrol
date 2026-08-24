@@ -1,6 +1,6 @@
-"use client";
+﻿"use client";
 
-/** Users (PRD §11.2) — accounts, roles and access status */
+/** Users (PRD Â§11.2) â€” accounts, roles and access status */
 
 import { useState } from "react";
 import { ACCOUNT_OPTIONS, admin } from "@/lib/services";
@@ -11,8 +11,7 @@ import { DataTable, FilterBar, FilterSelect, Pagination } from "@/components/dat
 import { ConfirmDialog, Dialog, ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
-import { unitName } from "@/lib/mock/hierarchy";
-import { timeAgo } from "@/lib/utils";
+import { timeAgo, geoLabel } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { AdminUser } from "@/lib/types";
 
@@ -25,7 +24,7 @@ const statusLabel: Record<string, string> = { active: "Active", invited: "Invite
 
 /**
  * Cryptographically secure temporary password (no email infrastructure
- * exists — the administrator hands these credentials to the new user).
+ * exists â€” the administrator hands these credentials to the new user).
  * ~103 bits of entropy from CSPRNG bytes over an unambiguous alphabet.
  */
 function generateTemporaryPassword(): string {
@@ -45,13 +44,13 @@ export default function AdminUsersPage() {
   const [roleFilter, setRoleFilter] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [inviteOpen, setInviteOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [cader, setCader] = useState("FBO");
   const [busy, setBusy] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
-  /** Shown ONCE after successful creation — never persisted or logged. */
+  /** Shown ONCE after successful creation â€” never persisted or logged. */
   const [createdCreds, setCreatedCreds] = useState<{ name: string; email: string; password: string; role: string } | null>(null);
   const [actionUser, setActionUser] = useState<AdminUser | null>(null);
   const [intent, setIntent] = useState<"toggle" | "remove" | null>(null);
@@ -68,7 +67,7 @@ export default function AdminUsersPage() {
   );
 
   const roleName = (id: string) => roles.data?.find((r) => r.id === id)?.name ?? id;
-  const validInvite = name.trim().length >= 3 && email.includes("@");
+  const validNewUser = name.trim().length >= 3 && email.includes("@");
   const selectedAccount = ACCOUNT_OPTIONS.find((o) => o.value === cader);
 
   const handleExport = (kind: ExportKind) => {
@@ -76,7 +75,7 @@ export default function AdminUsersPage() {
       name: u.name,
       email: u.email,
       role: roleName(u.roleId),
-      division: unitName(u.division),
+      division: geoLabel(u.division),
       status: statusLabel[u.status],
       lastActive: u.lastActive ?? "",
       created: u.created,
@@ -92,10 +91,10 @@ export default function AdminUsersPage() {
           <div className="flex items-center gap-2">
             <ExportButton onExport={handleExport} />
             <button
-              onClick={() => setInviteOpen(true)}
+              onClick={() => setCreateOpen(true)}
               className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
             >
-              Invite user
+              Create user
             </button>
           </div>
         }
@@ -105,7 +104,7 @@ export default function AdminUsersPage() {
         <FilterBar onClear={() => { setRoleFilter(""); setStatusFilter(""); }}>
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-medium text-ink-soft">Search</span>
-            <SearchInput value={query} onChange={(v) => { setQuery(v); setPage(1); }} placeholder="Name or email…" className="w-52" />
+            <SearchInput value={query} onChange={(v) => { setQuery(v); setPage(1); }} placeholder="Name or emailâ€¦" className="w-52" />
           </label>
           <FilterSelect label="Role" value={roleFilter} onChange={(v) => { setRoleFilter(v); setPage(1); }}
             options={(roles.data ?? []).map((r) => ({ value: r.id, label: r.name }))} />
@@ -129,9 +128,9 @@ export default function AdminUsersPage() {
               ),
             },
             { key: "role", header: "Role", render: (u) => <Badge tone="forest">{roleName(u.roleId)}</Badge> },
-            { key: "division", header: "Division", render: (u) => <span className="text-ink-soft">{unitName(u.division)}</span> },
+            { key: "division", header: "Division", render: (u) => <span className="text-ink-soft">{geoLabel(u.division)}</span> },
             { key: "lastActive", header: "Last active", sortValue: (u) => new Date(u.lastActive ?? "").getTime(),
-              render: (u) => <span className="text-ink-soft">{u.lastActive ? timeAgo(u.lastActive) : "—"}</span> },
+              render: (u) => <span className="text-ink-soft">{u.lastActive ? timeAgo(u.lastActive) : "â€”"}</span> },
             { key: "created", header: "Created", render: (u) => <span className="text-ink-soft">{u.created}</span> },
             { key: "status", header: "Status", sortValue: (u) => u.status, render: (u) => <Badge tone={statusTone[u.status]} dot>{statusLabel[u.status]}</Badge> },
             {
@@ -171,10 +170,10 @@ export default function AdminUsersPage() {
         <Pagination page={page} pageSize={8} total={filtered.length} onChange={setPage} />
       </Card>
 
-      <Dialog open={inviteOpen} onClose={() => setInviteOpen(false)} title="Create user" icon="users">
+      <Dialog open={createOpen} onClose={() => setCreateOpen(false)} title="Create user" icon="users">
         <div className="space-y-4">
           <p className="rounded-card border border-line bg-surface px-3 py-2 text-xs text-ink-soft">
-            No email/SMS is sent — the portal has no messaging infrastructure. After
+            No email/SMS is sent â€” the portal has no messaging infrastructure. After
             creation you will see a one-time temporary password to hand over securely.
           </p>
           <Field label="Full name" required>
@@ -201,16 +200,16 @@ export default function AdminUsersPage() {
           )}
         </div>
         <div className="mt-5 flex justify-end gap-2">
-          <button onClick={() => setInviteOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">Cancel</button>
+          <button onClick={() => setCreateOpen(false)} className="h-9 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:bg-zinc-50">Cancel</button>
           <button
-            disabled={!validInvite || busy}
+            disabled={!validNewUser || busy}
             onClick={async () => {
               setBusy(true);
               setCreateError(null);
               const password = generateTemporaryPassword();
               try {
                 await admin.createUser({ name: name.trim(), email: email.trim(), cader, password });
-                setInviteOpen(false);
+                setCreateOpen(false);
                 setName(""); setEmail("");
                 users.reload();
                 // Displayed once; not stored in app state beyond this view.
@@ -229,12 +228,12 @@ export default function AdminUsersPage() {
             }}
             className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
           >
-            {busy ? "Creating…" : "Create user"}
+            {busy ? "Creatingâ€¦" : "Create user"}
           </button>
         </div>
       </Dialog>
 
-      {/* One-time credential reveal — never persisted, never re-shown. */}
+      {/* One-time credential reveal â€” never persisted, never re-shown. */}
       <Dialog open={createdCreds !== null} onClose={() => setCreatedCreds(null)} title="Temporary credentials" icon="lock">
         <div className="space-y-4">
           <p className="text-sm text-ink">
@@ -244,7 +243,7 @@ export default function AdminUsersPage() {
           <div className="grid gap-2 rounded-card border border-line bg-surface p-3 text-sm">
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-ink-soft">User</span>
-              <span className="font-medium text-ink">{createdCreds?.name} · {createdCreds?.email}</span>
+              <span className="font-medium text-ink">{createdCreds?.name} Â· {createdCreds?.email}</span>
             </div>
             <div className="flex items-center justify-between gap-3">
               <span className="text-xs text-ink-soft">Role / cadre</span>
@@ -272,7 +271,7 @@ export default function AdminUsersPage() {
         </div>
         <div className="mt-5 flex justify-end">
           <button onClick={() => setCreatedCreds(null)} className="h-9 rounded-field bg-forest-800 px-4 text-sm font-medium text-white hover:bg-forest-700">
-            Done — I&apos;ve shared it securely
+            Done â€” I&apos;ve shared it securely
           </button>
         </div>
       </Dialog>
@@ -290,7 +289,7 @@ export default function AdminUsersPage() {
         }
         message={
           intent === "remove"
-            ? `${actionUser?.name}'s account will be deactivated — sign-in is disabled immediately. The account can be reactivated later and all records are kept. Nothing is permanently deleted.`
+            ? `${actionUser?.name}'s account will be deactivated â€” sign-in is disabled immediately. The account can be reactivated later and all records are kept. Nothing is permanently deleted.`
             : actionUser?.status === "disabled"
               ? `Reactivate ${actionUser?.name}? They regain access per their role.`
               : `${actionUser?.name} will be locked out until reactivated.`

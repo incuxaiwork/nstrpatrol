@@ -56,3 +56,9 @@ export function initialsOf(name: string): string {
 export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
 }
+
+/** Display label for a backend geography value; empty/unknown renders honestly. */
+export function geoLabel(v: string | null | undefined): string {
+  const s = (v ?? "").trim();
+  return s.length > 0 ? s : "—";
+}

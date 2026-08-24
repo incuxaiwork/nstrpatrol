@@ -17,8 +17,7 @@ import { Icon } from "@/components/icons";
 import { ExportButton } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
-import { unitName } from "@/lib/mock/hierarchy";
-import { formatKm, formatMinutes, formatDate } from "@/lib/utils";
+import { formatKm, formatMinutes, formatDate, geoLabel } from "@/lib/utils";
 import { downloadJson, downloadCsv } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { PatrolsReportDialog } from "@/components/reports/dialogs";
@@ -157,7 +156,7 @@ export default function PatrolReportsPage() {
               render: (r) => (
                 <div>
                   <p className="font-medium text-ink">{r.title}</p>
-                  <p className="text-xs text-ink-soft">{r.type ? patrolTypeLabels[r.type] : "Field"} · {unitName(r.range)} · {unitName(r.beat)}</p>
+                  <p className="text-xs text-ink-soft">{r.type ? patrolTypeLabels[r.type] : "Field"} · {geoLabel(r.range)} · {geoLabel(r.beat)}</p>
                 </div>
               ) },
             { key: "leader", header: "Leader", render: (r) => <span className="text-ink-soft">{r.leader}</span> },
@@ -216,7 +215,7 @@ export default function PatrolReportsPage() {
                 <ReportStat label="Photos" value={r.photos} />
               </div>
               <p className="text-xs text-ink-faint">
-                {unitName(r.division)} · {unitName(r.range)} · {unitName(r.beat)} — led by {r.leader}
+                {geoLabel(r.division)} · {geoLabel(r.range)} · {geoLabel(r.beat)} — led by {r.leader}
               </p>
             </div>
           </Card>

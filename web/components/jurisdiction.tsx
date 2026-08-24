@@ -9,7 +9,6 @@
 import { Badge, Card, CardHeader } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { mapBeatsRaw } from "@/lib/mock/gis";
-import { unitName } from "@/lib/mock/hierarchy";
 import { authStatusLabel, authStatusTone, jurisdictionLabel, jurisdictionTone } from "@/lib/jurisdiction";
 import type { JurisdictionState, PatrolAuthorization } from "@/lib/types";
 
@@ -210,8 +209,8 @@ export function JurisdictionCompareCard({ authorization }: { authorization: Patr
             {rows.map((r) => (
               <tr key={r.label} className="border-t border-line">
                 <td className="py-2 pr-4 text-xs font-medium text-ink-soft">{r.label}</td>
-                <td className="py-2 pr-4 font-medium text-ink">{unitName(r.home)}</td>
-                <td className="py-2 font-medium text-[#8a4b00]">{unitName(r.auth)}</td>
+                <td className="py-2 pr-4 font-medium text-ink">{r.home || "—"}</td>
+                <td className="py-2 font-medium text-[#8a4b00]">{r.auth || "—"}</td>
               </tr>
             ))}
           </tbody>

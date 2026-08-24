@@ -168,10 +168,34 @@ export async function ingestEntity(
   user: { id: string; role: string; isAdmin: boolean },
 ): Promise<{ id: string }[]> {
   const schema = schemas[key] as z.ZodArray<z.ZodType<Record<string, unknown>>>;
-  const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string }[];
+  const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string; timestamp: Date }[];
   await authorizePatrols(user, records);
 
-  const data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
+  let data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
+  if (key === 'points' && data.length > 0) {
+    // Idempotent GPS ingest. The device omits per-point ids and re-uploads its
+    // whole PENDING set when a sync is interrupted (SyncManager flips
+    // syncStatus per patrol only after every chunk succeeds), so the same
+    // (patrolId, timestamp) fix can legitimately arrive twice. Drop fixes that
+    // are already stored — plus duplicates inside one batch — instead of
+    // double-counting them in paths, distance and coverage. Ordering,
+    // validity and ownership checks are unchanged.
+    const existing = await prisma.patrolPoint.findMany({
+      where: {
+        patrolId: { in: [...new Set(data.map((r) => r.patrolId))] },
+        timestamp: { in: data.map((r) => r.timestamp as Date) },
+      },
+      select: { patrolId: true, timestamp: true },
+    });
+    const seen = new Set(existing.map((e) => `${e.patrolId}|${e.timestamp.getTime()}`));
+    data = data.filter((r) => {
+      const k = `${r.patrolId}|${(r.timestamp as Date).getTime()}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  if (data.length === 0) return [];
   const model = (prisma as unknown as Record<string, { createManyAndReturn: (args: { data: unknown[] }) => Promise<{ id: string }[]> }>)[
     modelMap[key].model
   ];

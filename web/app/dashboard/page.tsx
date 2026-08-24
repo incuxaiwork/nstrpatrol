@@ -26,7 +26,6 @@ import {
   observationStatusTone,
 } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import type { AnalyticsDataset } from "@/lib/types";
 
@@ -96,7 +95,7 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        subtitle={`Operational picture — ${scope.forest} · ${unitName(scope.division)} · ${unitName(scope.range)} · ${unitName(scope.beat)}`}
+        subtitle={`Operational picture — ${scope.forest}`}
         actions={
           <div className="flex items-center gap-2">
             <button
@@ -251,7 +250,7 @@ export default function DashboardPage() {
           />
           <div className="divide-y divide-line">
             {data.incidentsToday.map((inc) => (
-              <div key={inc.title} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={inc.id} className="flex items-center gap-3 px-4 py-2.5">
                 <Badge tone={severityTone[inc.severity]} dot>
                   {severityLabel[inc.severity]}
                 </Badge>
@@ -322,7 +321,7 @@ export default function DashboardPage() {
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm text-ink">{p.title}</p>
                   <p className="text-xs text-ink-soft">
-                    {p.code} · {unitName(p.beat)} · {p.leader}
+                    {p.code} · {p.beat || "Unknown beat"} · {p.leader}
                   </p>
                 </div>
                 <Badge tone={patrolStatusTone[p.status]}>{patrolStatusLabel[p.status]}</Badge>

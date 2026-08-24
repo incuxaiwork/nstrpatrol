@@ -6,7 +6,7 @@ import { validateBody } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../lib/jwt';
-import { serializeUser, userSelect } from '../lib/user';
+import { ROLE_FOR_CADER, serializeUser, userSelect } from '../lib/user';
 
 export const authRouter = Router();
 
@@ -17,13 +17,12 @@ const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   fullName: z.string().trim().min(1).max(120),
-  role: z.enum(['ADMIN', 'RANGER']).default('RANGER'),
   cader: z.enum(['DFO', 'DyDFO', 'FRO', 'DyRO', 'FSO', 'FBO', 'ABO']).default('FBO'),
   phone: z.string().trim().max(30).nullish(),
 });
 
 authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (req, res) => {
-  const { email, password, fullName, role, cader, phone } = req.body;
+  const { email, password, fullName, cader, phone } = req.body;
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new HttpError(409, 'conflict', 'A user with that email already exists');
 
@@ -36,7 +35,9 @@ authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (
     throw new HttpError(403, 'forbidden', 'Admin access required to create users');
   }
 
-  const effectiveRole = isFirstUser ? 'ADMIN' : role;
+  // Authoritative mapping: the role is derived server-side from the
+  // organizational cader — a client-suggested role is never honored.
+  const effectiveRole = isFirstUser ? 'ADMIN' : ROLE_FOR_CADER[cader] ?? 'RANGER';
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
     data: {

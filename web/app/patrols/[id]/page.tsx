@@ -24,7 +24,7 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
-import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
+import { formatDateTime, formatMinutes, formatKm, geoLabel } from "@/lib/utils";
 import type { PatrolEvent } from "@/lib/types";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { PatrolReportDialog } from "@/components/reports/dialogs";
@@ -81,7 +81,7 @@ export default function PatrolDetailPage() {
         <JurisdictionBanner
           state={jurisdiction.state}
           authorization={auth}
-          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => unitName(id ?? "")).join(" / ") : undefined}
+          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => geoLabel(id ?? "")).join(" / ") : undefined}
           patrolArea={areaText}
         />
       </div>
