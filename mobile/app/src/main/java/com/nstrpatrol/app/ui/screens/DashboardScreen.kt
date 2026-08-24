@@ -87,11 +87,18 @@ fun DashboardScreen(
         IndiaTime.format("EEE, dd MMM yyyy · HH:mm:ss z", it)
     }
     tick
-    val durationText = if (patrolTimer.running.value) patrolTimer.elapsedFormatted() else "—"
 
     var dailyActivity by remember { mutableStateOf<DailyActivityEntity?>(null) }
     LaunchedEffect(tick, patrolTimer.running.value) {
         dailyActivity = ActivitySummary.computeForToday(dao)
+    }
+
+    // Live elapsed while a patrol is running; otherwise today's recorded
+    // patrol time (sum of GPS spans across the day), not a blank.
+    val durationText = if (patrolTimer.running.value) {
+        patrolTimer.elapsedFormatted()
+    } else {
+        formatPatrolMillis(dailyActivity?.totalPatrolMillis ?: 0L)
     }
 
     val activity = dailyActivity
@@ -364,6 +371,20 @@ fun DashboardScreen(
                 modifier = Modifier.weight(1f)
             )
         }
+    }
+}
+
+/** "1h 05m" / "12m 30s" / "45s" — same shape as the live patrol timer. */
+private fun formatPatrolMillis(ms: Long): String {
+    if (ms <= 0L) return "—"
+    val totalSec = ms / 1000
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return when {
+        h > 0 -> String.format(java.util.Locale.US, "%dh %02dm", h, m)
+        m > 0 -> String.format(java.util.Locale.US, "%dm %02ds", m, s)
+        else -> "${s}s"
     }
 }
 
