@@ -137,15 +137,21 @@ export interface GridPolygon {
   compId?: string;
 }
 
-/** All outer rings of a Polygon or MultiPolygon + overall bbox. */
+/** All outer rings of a Polygon or MultiPolygon (one entry per part). */
 function ringsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): LngLatRing[][] {
   const g = feature.geometry;
   if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
-  const coords = g.coordinates as unknown[][];
-  return coords.map((poly: unknown) => {
+  /* Normalize to a list of polygons first — for a plain Polygon the
+   * coordinates ARE the single polygon's ring list; taking [0] of each
+   * ring would grab a coordinate pair instead of the outer ring. */
+  const polys: unknown[][] =
+    g.type === "Polygon" ? [g.coordinates as unknown[]] : (g.coordinates as unknown[][]);
+  return polys.map((poly) => {
     const outer = Array.isArray(poly) ? poly[0] : poly;
     if (!Array.isArray(outer)) return [];
-    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+    return (outer as number[][])
+      .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      .map(([lon, lat]) => ({ lon, lat }));
   });
 }
 
@@ -187,22 +193,32 @@ export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExten
 
 export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentPolygon[] {
   const features = fc.features.filter(
-    (f) => f.geometry?.type === "Polygon" && Array.isArray((f.geometry.coordinates as unknown[])[0])
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
-  return features.map((f, i) => {
-    const ring = ringOf(f);
+  /* One polygon per outer ring — MultiPolygons expand into sibling parts
+   * sharing compNo/beat/area (deterministic -pN id suffixes) so no feature
+   * ever silently disappears from the map. */
+  return features.flatMap((f, i) => {
+    const compNo = String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`);
+    const beat = String(f.properties.BEAT ?? "");
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
-    return {
-      id: String(f.id ?? `api-comp-${i}`),
-      compNo: String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`),
-      beat: String(f.properties.BEAT ?? ""),
-      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
-      areaHa: Number.isFinite(area) ? area : 0,
-    };
+    const areaHa = Number.isFinite(area) ? area : 0;
+    const baseId = String(f.id ?? `api-comp-${i}`);
+    return ringsOf(f)
+      .filter((ring) => ring.length > 0)
+      .map((ring, part) => ({
+        id: part === 0 ? baseId : `${baseId}-p${part + 1}`,
+        compNo,
+        beat,
+        points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+        areaHa,
+      }));
   });
 }
 
