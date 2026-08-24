@@ -446,7 +446,7 @@ fun NstrApp() {
             LoginScreen(
                 onLogin = { email, password ->
                     try {
-                        auth.login(email, password)
+                        auth.login(email, password, database)
                         // DISABLED FOR BETA: needsSetup = auth.needsFaceSetup()
                         sessionStore.saveRoute(Route.Dashboard.key)
                         null
@@ -522,7 +522,7 @@ fun NstrApp() {
         Route.Settings -> SettingsScreen(
             settings = settings,
             onLogout = {
-                auth.logout()
+                auth.logout(database)
                 sessionStore.clear()
                 nav.resetTo(Route.Login)
             },
