@@ -50,7 +50,7 @@ import com.nstrpatrol.app.ui.theme.TextSecondary
 @Composable
 fun ActivePatrolOverlay(
     distanceMeters: Double,
-    avgSpeedKmh: Double,
+    currentSpeedKmh: Double,
     moveMinutes: Int,
     durationFormatted: String,
     currentMode: MovementMode,
@@ -104,7 +104,9 @@ fun ActivePatrolOverlay(
             )
             MetricItem(
                 label = stringResource(R.string.overlay_speed),
-                value = String.format("%.1f km/h", avgSpeedKmh)
+                // Live GPS speed, updated with every fix (not the patrol
+                // average) so the ranger sees real-time pace while travelling.
+                value = String.format("%.1f km/h", currentSpeedKmh)
             )
             MetricItem(
                 label = stringResource(R.string.overlay_move_min),

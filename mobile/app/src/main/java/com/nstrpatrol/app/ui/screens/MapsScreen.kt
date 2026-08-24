@@ -171,12 +171,16 @@ fun MapsScreen(
     val isRunning by patrolTimer.running.collectAsStateWithLifecycle()
     val movementInfo by movement.collectAsStateWithLifecycle()
     val liveTelemetry by telemetryManager.telemetry.collectAsStateWithLifecycle()
+
     var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(isRunning) {
         if (isRunning) {
             while (true) {
+                // 2 s cadence: distance/move-min stay fresh enough for a live
+                // feel; instantaneous SPEED below updates even faster because
+                // it derives straight from the telemetry StateFlow.
                 tick++
-                delay(5000)
+                delay(2000)
             }
         }
     }
@@ -184,8 +188,22 @@ fun MapsScreen(
 
     var patrolPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
     var totalDistance by remember { mutableStateOf(0.0) }
-    var avgSpeed by remember { mutableStateOf(0.0) }
     var moveMinutes by remember { mutableStateOf(0) }
+
+    // Live speed: prefer the GNSS receiver's own doppler speed (updates with
+    // every fix, ~1 s while tracking); fall back to the pace between the last
+    // two recorded points. Values under 1 km/h are GPS jitter — show 0.
+    val currentSpeedKmh: Double = run {
+        val gps = liveTelemetry.speedMps
+        val fromGps = if (gps != null && gps >= 0.28f) (gps * 3.6).coerceAtMost(160.0) else null
+        val derived = if (patrolPoints.size >= 2) {
+            val a = patrolPoints[patrolPoints.size - 2]
+            val b = patrolPoints.last()
+            val dt = (b.timestamp - a.timestamp) / 1000.0
+            if (dt > 0.5) computeDistance(listOf(a, b)) / dt * 3.6 else 0.0
+        } else 0.0
+        fromGps ?: derived.coerceIn(0.0, 160.0)
+    }
 
     LaunchedEffect(isRunning, tick) {
         // While a patrol is live, load its points; otherwise (e.g. the app was
@@ -201,12 +219,6 @@ fun MapsScreen(
             patrolPoints = dao.patrolPointsOrdered(pid)
             totalDistance = computeDistance(patrolPoints)
             if (isRunning) {
-                avgSpeed = if (patrolPoints.size >= 2) {
-                    val first = patrolPoints.first().timestamp
-                    val last = patrolPoints.last().timestamp
-                    val dur = (last - first) / 3_600_000.0
-                    if (dur > 0) (totalDistance / 1000) / dur else 0.0
-                } else 0.0
                 moveMinutes = dao.activeMovementSamplesForPatrol(pid) * 5 / 60
             }
         }
@@ -739,7 +751,7 @@ fun MapsScreen(
             if (isRunning) {
                 ActivePatrolOverlay(
                     distanceMeters = totalDistance,
-                    avgSpeedKmh = avgSpeed,
+                    currentSpeedKmh = currentSpeedKmh,
                     moveMinutes = moveMinutes,
                     durationFormatted = patrolTimer.elapsedFormatted(),
                     currentMode = movementInfo.mode,

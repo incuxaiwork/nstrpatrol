@@ -34,6 +34,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.nstrpatrol.app.data.PatrolState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -112,6 +113,16 @@ fun PatrolReportScreen(
     var backendPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
     var backendStatsModes by remember { mutableStateOf(emptyList<Pair<String, Int>>()) }
     var moveMinutes by remember { mutableStateOf(0) }
+
+    // Live GPS speed for the in-progress report: the telemetry StateFlow emits
+    // on every location fix, so this recomposes the speed card in real time
+    // while travelling (falls back to 0 when no fix is fresh).
+    val liveSpeedKmh: Double = run {
+        val graph = PatrolState.telemetryGraph(LocalContext.current)
+        val t by graph.telemetry.telemetry.collectAsStateWithLifecycle()
+        val gps = t.speedMps
+        if (gps != null && gps >= 0.28f) (gps * 3.6).coerceAtMost(160.0) else 0.0
+    }
     var estimatedSteps by remember { mutableStateOf<Int?>(null) }
     var locallyEnded by remember { mutableStateOf(false) }
     var showEndConfirm by remember { mutableStateOf(false) }
@@ -299,15 +310,25 @@ fun PatrolReportScreen(
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 ReportStatCard("Move min", "$calculatedMoveMinutes", Modifier.weight(1f))
-                ReportStatCard("GPS points", "${s?.pointCount ?: points.size}", Modifier.weight(1f))
+                // Live GPS speed while travelling; sits at 0.0 when there is
+                // no fresh fix (e.g. indoors).
+                ReportStatCard("Speed now", String.format("%.1f km/h", liveSpeedKmh), Modifier.weight(1f))
             }
             Spacer(Modifier.height(8.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+                ReportStatCard("GPS points", "${s?.pointCount ?: points.size}", Modifier.weight(1f))
                 ReportStatCard("Sync status", s?.syncStatus ?: "—", Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 ReportStatCard("Detected", s?.detectedMethod ?: "—", Modifier.weight(1f))
+                ReportStatCard("Avg speed", String.format("%.1f km/h", s?.avgSpeedKmh ?: 0.0), Modifier.weight(1f))
             }
 
             Spacer(Modifier.height(16.dp))
