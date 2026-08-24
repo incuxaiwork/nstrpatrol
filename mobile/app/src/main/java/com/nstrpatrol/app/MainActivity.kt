@@ -9,6 +9,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -163,23 +165,17 @@ fun NstrApp() {
     LaunchedEffect(nav.current) {
         sessionStore.saveRoute(nav.current.key)
     }
-    val timeManager = remember { TrustedTimeManager(context.applicationContext) }
-    val settings = remember { SettingsStore(context.applicationContext) }
-    val telemetryManager = remember { GpsTelemetryManager(context.applicationContext, settings) }
-    // Process-scoped timer: survives Activity recreation so stop flows and
-    // orphan recovery always see the real patrol state (see PatrolState doc).
+    // Process-scoped telemetry + timer: survives Activity recreation so a
+    // patrol keeps sampling (and stop flows / orphan recovery always see the
+    // real patrol state) no matter how often the system rebuilds the Activity
+    // mid-drive. See PatrolState doc.
+    val timeGraph = remember { PatrolState.telemetryGraph(context) }
     val patrolTimer = PatrolState.timer
-    val database = remember { NstrDatabase.getInstance(context.applicationContext) }
-    val telemetryRecorder = remember {
-        TelemetryRecorder(
-            appContext = context.applicationContext,
-            patrolTimer = patrolTimer,
-            telemetryManager = telemetryManager,
-            timeManager = timeManager,
-            dao = database.telemetryDao(),
-            settings = settings
-        )
-    }
+    val timeManager = remember { timeGraph.timeManager }
+    val settings = remember { timeGraph.settings }
+    val telemetryManager = remember { timeGraph.telemetry }
+    val database = remember { timeGraph.database }
+    val telemetryRecorder = remember { timeGraph.recorder }
     val api: BackendApiClient = auth.apiClient()
     val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     val connectivity = remember { ConnectivityObserver(context) }
@@ -230,6 +226,10 @@ fun NstrApp() {
         if (patrolTimer.patrolId == pid) {
             patrolTimer.stop()
             PatrolForegroundService.stop(context)
+            // Give the GPS radio back — the manager's periodic resync will
+            // re-register providers when a map screen or the next patrol
+            // needs them. Without this, listeners leak after every patrol.
+            telemetryManager.releaseLocationListeners()
         }
         syncScope.launch {
             val dao = database.telemetryDao()
@@ -277,6 +277,17 @@ fun NstrApp() {
 
     /** Kicks off the actual patrol once location permission is available. */
     fun beginPatrol() {
+        // Battery saver silently starves GPS (network provider disabled, GNSS
+        // throttled) — the #1 cause of "vehicle was detected but no track on
+        // the map". Warn up front instead of losing an unrepeatable patrol.
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isPowerSaveMode) {
+            Toast.makeText(
+                context,
+                "Battery saver is ON — GPS tracking may fail. Charge the phone or disable battery saver.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
         patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
         PatrolForegroundService.start(context)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

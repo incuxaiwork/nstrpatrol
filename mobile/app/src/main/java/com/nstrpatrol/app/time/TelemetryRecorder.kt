@@ -94,6 +94,17 @@ class TelemetryRecorder(
     private var lastPointTime: Long = 0L
     private var lastPersistedMode: MovementMode = MovementMode.UNKNOWN
     private var lastIntegrityLogAt: Long = 0L
+
+    // Fix watchdog state: elapsedRealtime of the last FRESH fix, and of the
+    // last forced provider re-registration (rate limit).
+    private var lastFreshFixElapsed = 0L
+    private var lastForceResyncElapsed = 0L
+
+    /** Set by [tryRecordPoint] when it accepted a fix this tick. */
+    private var tryRecordPointWasFresh = false
+
+    /** Force a provider resync after this long without a fresh fix. */
+    private val WATCHDOG_STALE_MS = 2L * 60_000L
     private var arPendingIntent: PendingIntent? = null
     private var sensorsRegistered = false
     private var stepSensorRegistered = false
@@ -138,6 +149,9 @@ class TelemetryRecorder(
         lastPointLon = null
         lastPointTime = 0L
         lastPersistedMode = MovementMode.UNKNOWN
+        lastFreshFixElapsed = 0L
+        lastForceResyncElapsed = 0L
+        tryRecordPointWasFresh = false
         registerSensors()
         registerArUpdates()
         patrolId?.let { pid ->
@@ -210,6 +224,30 @@ class TelemetryRecorder(
         val now = timeManager.trustedUtcNow()
 
         tryRecordPoint(pid, now, force = false)
+
+        // Fix watchdog: if we are mid-patrol but no fresh fix has arrived for
+        // a while, drop and re-register the location providers once. Battery
+        // saver transitions and provider flaps can silently starve an existing
+        // registration; re-adding it (and newly enabled providers, e.g. network
+        // coming back) restores the trace without user intervention.
+        val telemetryNow = telemetryManager.telemetry.value
+        val elapsedNow = SystemClock.elapsedRealtime()
+        if ((telemetryNow.ageMs in 0..60_000) || tryRecordPointWasFresh) {
+            lastFreshFixElapsed = elapsedNow
+            tryRecordPointWasFresh = false
+        }
+        if (lastFreshFixElapsed == 0L) {
+            // Anchor on first sample so a slow GNSS cold start doesn't
+            // immediately trigger the watchdog.
+            lastFreshFixElapsed = elapsedNow
+        } else if (elapsedNow - lastFreshFixElapsed > WATCHDOG_STALE_MS &&
+            elapsedNow - lastForceResyncElapsed > WATCHDOG_STALE_MS
+        ) {
+            Log.w(TAG, "No fresh GPS fix for ${WATCHDOG_STALE_MS / 1000}s during active patrol — forcing provider resync")
+            telemetryManager.forceResync()
+            lastForceResyncElapsed = elapsedNow
+            lastFreshFixElapsed = elapsedNow
+        }
 
         val readings = buildSensorReadings(pid, now)
         if (readings.isNotEmpty()) {
@@ -307,6 +345,7 @@ class TelemetryRecorder(
         lastPointLat = lat
         lastPointLon = lon
         lastPointTime = now
+        tryRecordPointWasFresh = true
         return true
     }
 

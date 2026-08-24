@@ -511,6 +511,34 @@ class GpsTelemetryManager(
         }
     }
 
+    /**
+     * Drops every provider registration and re-registers whatever is enabled
+     * right now. Used by the recorder's fix watchdog when a patrol is active
+     * but fixes have gone stale — the system silently drops or starves
+     * registrations more often than you'd hope (battery saver transitions,
+     * provider flaps), and a periodic [resync] alone cannot heal a provider
+     * that is still registered but no longer delivering.
+     */
+    fun forceResync() {
+        try {
+            locationManager.removeUpdates(locationListener)
+        } catch (_: Exception) {
+        }
+        registeredProviders.clear()
+        resync()
+    }
+
+    /** Releases all location registrations (e.g. after a patrol ends so the
+     *  GPS radio is not held for nothing). The periodic [resync] re-registers
+     *  providers on demand, so this is safe to call any time. */
+    fun releaseLocationListeners() {
+        try {
+            locationManager.removeUpdates(locationListener)
+        } catch (_: Exception) {
+        }
+        registeredProviders.clear()
+    }
+
     private fun pollProviderState() {
         handler.post(object : Runnable {
             override fun run() {
