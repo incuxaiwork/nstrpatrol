@@ -126,11 +126,11 @@ export default function PatrolsDashboardPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { id: "all", label: "All Patrols", count: rows.length },
-              { id: "ongoing", label: "🟢 Ongoing", count: ongoing.length },
-              { id: "completed", label: "✅ Completed", count: completed.length },
-              { id: "planned", label: "📅 Planned", count: planned.length },
-              { id: "authorized", label: "🔒 Authorized Exception", count: crossJurisdiction.length },
-              { id: "review", label: "⚠️ Requires Review", count: review.length },
+              { id: "ongoing", label: "Ongoing", count: ongoing.length },
+              { id: "completed", label: "Completed", count: completed.length },
+              { id: "planned", label: "Planned", count: planned.length },
+              { id: "authorized", label: "Authorized Exception", count: crossJurisdiction.length },
+              { id: "review", label: "Requires Review", count: review.length },
             ].map((f) => (
               <button
                 key={f.id}

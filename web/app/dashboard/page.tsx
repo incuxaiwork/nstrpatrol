@@ -84,7 +84,7 @@ export default function DashboardPage() {
             <span className="relative inline-flex size-3 rounded-full bg-danger" />
           </span>
           <div>
-            <p className="text-xs font-semibold text-danger">🚨 ACTIVE FIELD EMERGENCY (SOS ALERT)</p>
+            <p className="text-xs font-semibold text-danger">ACTIVE FIELD EMERGENCY (SOS ALERT)</p>
             <p className="text-xs text-ink">Ranger K. Ali · Beat 14 (Tummurukota) · Signal received 12 mins ago</p>
           </div>
         </div>
@@ -106,7 +106,7 @@ export default function DashboardPage() {
             {/* Weather & Fire Risk Badge */}
             <div className="flex items-center gap-2 rounded-field border border-line-strong bg-white px-3 py-1.5 text-xs shadow-card">
               <span className="font-medium text-ink-soft">Forest Weather:</span>
-              <span className="font-semibold text-ink">🌤️ 32°C Clear</span>
+              <span className="font-semibold text-ink">32°C Clear</span>
               <span className="text-ink-faint">|</span>
               <Badge tone="warning" dot>Fire Risk: Moderate</Badge>
             </div>
@@ -174,9 +174,9 @@ export default function DashboardPage() {
           <div className="flex flex-wrap items-center gap-1.5">
             {[
               { id: "all", label: "All Layers" },
-              { id: "tigers", label: "🐾 Tigers & Wildlife" },
-              { id: "incidents", label: "⚠️ Incidents Only" },
-              { id: "patrols", label: "🥾 Active Patrols" },
+              { id: "tigers", label: "Tigers & Wildlife" },
+              { id: "incidents", label: "Incidents Only" },
+              { id: "patrols", label: "Active Patrols" },
             ].map((f) => (
               <button
                 key={f.id}
@@ -226,7 +226,7 @@ export default function DashboardPage() {
                   Tummurukota Beat <span className="text-xs font-normal text-ink-soft">(V.P. South Range)</span>
                 </p>
                 <p className="text-xs font-medium text-danger">
-                  ⚠️ Threat: High Poaching Corridor &amp; Snare Risk · Unpatrolled for 14 days
+                  Threat: High Poaching Corridor &amp; Snare Risk · Unpatrolled for 14 days
                 </p>
               </div>
             </div>
@@ -246,7 +246,7 @@ export default function DashboardPage() {
                   Gotlagattu Beat <span className="text-xs font-normal text-ink-soft">(Markapur Range)</span>
                 </p>
                 <p className="text-xs font-medium text-danger">
-                  ⚠️ Threat: Timber Smuggling Vulnerability · Unpatrolled for 12 days
+                  Threat: Timber Smuggling Vulnerability · Unpatrolled for 12 days
                 </p>
               </div>
             </div>
