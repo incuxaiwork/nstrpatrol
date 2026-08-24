@@ -162,6 +162,7 @@ fun MapsScreen(
 
     var miniMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
+    var styleReady by remember { mutableStateOf(false) }
 
     // When true the camera auto-follows the live patrol track; a user drag/zoom
     // gesture switches it off so they can inspect the map freely.
@@ -231,11 +232,12 @@ fun MapsScreen(
         }
     }
 
-    // Fill beat & compartment sources once GIS data is loaded. The sources are
-    // created (empty) when the style renders, so boundaries appear reliably even
-    // if the GeoJSON arrives after the map itself.
-    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef) {
-        if (!gisRepo.isDataLoaded) return@LaunchedEffect
+    // Fill beat & compartment sources once GIS data is loaded AND the map style
+    // is ready. This handles two scenarios:
+    //   - Fast path (assets): data loads before style → fires when styleReady changes
+    //   - Slow path (backend): style loads before data → fires when isDataLoaded changes
+    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef, styleReady) {
+        if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
         val beatGeo = gisRepo.beatGeoJsonString
         val compGeo = gisRepo.compartmentGeoJsonString
         miniMapRef?.style?.let { style ->
@@ -372,12 +374,17 @@ fun MapsScreen(
                                     style.addSource(rasterSource)
                                     style.addSource(satelliteSource)
                                     style.addSource(streetSource)
-                                    // Beat & compartment sources are always present
-                                    // (empty until GIS data loads); the LaunchedEffect
-                                    // below fills them in once loadGisData() finishes,
-                                    // so the boundaries always appear.
-                                    style.addSource(GeoJsonSource("beats-geojson-source", EMPTY_FEATURE_COLLECTION))
-                                    style.addSource(GeoJsonSource("comp-geojson-source", EMPTY_FEATURE_COLLECTION))
+
+                                    // Beat & compartment sources: push immediately if
+                                    // GIS data is already loaded (assets are fast), or
+                                    // start empty and let the LaunchedEffect fill them
+                                    // later when the backend/cache loads finish.
+                                    val beatInit = if (gisRepo.isDataLoaded) gisRepo.beatGeoJsonString else ""
+                                    val compInit = if (gisRepo.isDataLoaded) gisRepo.compartmentGeoJsonString else ""
+                                    style.addSource(GeoJsonSource("beats-geojson-source",
+                                        if (beatInit.isNotEmpty()) beatInit else EMPTY_FEATURE_COLLECTION))
+                                    style.addSource(GeoJsonSource("comp-geojson-source",
+                                        if (compInit.isNotEmpty()) compInit else EMPTY_FEATURE_COLLECTION))
 
                                     // 1. MBTiles Basemap Layer (offline fallback base)
                                     style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
@@ -416,7 +423,7 @@ fun MapsScreen(
                                         FillLayer("comp-fill-layer", "comp-geojson-source").apply {
                                             setProperties(
                                                 PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.fillOpacity(0.04f),
+                                                PropertyFactory.fillOpacity(0.15f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
@@ -427,8 +434,8 @@ fun MapsScreen(
                                         LineLayer("comp-line-layer", "comp-geojson-source").apply {
                                             setProperties(
                                                 PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.lineWidth(1.2f),
-                                                PropertyFactory.lineOpacity(0.75f),
+                                                PropertyFactory.lineWidth(1.6f),
+                                                PropertyFactory.lineOpacity(0.85f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
@@ -513,6 +520,9 @@ fun MapsScreen(
                                         .target(LatLng(15.92, 79.15))
                                         .zoom(11.8)
                                         .build()
+
+                                    // Signal that the style + all layers are ready.
+                                    styleReady = true
 
                                     // Tap listener for map features (Beats & Compartments)
                                     map.addOnMapClickListener { latLng ->
