@@ -36,8 +36,6 @@ export default function PatrolsPage() {
   const [dateRange, setDateRange] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [sortKey, setSortKey] = useState<"start" | "end" | "duration" | "distance" | "ranger" | "status">("start");
-  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
   const now = new Date();
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
@@ -67,30 +65,8 @@ export default function PatrolsPage() {
     });
   }, [data, status, method, division, subDivision, range, beat, ranger, dateRange, query, cutoff]);
 
-  const sorted = useMemo(() => {
-    const copy = [...filtered];
-    const dir = sortDir === "asc" ? 1 : -1;
-    copy.sort((a, b) => {
-      switch (sortKey) {
-        case "start": return dir * (new Date(a.startScheduled).getTime() - new Date(b.startScheduled).getTime());
-        case "end": return dir * ((new Date(a.endActual ?? 0).getTime()) - (new Date(b.endActual ?? 0).getTime()));
-        case "duration": return dir * (a.durationMin - b.durationMin);
-        case "distance": return dir * (a.distanceKm - b.distanceKm);
-        case "ranger": return dir * a.leader.localeCompare(b.leader);
-        case "status": return dir * a.status.localeCompare(b.status);
-        default: return 0;
-      }
-    });
-    return copy;
-  }, [filtered, sortKey, sortDir]);
-
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
-  const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
-  const toggleSort = useCallback((key: typeof sortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("desc"); }
-  }, [sortKey]);
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const clearFilters = useCallback(() => {
     setStatus(""); setMethod(""); setDivision(""); setSubDivision("");
@@ -113,13 +89,6 @@ export default function PatrolsPage() {
   ];
   const methodOptions = [...new Set(data.map((p) => p.method).filter((m): m is NonNullable<Patrol["method"]> => Boolean(m)))];
   const rangerOptions = roster.data.map((r) => ({ value: r.id, label: r.name }));
-
-  const SortHeader = ({ label, sortField }: { label: string; sortField: typeof sortKey }) => (
-    <button onClick={() => toggleSort(sortField)} className="inline-flex items-center gap-1 text-left hover:text-forest-700">
-      {label}
-      {sortKey === sortField && <Icon name={sortDir === "asc" ? "chevronUp" : "chevronDown"} size={11} />}
-    </button>
-  );
 
   const activeFilters = [status, method, division, subDivision, range, beat, ranger, dateRange, query].filter(Boolean).length;
 
@@ -155,8 +124,8 @@ export default function PatrolsPage() {
             )}
           </div>
           <p className="text-xs text-ink-soft">
-            {sorted.length} patrol{sorted.length === 1 ? "" : "s"}
-            {sorted.length !== data.length && ` of ${data.length}`}
+            {filtered.length} patrol{filtered.length === 1 ? "" : "s"}
+            {filtered.length !== data.length && ` of ${data.length}`}
           </p>
         </div>
 
@@ -192,7 +161,7 @@ export default function PatrolsPage() {
           onRowClick={(r) => router.push(`/patrols/${r.id}`)}
           columns={[
             {
-              key: "code", header: <SortHeader label="Patrol" sortField="start" />,
+              key: "code", header: "Patrol",
               sortValue: (r) => r.code,
               render: (r) => (
                 <div>
@@ -202,7 +171,7 @@ export default function PatrolsPage() {
               ),
             },
             {
-              key: "ranger", header: <SortHeader label="Ranger" sortField="ranger" />,
+              key: "ranger", header: "Ranger",
               sortValue: (r) => r.leader,
               render: (r) => <span className="text-sm text-ink">{r.leader || "—"}</span>,
             },
@@ -212,22 +181,22 @@ export default function PatrolsPage() {
             { key: "beat", header: "Beat", sortValue: (r) => r.beat, render: (r) => <span className="text-ink-soft">{r.beat || "—"}</span> },
             { key: "method", header: "Method", sortValue: (r) => r.method ?? "", render: (r) => <span className="text-ink-soft">{r.method ? (patrolMethodLabels[r.method] ?? r.method) : "—"}</span> },
             {
-              key: "start", header: <SortHeader label="Start" sortField="start" />,
+              key: "start", header: "Start",
               sortValue: (r) => new Date(r.startScheduled).getTime(),
               render: (r) => <span className="text-ink-soft">{r.startScheduled ? timeAgo(r.startScheduled) : "—"}</span>,
             },
             {
-              key: "end", header: <SortHeader label="End" sortField="end" />,
+              key: "end", header: "End",
               sortValue: (r) => new Date(r.endActual ?? 0).getTime(),
               render: (r) => <span className="text-ink-soft">{r.endActual ? timeAgo(r.endActual) : "—"}</span>,
             },
             {
-              key: "duration", header: <SortHeader label="Duration" sortField="duration" />,
+              key: "duration", header: "Duration",
               sortValue: (r) => r.durationMin,
               render: (r) => <span className="text-ink-soft">{r.durationMin > 0 ? formatMinutes(r.durationMin) : "—"}</span>,
             },
             {
-              key: "distance", header: <SortHeader label="Distance" sortField="distance" />,
+              key: "distance", header: "Distance",
               sortValue: (r) => r.distanceKm,
               render: (r) => <span className="text-ink-soft">{r.distanceKm > 0 ? formatKm(r.distanceKm) : "—"}</span>,
             },
@@ -237,7 +206,7 @@ export default function PatrolsPage() {
               render: (r) => <span className="text-ink-soft">{r.observations > 0 ? r.observations : "—"}</span>,
             },
             {
-              key: "status", header: <SortHeader label="Status" sortField="status" />,
+              key: "status", header: "Status",
               sortValue: (r) => r.status,
               render: (r) => <Badge tone={patrolStatusTone[r.status]} dot>{patrolStatusLabel[r.status]}</Badge>,
             },
@@ -274,7 +243,7 @@ export default function PatrolsPage() {
           }
         />
 
-        <Pagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onChange={setPage} />
+        <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
       </Card>
     </div>
   );
