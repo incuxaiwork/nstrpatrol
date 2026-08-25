@@ -668,29 +668,67 @@ export const gis = {
    * project with ONE shared extent so the layers align in the same map space.
    * Strict: no mock fallback — failures surface as error states.
    */
-  spatial: async (): Promise<{
-    beats: BeatPolygon[];
-    compartments: CompartmentPolygon[];
-    boundary: BoundaryPolygon[];
-    grids: GridPolygon[];
-    /** Real lon/lat extent every layer shares (projection anchor). */
-    extent: GeoExtent | null;
-  }> => {
-    const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
-      api.gis.beats(),
-      api.gis.compartments(),
-      api.gis.boundary(),
-      api.gis.grids(),
-    ]);
-    const extent: GeoExtent | null = unionExtent(beatFc, compFc);
-    return {
-      beats: beatsFromGeoJson(beatFc, extent),
-      compartments: compartmentsFromGeoJson(compFc, extent),
-      boundary: boundariesFromGeoJson(boundaryFc, extent),
-      grids: gridsFromGeoJson(gridFc, extent),
-      extent,
+  spatial: (() => {
+    const TTL_MS = 30_000;
+    let cached: {
+      data: {
+        beats: BeatPolygon[];
+        compartments: CompartmentPolygon[];
+        boundary: BoundaryPolygon[];
+        grids: GridPolygon[];
+        extent: GeoExtent | null;
+      };
+      at: number;
+    } | null = null;
+    let inflight: Promise<{
+      beats: BeatPolygon[];
+      compartments: CompartmentPolygon[];
+      boundary: BoundaryPolygon[];
+      grids: GridPolygon[];
+      extent: GeoExtent | null;
+    }> | null = null;
+
+    async function fetchSpatial() {
+      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
+        api.gis.beats(),
+        api.gis.compartments(),
+        api.gis.boundary(),
+        api.gis.grids(),
+      ]);
+      const extent: GeoExtent | null = unionExtent(beatFc, compFc);
+      return {
+        beats: beatsFromGeoJson(beatFc, extent),
+        compartments: compartmentsFromGeoJson(compFc, extent),
+        boundary: boundariesFromGeoJson(boundaryFc, extent),
+        grids: gridsFromGeoJson(gridFc, extent),
+        extent,
+      };
+    }
+
+    return async (): Promise<{
+      beats: BeatPolygon[];
+      compartments: CompartmentPolygon[];
+      boundary: BoundaryPolygon[];
+      grids: GridPolygon[];
+      extent: GeoExtent | null;
+    }> => {
+      if (cached && Date.now() - cached.at < TTL_MS) return cached.data;
+      // Share one in-flight request across all concurrent callers.
+      if (inflight) return inflight;
+      inflight = fetchSpatial().then(
+        (data) => {
+          cached = { data, at: Date.now() };
+          inflight = null;
+          return data;
+        },
+        (err) => {
+          inflight = null;
+          throw err;
+        }
+      );
+      return inflight;
     };
-  },
+  })(),
   beats: async (): Promise<BeatPolygon[]> => (await gis.spatial()).beats,
   /** Compartments from the backend GIS API (GeoJSON → SVG polygons). */
   compartments: async (): Promise<CompartmentPolygon[]> => (await gis.spatial()).compartments,

@@ -69,9 +69,8 @@ export default function PatrolReplayPage() {
     setPlayback(f);
   };
 
-  if (loading || !patrol || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
+  if (loading || !patrol) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
-  if (spatial.error) return <ErrorState message={spatial.error.message} onRetry={spatial.reload} />;
 
   return (
     <div>
@@ -109,19 +108,25 @@ export default function PatrolReplayPage() {
               subtitle="Press play on the map to replay the patrol sequence"
             />
             <div className="p-3">
-              <MapWorkspace
-                mode="overview"
-                heightClass="h-[420px]"
-                replayPatrolId={patrol.id}
-                replayPoints={patrol.route}
-                liveBeats={spatial.data.beats}
-                compartments={spatial.data.compartments}
-                boundary={spatial.data.boundary}
-                grids={spatial.data.grids}
-                onProgress={(p) => setPlayback(p)}
-                seekSignal={seek}
-                onSelect={() => undefined}
-              />
+              {spatial.data ? (
+                <MapWorkspace
+                  mode="overview"
+                  heightClass="h-[420px]"
+                  replayPatrolId={patrol.id}
+                  replayPoints={patrol.route}
+                  liveBeats={spatial.data.beats}
+                  compartments={spatial.data.compartments}
+                  boundary={spatial.data.boundary}
+                  grids={spatial.data.grids}
+                  onProgress={(p) => setPlayback(p)}
+                  seekSignal={seek}
+                  onSelect={() => undefined}
+                />
+              ) : (
+                <div className="flex h-[420px] items-center justify-center text-xs text-ink-soft">
+                  {spatial.loading ? "Loading map layers…" : "Map unavailable"}
+                </div>
+              )}
             </div>
           </Card>
 

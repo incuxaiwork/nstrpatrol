@@ -42,7 +42,7 @@ export default function PatrolDetailPage() {
     [patrol, auths.data]
   );
 
-  if (loading || auths.loading || !auths.data || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
+  if (loading || !patrol || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
   if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the records")} />;
 
@@ -104,17 +104,23 @@ export default function PatrolDetailPage() {
           <Card>
             <CardHeader title="Route & live position" icon="map" subtitle="Press play to replay the patrol trace" />
             <div className="p-3">
-              <MapWorkspace
-                mode="overview"
-                heightClass="h-[300px]"
-                replayPatrolId={patrol.id}
-                replayPoints={patrol.route}
-                liveBeats={spatial.data.beats}
-                compartments={spatial.data.compartments}
-                boundary={spatial.data.boundary}
-                grids={spatial.data.grids}
-                onSelect={() => undefined}
-              />
+              {spatial.data ? (
+                <MapWorkspace
+                  mode="overview"
+                  heightClass="h-[300px]"
+                  replayPatrolId={patrol.id}
+                  replayPoints={patrol.route}
+                  liveBeats={spatial.data.beats}
+                  compartments={spatial.data.compartments}
+                  boundary={spatial.data.boundary}
+                  grids={spatial.data.grids}
+                  onSelect={() => undefined}
+                />
+              ) : (
+                <div className="flex h-[300px] items-center justify-center text-xs text-ink-soft">
+                  {spatial.loading ? "Loading map layers…" : "Map unavailable"}
+                </div>
+              )}
             </div>
           </Card>
 
