@@ -5,9 +5,9 @@
  * the admin chrome (sidebar/topbar) on the login screen.
  *
  * Auth check uses useSyncExternalStore with a null server snapshot to avoid
- * hydration mismatches. During the null (hydrating) phase, children render
- * immediately inside AppShell — no blank loading screen. Redirect only fires
- * after the subscription confirms the user is genuinely unauthenticated.
+ * hydration mismatches. During the null (hydrating) phase, AppShell renders
+ * immediately — no blank loading screen, no layout shift. Redirect only
+ * fires after the subscription confirms the user is genuinely unauthenticated.
  */
 
 import { useEffect, useSyncExternalStore } from "react";
@@ -31,8 +31,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, [authed, onLogin, router]);
 
   if (onLogin) return <>{children}</>;
-  // Render children immediately — no blank loading screen.
-  // If auth fails, the redirect effect fires on the next tick.
-  if (!authed) return <>{children}</>;
+  // Always render AppShell — no white screen, no layout shift.
+  // Redirect fires in background if auth fails.
   return <AppShell>{children}</AppShell>;
 }
