@@ -7,6 +7,7 @@
     <string name="nav_reports">রিপোর্ট</string>
     <string name="nav_settings">সেটিংস</string>
     <string name="action_save_details">বিবরণ সংরক্ষণ করুন</string>
+    <string name="action_start_patrol">টহল শুরু করুন</string>
     <string name="action_back">ফিরে যান</string>
     <string name="action_submit">জমা দিন</string>
     <string name="action_cancel">বাতিল করুন</string>
