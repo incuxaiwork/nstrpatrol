@@ -125,6 +125,13 @@ interface RequestOpts {
    * applies. Omitted → the shared 30 s default; global behavior unchanged.
    */
   ttlMs?: number;
+  /**
+   * Background requests should NOT trigger token clearing on 401. Only
+   * explicit logout or critical auth flows should wipe tokens. This prevents
+   * a background notification feed fetch from destroying the user's session
+   * when the access token has expired but the refresh token is still valid.
+   */
+  background?: boolean;
 }
 
 async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
@@ -223,11 +230,11 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
           const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
           setTokens(data.accessToken, data.refreshToken);
           res = await rawRequest(path, opts);
-        } else {
+        } else if (!opts.background) {
           clearTokens();
         }
       } catch {
-        clearTokens();
+        if (!opts.background) clearTokens();
       }
     }
 
@@ -714,7 +721,7 @@ export const sos = {
 
 export const alerts = {
   list: (query: { since?: string; limit?: number } = {}) =>
-    request<ApiAlert[]>("/api/alerts", { query: { ...query, limit: query.limit } }),
+    request<ApiAlert[]>("/api/alerts", { query: { ...query, limit: query.limit }, background: true }),
 };
 
 export const devices = {
