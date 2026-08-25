@@ -217,14 +217,6 @@ fun GpsDiagnosticsScreen(
 
         Spacer(Modifier.height(16.dp))
 
-        MovementModeCard(recorder = recorder)
-
-        Spacer(Modifier.height(16.dp))
-
-        AccuracyCircleMapVisualizer(telemetry = telemetry)
-
-        Spacer(Modifier.height(16.dp))
-
         GpsStatusChecklistCard(telemetry = telemetry, timeState = timeState)
 
         Spacer(Modifier.height(16.dp))
@@ -617,12 +609,32 @@ private fun CurrentLocationCard(
                 telemetry.longitude?.let { formatLongitude(it) } ?: "--"
             )
             Spacer(Modifier.height(8.dp))
-            LocationGridRow(
-                "Altitude",
-                telemetry.altitudeMeters?.let { String.format(Locale.US, "%.1f m (MSL)", it) } ?: "--",
-                "H. Accuracy",
-                "± ${formatOne(telemetry.horizontalAccuracyMeters)} m"
-            )
+            Row(modifier = Modifier.fillMaxWidth()) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Altitude", fontSize = 11.sp, color = TextSecondary)
+                    Text(
+                        telemetry.altitudeMeters?.let { String.format(Locale.US, "%.1f m (MSL)", it) } ?: "--",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextPrimary
+                    )
+                }
+                Column(modifier = Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("H. Accuracy", fontSize = 11.sp, color = TextSecondary)
+                    Text(
+                        text = telemetry.horizontalAccuracyMeters?.let { "${formatOne(it)} m" } ?: "--",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = accuracyStatusColor(telemetry.horizontalAccuracyMeters)
+                    )
+                    Text(
+                        text = accuracyLabel(telemetry.horizontalAccuracyMeters),
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = accuracyStatusColor(telemetry.horizontalAccuracyMeters)
+                    )
+                }
+            }
             Spacer(Modifier.height(8.dp))
             LocationGridRow(
                 "V. Accuracy",
@@ -990,193 +1002,6 @@ private fun LiveCompassCard(telemetry: GpsTelemetry) {
                 fontSize = 10.sp,
                 color = TextSecondary
             )
-        }
-    }
-}
-
-// -----------------------------------------------------------------------------
-// 8b. MOVEMENT MODE DETECTION CARD
-// -----------------------------------------------------------------------------
-@Composable
-private fun MovementModeCard(recorder: TelemetryRecorder) {
-    val movement by recorder.movement.collectAsStateWithLifecycle()
-    val samples by recorder.samplesRecorded.collectAsStateWithLifecycle()
-    val arGranted by recorder.arPermissionGranted.collectAsStateWithLifecycle()
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.gps_movement), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
-                Text(movement.mode.label, fontWeight = FontWeight.Bold, color = ForestGreen, fontSize = 14.sp)
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                MovementMode.entries.forEach { mode ->
-                    MovementModePill(mode, active = movement.mode == mode)
-                }
-            }
-
-            Spacer(Modifier.height(14.dp))
-
-            InfoRow(
-                "Source",
-                when (movement.source) {
-                    ModeSource.GMS_ACTIVITY_RECOGNITION -> "Google Activity Recognition"
-                    ModeSource.HEURISTIC -> "Heuristic (speed / cadence)"
-                }
-            )
-            InfoRow(
-                "Confidence",
-                if (movement.source == ModeSource.GMS_ACTIVITY_RECOGNITION)
-                    "${movement.confidence.toInt()}%"
-                else
-                    "n/a"
-            )
-            InfoRow(
-                "Speed",
-                movement.speedKmh?.let { String.format(Locale.US, "%.1f km/h", it) } ?: "--"
-            )
-            InfoRow(
-                "Step Cadence",
-                movement.stepCadence?.let { String.format(Locale.US, "%.0f steps/min", it) } ?: "--"
-            )
-            InfoRow("Patrol Points Recorded", samples.toString())
-
-            Spacer(Modifier.height(10.dp))
-
-            Text(
-                text = if (arGranted)
-                    "Activity Recognition active · falls back to heuristics if stale"
-                else
-                    "Activity Recognition permission missing · heuristic fallback in use",
-                fontSize = 10.sp,
-                color = TextSecondary
-            )
-        }
-    }
-}
-
-@Composable
-private fun MovementModePill(mode: MovementMode, active: Boolean) {
-    val color = if (active) ForestGreen else TextSecondary
-    Box(
-        modifier = Modifier
-            .background(
-                if (active) color.copy(alpha = 0.12f) else Color.Transparent,
-                RoundedCornerShape(8.dp)
-            )
-            .border(
-                1.dp,
-                if (active) color else OutlineCard,
-                RoundedCornerShape(8.dp)
-            )
-            .padding(horizontal = 8.dp, vertical = 6.dp)
-    ) {
-        Text(
-            text = mode.label,
-            fontSize = 11.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Medium,
-            color = color
-        )
-    }
-}
-
-// -----------------------------------------------------------------------------
-// 9. ACCURACY CIRCLE MAP VISUALIZER
-// -----------------------------------------------------------------------------
-@Composable
-private fun AccuracyCircleMapVisualizer(telemetry: GpsTelemetry) {
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.8f,
-        targetValue = 1.2f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1200, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
-    val accuracy = telemetry.horizontalAccuracyMeters
-    val accuracyLabelText = if (accuracy != null)
-        "± ${formatOne(accuracy)}m Accuracy Boundary"
-    else
-        "No fix · boundary unknown"
-
-    Card(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
-        colors = CardDefaults.cardColors(containerColor = Surface),
-        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(stringResource(R.string.gps_accuracy_map), fontWeight = FontWeight.Bold, fontSize = 16.sp, color = TextPrimary)
-                Text(telemetry.provider?.let { providerLabel(it) } ?: "No provider", fontSize = 11.sp, color = TextSecondary)
-            }
-
-            Spacer(Modifier.height(12.dp))
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(150.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFFE8F5E9)),
-                contentAlignment = Alignment.Center
-            ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val center = Offset(size.width / 2, size.height / 2)
-
-                    for (x in 0..size.width.toInt() step 40) {
-                        drawLine(Color(0xFFC8E6C9), Offset(x.toFloat(), 0f), Offset(x.toFloat(), size.height), strokeWidth = 1f)
-                    }
-                    for (y in 0..size.height.toInt() step 40) {
-                        drawLine(Color(0xFFC8E6C9), Offset(0f, y.toFloat()), Offset(size.width, y.toFloat()), strokeWidth = 1f)
-                    }
-
-                    drawCircle(
-                        color = ForestGreen.copy(alpha = 0.2f),
-                        radius = 45.dp.toPx() * pulseScale,
-                        center = center
-                    )
-                    drawCircle(
-                        color = ForestGreen,
-                        radius = 45.dp.toPx() * pulseScale,
-                        center = center,
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-
-                    drawCircle(color = ForestGreen, radius = 6.dp.toPx(), center = center)
-                    drawCircle(color = Color.White, radius = 3.dp.toPx(), center = center)
-                }
-
-                Text(
-                    text = accuracyLabelText,
-                    fontSize = 10.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = ForestGreen,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(8.dp)
-                        .background(Color.White.copy(alpha = 0.8f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
-                )
-            }
         }
     }
 }
