@@ -20,7 +20,7 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
 import { timeAgo, geoLabel } from "@/lib/utils";
-
+import { useEffect } from "react";
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
@@ -36,6 +36,9 @@ export default function ObservationDetailPage() {
   if (loading || !obs || spatial.loading || !spatial.data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
+    if (obs) {
+      console.log(obs);
+    }
   return (
     <div>
       <PageHeader

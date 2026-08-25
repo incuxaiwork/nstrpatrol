@@ -14,7 +14,6 @@ import type {
   PatrolEvent,
   PatrolMethod,
   PatrolStatus,
-  AdminUser,
   NotificationItem,
   Ranger,
 } from "@/lib/types";
@@ -463,6 +462,7 @@ export function patrolFromApi(
     // Authoritative server-resolved geography only. Unresolved levels stay
     // "" (rendered "—"), never guessed.
     division: p.geography?.division ?? "",
+    subDivision: p.geography?.subDivision ?? "",
     range: p.geography?.range ?? "",
     beat: p.geography?.beat ?? p.beat ?? "",
     teamId: "",
@@ -572,34 +572,6 @@ export function observationFromApi(i: {
         captureTime: i.occurredAt ?? i.reportedAt ?? new Date().toISOString(),
       };
     }),
-  };
-}
-
-/* ------------------------------------------------------------------ */
-/* Admin users ↔ backend users                                         */
-/* ------------------------------------------------------------------ */
-
-const roleIdFromApi: Record<string, string> = {
-  ADMIN: "admin",
-  RANGER: "ranger",
-};
-
-export function adminUserFromApi(u: {
-  id: string;
-  fullName?: string;
-  email?: string;
-  role?: string;
-  isActive?: boolean;
-  cader?: string | null;
-}): AdminUser {
-  return {
-    id: u.id,
-    name: u.fullName ?? "",
-    email: u.email ?? "",
-    roleId: u.role ? roleIdFromApi[u.role] ?? u.role.toLowerCase() : "ranger",
-    status: u.isActive === false ? "disabled" : "active",
-    division: "",
-    created: "",
   };
 }
 

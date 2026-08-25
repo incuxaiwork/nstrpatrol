@@ -1,270 +1,281 @@
 "use client";
 
 /**
- * Patrol Dashboard (PRD §6.1, new operating model) — answers
- * "what patrol activity is happening across the forest?".
- *
- * Rangers decide and conduct their patrols within their authorized
- * operational area. This dashboard MONITORS that activity — it does not
- * create or assign patrols. Exceptional (cross-jurisdiction) patrols are
- * surfaced for review and linked to their special authorizations.
+ * Patrols — operational patrol list with filtering, search, and pagination.
+ * Replaces the previous dashboard-style page with a clean data table.
  */
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
-import { authorizations, patrols, rangers } from "@/lib/services";
+import Link from "next/link";
+import { useMemo, useState, useCallback } from "react";
+import { patrols, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
-import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
-import { KpiCard } from "@/components/data";
-import { Donut, DonutLegend } from "@/components/charts";
+import { Card, Badge, PageHeader } from "@/components/ui";
+import { DataTable, FilterBar, FilterSelect, Pagination } from "@/components/data";
 import { Icon } from "@/components/icons";
-import { JurisdictionBadge } from "@/components/jurisdiction";
-import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
-import { patrolTypeLabels } from "@/lib/mock/patrols";
-import { timeAgo, formatKm, formatMinutes, geoLabel } from "@/lib/utils";
-import { ReportButton } from "@/components/reports/ReportButton";
-import { PatrolsReportDialog } from "@/components/reports/dialogs";
+import { patrolMethodLabels } from "@/lib/mock/patrols";
+import { timeAgo, formatMinutes, formatKm } from "@/lib/utils";
+import type { Patrol } from "@/lib/types";
 
-export default function PatrolsDashboardPage() {
+const PAGE_SIZE = 15;
+
+export default function PatrolsPage() {
   const router = useRouter();
-  const [reportOpen, setReportOpen] = useState(false);
-  const { data: patrolData, error, loading, reload } = useAsyncData(() => patrols.list());
-  const auths = useAsyncData(() => authorizations.list());
-  const rangersData = useAsyncData(() => rangers.list());
-  const rangersTotal = rangersData.data?.length ?? 0;
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list());
+  const roster = useAsyncData(() => rangers.list());
 
-  const rows = useMemo(() => {
-    if (!patrolData || !auths.data) return [];
-    return patrolData.map((p) => ({ patrol: p, jurisdiction: resolveJurisdiction(p, auths.data ?? []) }));
-  }, [patrolData, auths.data]);
+  const [status, setStatus] = useState("");
+  const [method, setMethod] = useState("");
+  const [division, setDivision] = useState("");
+  const [subDivision, setSubDivision] = useState("");
+  const [range, setRange] = useState("");
+  const [beat, setBeat] = useState("");
+  const [ranger, setRanger] = useState("");
+  const [dateRange, setDateRange] = useState("");
+  const [query, setQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [sortKey, setSortKey] = useState<"start" | "end" | "duration" | "distance" | "ranger" | "status">("start");
+  const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
-  if (loading || !patrolData || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const cutoff =
+    dateRange === "today" ? todayStart
+      : dateRange === "week" ? now.getTime() - 7 * 86_400_000
+        : dateRange === "month" ? now.getTime() - 30 * 86_400_000
+          : 0;
+
+  const filtered = useMemo(() => {
+    if (!data) return [];
+    const q = query.trim().toLowerCase();
+    return data.filter((p) => {
+      if (status && p.status !== status) return false;
+      if (method && p.method !== method) return false;
+      if (division && p.division !== division) return false;
+      if (subDivision && p.subDivision !== subDivision) return false;
+      if (range && p.range !== range) return false;
+      if (beat && p.beat !== beat) return false;
+      if (ranger && p.rangerId !== ranger && p.leader !== ranger) return false;
+      if (cutoff && new Date(p.startScheduled).getTime() < cutoff) return false;
+      if (q) {
+        const hay = [p.code, p.title, p.leader, p.beat, p.range, p.division].join(" ").toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      return true;
+    });
+  }, [data, status, method, division, subDivision, range, beat, ranger, dateRange, query, cutoff]);
+
+  const sorted = useMemo(() => {
+    const copy = [...filtered];
+    const dir = sortDir === "asc" ? 1 : -1;
+    copy.sort((a, b) => {
+      switch (sortKey) {
+        case "start": return dir * (new Date(a.startScheduled).getTime() - new Date(b.startScheduled).getTime());
+        case "end": return dir * ((new Date(a.endActual ?? 0).getTime()) - (new Date(b.endActual ?? 0).getTime()));
+        case "duration": return dir * (a.durationMin - b.durationMin);
+        case "distance": return dir * (a.distanceKm - b.distanceKm);
+        case "ranger": return dir * a.leader.localeCompare(b.leader);
+        case "status": return dir * a.status.localeCompare(b.status);
+        default: return 0;
+      }
+    });
+    return copy;
+  }, [filtered, sortKey, sortDir]);
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE));
+  const pageRows = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
+  const toggleSort = useCallback((key: typeof sortKey) => {
+    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    else { setSortKey(key); setSortDir("desc"); }
+  }, [sortKey]);
+
+  const clearFilters = useCallback(() => {
+    setStatus(""); setMethod(""); setDivision(""); setSubDivision("");
+    setRange(""); setBeat(""); setRanger(""); setDateRange(""); setQuery(""); setPage(1);
+  }, []);
+
+  if (loading || !data || roster.loading || !roster.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
-  const active = rows.filter((r) => r.patrol.status === "ongoing" || r.patrol.status === "delayed");
-  const ongoing = rows.filter((r) => r.patrol.status === "ongoing");
-  const completed = rows.filter((r) => r.patrol.status === "completed");
-  const today = rows.filter((r) => new Date(r.patrol.startScheduled).toDateString() === new Date().toDateString());
-  const exceptional = rows.filter((r) => r.jurisdiction.state !== "normal");
-  const crossJurisdiction = rows.filter((r) => r.jurisdiction.state === "authorized-exception");
-  const review = rows.filter((r) => r.jurisdiction.state === "requires-review" || r.jurisdiction.state === "pending-review");
-  const activeAuths = auths.data.filter((a) => a.status === "active");
+  // Derive filter options from real data only
+  const divisionOptions = [...new Set(data.map((p) => p.division).filter(Boolean))];
+  const subDivisionOptions = [
+    ...new Set(data.filter((p) => !division || p.division === division).map((p) => p.subDivision).filter(Boolean)),
+  ];
+  const rangeOptions = [
+    ...new Set(data.filter((p) => (!division || p.division === division) && (!subDivision || p.subDivision === subDivision)).map((p) => p.range).filter(Boolean)),
+  ];
+  const beatOptions = [
+    ...new Set(data.filter((p) => (!division || p.division === division) && (!subDivision || p.subDivision === subDivision) && (!range || p.range === range)).map((p) => p.beat).filter(Boolean)),
+  ];
+  const methodOptions = [...new Set(data.map((p) => p.method).filter((m): m is NonNullable<Patrol["method"]> => Boolean(m)))];
+  const rangerOptions = roster.data.map((r) => ({ value: r.id, label: r.name }));
 
-  const totalDistance = completed.reduce((a, r) => a + r.patrol.distanceKm, 0);
-  const totalDuration = completed.reduce((a, r) => a + r.patrol.durationMin, 0);
-  // Coverage is detail-only — list-level average is shown only when the
-  // backend actually provides per-patrol values.
-  const coverageValues = completed.map((r) => r.patrol.coveragePct).filter((c): c is number => c != null);
-  const avgCoverage = coverageValues.length
-    ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
-    : null;
-  const completedToday = completed.filter(
-    (r) => new Date(r.patrol.endActual ?? r.patrol.startScheduled).toDateString() === new Date().toDateString()
-  ).length;
-  const todayCross = today.filter((r) => r.jurisdiction.state === "authorized-exception").length;
-  const todayReview = today.filter(
-    (r) => r.jurisdiction.state === "requires-review" || r.jurisdiction.state === "pending-review"
-  ).length;
+  const SortHeader = ({ label, sortField }: { label: string; sortField: typeof sortKey }) => (
+    <button onClick={() => toggleSort(sortField)} className="inline-flex items-center gap-1 text-left hover:text-forest-700">
+      {label}
+      {sortKey === sortField && <Icon name={sortDir === "asc" ? "chevronUp" : "chevronDown"} size={11} />}
+    </button>
+  );
 
-  const statusSegments = [
-    { label: "Ongoing", value: ongoing.length, color: "#2E7D32" },
-    { label: "Completed", value: completed.length, color: "#1F4626" },
-    { label: "Delayed", value: rows.filter((r) => r.patrol.status === "delayed").length, color: "#FF8F00" },
-    { label: "Planned", value: rows.filter((r) => r.patrol.status === "planned").length, color: "#C3B091" },
-    { label: "Cancelled", value: rows.filter((r) => r.patrol.status === "cancelled").length, color: "#B3261E" },
-  ].filter((s) => s.value > 0);
+  const activeFilters = [status, method, division, subDivision, range, beat, ranger, dateRange, query].filter(Boolean).length;
 
   return (
     <div>
       <PageHeader
-        title="Patrol Dashboard"
-        subtitle="Monitoring patrol activity across the forest — rangers decide and conduct patrols within their authorized areas"
+        title="Patrols"
+        subtitle="Monitor and filter all patrol activity"
         actions={
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => reload()}
-              className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
-            >
-              Refresh
-            </button>
-            <ReportButton onClick={() => setReportOpen(true)} />
-            <Link
-              href="/patrols/permissions"
-              className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
-            >
-              Patrol permissions
-            </Link>
-          </div>
+          <Link
+            href="/patrols/permissions"
+            className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+          >
+            <Icon name="lock" size={15} /> Permissions
+          </Link>
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KpiCard label="Active patrols" value={active.length} icon="route" tone="success" tillDate={rows.length} today={active.length} onClick={() => router.push("/patrols/all?status=ongoing")} />
-        <KpiCard label="Started today" value={today.length} icon="play" tone="info" tillDate={rows.length} today={today.length} onClick={() => router.push("/patrols/all")} />
-        <KpiCard label="Completed (7d)" value={completed.length} icon="check" tone="forest" tillDate={completed.length} today={completedToday} onClick={() => router.push("/patrols/all?status=completed")} />
-        <KpiCard label="Rangers patrolling" value={ongoing.length ? ongoing.length : 0} icon="users" tone="khaki" tillDate={rangersTotal} today={ongoing.length} onClick={() => router.push("/rangers")} />
-        <KpiCard label="Cross-jurisdiction" value={crossJurisdiction.length} icon="map" tone="warning" tillDate={crossJurisdiction.length} today={todayCross} onClick={() => router.push("/patrols/all?jurisdiction=authorized")} />
-        <KpiCard label="Requiring review" value={review.length} icon="alert" tone="danger" tillDate={review.length} today={todayReview} onClick={() => router.push("/patrols/all?jurisdiction=review")} />
-      </div>
-
-      <div className="mt-4 grid gap-4 xl:grid-cols-3">
-        {/* Exceptional patrols */}
-        <Card className="xl:col-span-2">
-          <CardHeader
-            title="Exceptional patrols"
-            icon="alert"
-            iconTone="khaki"
-            subtitle="Patrols outside the ranger's normal jurisdiction — authorized, pending or requiring review"
-            actions={
-              <Link href="/patrols/permissions" className="text-xs font-medium text-forest-700 hover:underline">
-                Manage permissions →
-              </Link>
-            }
-          />
-          <div className="divide-y divide-line">
-            {exceptional.length === 0 && (
-              <p className="px-4 py-8 text-center text-sm text-ink-soft">No exceptional patrols. All activity is within normal jurisdiction.</p>
-            )}
-            {exceptional.slice(0, 6).map(({ patrol, jurisdiction }) => (
-              <button
-                key={patrol.id}
-                onClick={() => router.push(`/patrols/${patrol.id}`)}
-                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-forest-50/40"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink">{patrol.title}</p>
-                  <p className="mt-0.5 text-xs text-ink-soft">
-                    {patrol.leader} · {geoLabel(patrol.division)} / {geoLabel(patrol.range)} / {geoLabel(patrol.beat)} · {timeAgo(patrol.startScheduled)}
-                  </p>
-                  {jurisdiction.authorization && (
-                    <p className="mt-0.5 font-mono text-[11px] text-forest-800">
-                      {jurisdiction.authorization.id} · {jurisdiction.authorization.approvedBy ?? "—"}
-                    </p>
-                  )}
-                </div>
-                <JurisdictionBadge state={jurisdiction.state} />
+      <Card>
+        {/* Search + record count */}
+        <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <input
+              value={query}
+              onChange={(e) => { setQuery(e.target.value); setPage(1); }}
+              placeholder="Search patrols…"
+              className="h-9 w-56 rounded-field border border-line bg-white px-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-forest-600"
+            />
+            {activeFilters > 0 && (
+              <button onClick={clearFilters} className="text-xs text-forest-700 hover:underline">
+                Clear all ({activeFilters})
               </button>
-            ))}
+            )}
           </div>
-        </Card>
+          <p className="text-xs text-ink-soft">
+            {sorted.length} patrol{sorted.length === 1 ? "" : "s"}
+            {sorted.length !== data.length && ` of ${data.length}`}
+          </p>
+        </div>
 
-        {/* Live patrols */}
-        <Card>
-          <CardHeader title="Ongoing patrols" icon="activity" iconTone="forest" subtitle="Rangers currently in the field" />
-          <div className="space-y-2 p-3">
-            {ongoing.length === 0 && <p className="px-2 py-4 text-center text-sm text-ink-soft">No patrols currently in the field.</p>}
-            {ongoing.map(({ patrol, jurisdiction }) => (
-              <Link
-                key={patrol.id}
-                href={`/patrols/${patrol.id}`}
-                className="flex items-center gap-3 rounded-card border border-line bg-surface p-3 transition-colors hover:border-forest-600 hover:bg-forest-50"
-              >
-                <span className="relative flex size-2.5 shrink-0">
-                  <span className="absolute inline-flex size-full animate-ping rounded-full bg-success opacity-60" />
-                  <span className="relative inline-flex size-2.5 rounded-full bg-success" />
+        {/* Filters */}
+        <FilterBar onClear={clearFilters}>
+          <FilterSelect label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...Object.entries(patrolStatusLabel).map(([v, l]) => ({ value: v, label: l }))]} />
+          <FilterSelect label="Ranger" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...rangerOptions]} />
+          <FilterSelect label="Division" value={division} onChange={(v) => { setDivision(v); setSubDivision(""); setRange(""); setBeat(""); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...divisionOptions.map((d) => ({ value: d, label: d }))]} />
+          <FilterSelect label="Sub-Division" value={subDivision} onChange={(v) => { setSubDivision(v); setRange(""); setBeat(""); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...subDivisionOptions.map((d) => ({ value: d, label: d }))]} />
+          <FilterSelect label="Range" value={range} onChange={(v) => { setRange(v); setBeat(""); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...rangeOptions.map((r) => ({ value: r, label: r }))]} />
+          <FilterSelect label="Beat" value={beat} onChange={(v) => { setBeat(v); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...beatOptions.map((b) => ({ value: b, label: b }))]} />
+          <FilterSelect label="Method" value={method} onChange={(v) => { setMethod(v); setPage(1); }}
+            options={[{ value: "", label: "All" }, ...methodOptions.map((m) => ({ value: m, label: patrolMethodLabels[m] ?? m }))]} />
+          <FilterSelect label="Date" value={dateRange} onChange={(v) => { setDateRange(v); setPage(1); }}
+            options={[
+              { value: "", label: "All time" },
+              { value: "today", label: "Today" },
+              { value: "week", label: "Last 7 days" },
+              { value: "month", label: "Last 30 days" },
+            ]} />
+        </FilterBar>
+
+        {/* Table */}
+        <DataTable
+          rows={pageRows}
+          loading={loading}
+          onRowClick={(r) => router.push(`/patrols/${r.id}`)}
+          columns={[
+            {
+              key: "code", header: <SortHeader label="Patrol" sortField="start" />,
+              sortValue: (r) => r.code,
+              render: (r) => (
+                <div>
+                  <span className="font-mono text-xs font-medium text-forest-800">{r.code}</span>
+                  {r.title && <p className="truncate text-xs text-ink-soft">{r.title}</p>}
+                </div>
+              ),
+            },
+            {
+              key: "ranger", header: <SortHeader label="Ranger" sortField="ranger" />,
+              sortValue: (r) => r.leader,
+              render: (r) => <span className="text-sm text-ink">{r.leader || "—"}</span>,
+            },
+            { key: "division", header: "Division", sortValue: (r) => r.division, render: (r) => <span className="text-ink-soft">{r.division || "—"}</span> },
+            { key: "subDivision", header: "Sub-Div.", sortValue: (r) => r.subDivision, render: (r) => <span className="text-ink-soft">{r.subDivision || "—"}</span> },
+            { key: "range", header: "Range", sortValue: (r) => r.range, render: (r) => <span className="text-ink-soft">{r.range || "—"}</span> },
+            { key: "beat", header: "Beat", sortValue: (r) => r.beat, render: (r) => <span className="text-ink-soft">{r.beat || "—"}</span> },
+            { key: "method", header: "Method", sortValue: (r) => r.method ?? "", render: (r) => <span className="text-ink-soft">{r.method ? (patrolMethodLabels[r.method] ?? r.method) : "—"}</span> },
+            {
+              key: "start", header: <SortHeader label="Start" sortField="start" />,
+              sortValue: (r) => new Date(r.startScheduled).getTime(),
+              render: (r) => <span className="text-ink-soft">{r.startScheduled ? timeAgo(r.startScheduled) : "—"}</span>,
+            },
+            {
+              key: "end", header: <SortHeader label="End" sortField="end" />,
+              sortValue: (r) => new Date(r.endActual ?? 0).getTime(),
+              render: (r) => <span className="text-ink-soft">{r.endActual ? timeAgo(r.endActual) : "—"}</span>,
+            },
+            {
+              key: "duration", header: <SortHeader label="Duration" sortField="duration" />,
+              sortValue: (r) => r.durationMin,
+              render: (r) => <span className="text-ink-soft">{r.durationMin > 0 ? formatMinutes(r.durationMin) : "—"}</span>,
+            },
+            {
+              key: "distance", header: <SortHeader label="Distance" sortField="distance" />,
+              sortValue: (r) => r.distanceKm,
+              render: (r) => <span className="text-ink-soft">{r.distanceKm > 0 ? formatKm(r.distanceKm) : "—"}</span>,
+            },
+            {
+              key: "observations", header: "Obs.",
+              sortValue: (r) => r.observations,
+              render: (r) => <span className="text-ink-soft">{r.observations > 0 ? r.observations : "—"}</span>,
+            },
+            {
+              key: "status", header: <SortHeader label="Status" sortField="status" />,
+              sortValue: (r) => r.status,
+              render: (r) => <Badge tone={patrolStatusTone[r.status]} dot>{patrolStatusLabel[r.status]}</Badge>,
+            },
+            {
+              key: "actions", header: "",
+              render: (r) => (
+                <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                  <Link
+                    href={`/patrols/${r.id}`}
+                    title="View patrol"
+                    className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                  >
+                    <Icon name="eye" size={13} />
+                  </Link>
+                  <Link
+                    href={`/patrols/${r.id}/replay`}
+                    title="Replay"
+                    className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                  >
+                    <Icon name="play" size={13} />
+                  </Link>
                 </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-ink">{patrol.title}</p>
-                  <p className="text-xs text-ink-soft">
-                    {patrol.type ? patrolTypeLabels[patrol.type] : "Field"} · {patrol.leader} · {patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "in progress"}
-                  </p>
-                  {jurisdiction.state !== "normal" && (
-                    <p className="mt-1"><JurisdictionBadge state={jurisdiction.state} /></p>
-                  )}
-                </div>
-              </Link>
-            ))}
-          </div>
-        </Card>
-      </div>
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-        {/* Recent completed */}
-        <Card className="xl:col-span-1">
-          <CardHeader
-            title="Recent completed patrols"
-            icon="history"
-            actions={
-              <Link href="/patrols/all?status=completed" className="text-xs font-medium text-forest-700 hover:underline">
-                All completed →
-              </Link>
-            }
-          />
-          <div className="divide-y divide-line">
-            {completed.slice(0, 5).map(({ patrol }) => (
-              <Link
-                key={patrol.id}
-                href={`/patrols/${patrol.id}`}
-                className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-forest-50/40"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{patrol.title}</p>
-                  <p className="text-xs text-ink-soft">
-                    {patrol.code} · {patrol.coveragePct}% coverage · {timeAgo(patrol.endActual ?? patrol.startScheduled)}
-                  </p>
-                </div>
-                <Badge tone={patrolStatusTone[patrol.status]}>{patrolStatusLabel[patrol.status]}</Badge>
-              </Link>
-            ))}
-          </div>
-        </Card>
-
-        {/* Patrol mix + operational stats */}
-        <Card className="xl:col-span-1">
-          <CardHeader title="Patrol mix" icon="chart" subtitle="Status distribution and operational totals" />
-          <div className="flex items-center gap-4 px-4 py-4">
-            <Donut segments={statusSegments} centerValue={String(rows.length)} centerLabel="patrols" />
-            <div className="flex-1 space-y-2">
-              <DonutLegend segments={statusSegments} />
-              <dl className="space-y-1.5 border-t border-line pt-2 text-xs">
-                <div className="flex justify-between"><dt className="text-ink-soft">Distance (completed)</dt><dd className="font-semibold text-ink">{formatKm(totalDistance)}</dd></div>
-                <div className="flex justify-between"><dt className="text-ink-soft">Field time (completed)</dt><dd className="font-semibold text-ink">{formatMinutes(totalDuration)}</dd></div>
-                <div className="flex justify-between"><dt className="text-ink-soft">Avg coverage</dt><dd className="font-semibold text-ink">{avgCoverage != null ? `${avgCoverage}%` : "—"}</dd></div>
-              </dl>
+              ),
+            },
+          ]}
+          empty={
+            <div className="py-12 text-center">
+              <Icon name="route" size={32} className="mx-auto mb-3 text-ink-faint" />
+              <p className="text-sm text-ink-soft">No patrols found for the selected filters.</p>
+              {activeFilters > 0 && (
+                <button onClick={clearFilters} className="mt-2 text-xs text-forest-700 hover:underline">Clear filters</button>
+              )}
             </div>
-          </div>
-        </Card>
+          }
+        />
 
-        {/* Active authorizations */}
-        <Card className="xl:col-span-1">
-          <CardHeader
-            title="Active authorizations"
-            icon="lock"
-            iconTone="navy"
-            subtitle="Special patrol permissions currently valid"
-            actions={
-              <Link href="/patrols/permissions" className="text-xs font-medium text-forest-700 hover:underline">
-                All permissions →
-              </Link>
-            }
-          />
-          <div className="divide-y divide-line">
-            {activeAuths.length === 0 && <p className="px-4 py-6 text-center text-sm text-ink-soft">No active authorizations.</p>}
-            {activeAuths.slice(0, 5).map((a) => (
-              <Link
-                key={a.id}
-                href={`/patrols/permissions/${a.id}`}
-                className="flex items-center gap-3 px-4 py-2.5 transition-colors hover:bg-forest-50/40"
-              >
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-info-soft text-info">
-                  <Icon name="lock" size={14} />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-ink">{a.id}</p>
-                  <p className="text-xs text-ink-soft">
-                    {geoLabel(a.homeBeat)} → {geoLabel(a.authBeat)} · until {new Date(a.validUntil).toLocaleDateString()}
-                  </p>
-                </div>
-                <Badge tone="success">Active</Badge>
-              </Link>
-            ))}
-          </div>
-        </Card>
-      </div>
-      <PatrolsReportDialog open={reportOpen} onClose={() => setReportOpen(false)} />
+        <Pagination page={page} pageSize={PAGE_SIZE} total={sorted.length} onChange={setPage} />
+      </Card>
     </div>
   );
 }

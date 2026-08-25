@@ -146,6 +146,7 @@ export interface Patrol {
   status: PatrolStatus;
   objective: string;
   division: string;
+  subDivision: string;
   range: string;
   beat: string;
   compartment?: string;
@@ -396,70 +397,6 @@ export interface NotificationItem {
   read: boolean;
   /** Real deep link when one exists (e.g. SOS → /sos#<incidentId>). */
   href?: string;
-}
-
-export interface AdminUser {
-  id: string;
-  name: string;
-  email: string;
-  roleId: string;
-  status: "active" | "invited" | "disabled";
-  division: string;
-  lastActive?: string;
-  created: string;
-}
-
-export interface Role {
-  id: string;
-  name: string;
-  description: string;
-  userCount: number;
-  system: boolean;
-  permissions: Record<string, "full" | "view" | "manage" | "none">;
-}
-
-export interface PermissionEntry {
-  module: string;
-  label: string;
-  levels: { label: string; value: "full" | "view" | "manage" | "none" }[];
-}
-
-export interface AuditEntry {
-  id: string;
-  user: string;
-  action: string;
-  target: string;
-  module: string;
-  time: string;
-  ip: string;
-}
-
-export interface SiteSettings {
-  siteName: string;
-  timezone: string;
-  syncWindowHours: number;
-  sosWindowMin: number;
-  heatmapSensitivity: number;
-  offlineGraceHours: number;
-}
-
-export interface NotificationTemplate {
-  id: string;
-  name: string;
-  kind: string;
-  subject: string;
-  body: string;
-  enabled: boolean;
-}
-
-export interface MasterData {
-  species: { id: string; name: string; category: string; status: "present" | "rare" | "introduced" | "threatened" }[];
-  categories: { id: string; name: string; mappedTo: string; active: boolean }[];
-  waterBodyTypes: { id: string; name: string; active: boolean }[];
-  patrolTypes: { id: string; name: string; active: boolean }[];
-  patrolObjectives: { id: string; name: string; active: boolean }[];
-  vehicleTypes: { id: string; name: string; active: boolean }[];
-  weaponTypes: { id: string; name: string; active: boolean }[];
 }
 
 export interface SearchResult {

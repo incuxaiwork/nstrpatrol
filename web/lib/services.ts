@@ -25,13 +25,7 @@ import {
   monthlyTrend,
   scopeKpis,
 } from "@/lib/mock/analytics";
-import {
-  mockAudit,
-  mockMasterData,
-  mockNotificationTemplates,
-  mockRoles,
-  mockSettings,
-} from "@/lib/mock/admin";
+
 import {
   api,
   clearTokens,
@@ -40,7 +34,6 @@ import {
   type ApiUser,
 } from "@/lib/api";
 import {
-  adminUserFromApi,
   alertFromApi,
   beatsFromGeoJson,
   boundariesFromGeoJson,
@@ -60,16 +53,12 @@ import {
 } from "@/lib/backend-adapters";
 import type {
   AnalyticsDataset,
-  AdminUser,
-  AuditEntry,
   AuthorizationStatus,
   DashboardSummary,
   EquipmentItem,
   JurisdictionState,
   KpiSeries,
-  MasterData,
   NotificationItem,
-  NotificationTemplate,
   Observation,
   ObservationSeverity,
   Patrol,
@@ -77,9 +66,7 @@ import type {
   PatrolReport,
   PatrolStatus,
   Ranger,
-  Role,
   SearchResult,
-  SiteSettings,
   Team,
   Vehicle,
   Weapon,
@@ -1102,145 +1089,6 @@ export const workAnalytics = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Administration                                                     */
-/* ------------------------------------------------------------------ */
-
-const createdRoles: Role[] = [];
-const roleUpdates = new Map<string, Partial<Role>>();
-const removedRoleIds = new Set<string>();
-let settingsOverride: SiteSettings | undefined;
-const templateEnabledOverride = new Map<string, boolean>();
-const createdSpecies: { id: string; name: string; category: string; status: SpeciesStatus }[] = [];
-
-type SpeciesStatus = "present" | "rare" | "introduced" | "threatened";
-
-/**
- * Authoritative account options mirroring the backend exactly
- * (Prisma `Cader` enum + auth/register zod schema). The UI must never offer
- * a role the backend cannot honor: each option states the DB role it maps to
- * (DFO/DyDFO are administrative accounts; every field cadre is RANGER).
- */
-export const ACCOUNT_OPTIONS: { value: string; label: string; role: "ADMIN" | "RANGER" }[] = [
-  { value: "DFO", label: "Divisional Forest Officer (DFO)", role: "ADMIN" },
-  { value: "DyDFO", label: "Deputy Director, Field (DyDFO)", role: "ADMIN" },
-  { value: "FRO", label: "Forest Range Officer (FRO)", role: "RANGER" },
-  { value: "DyRO", label: "Deputy Range Officer (DyRO)", role: "RANGER" },
-  { value: "FSO", label: "Forest Section Officer (FSO)", role: "RANGER" },
-  { value: "FBO", label: "Forest Beat Officer (FBO)", role: "RANGER" },
-  { value: "ABO", label: "Assistant Beat Officer (ABO)", role: "RANGER" },
-];
-
-const roleRecord = (id: string): Role | undefined => {
-  if (removedRoleIds.has(id)) return undefined;
-  const created = createdRoles.find((r) => r.id === id);
-  if (created) return created;
-  const base = mockRoles.find((r) => r.id === id);
-  if (!base) return undefined;
-  return { ...base, ...roleUpdates.get(id) };
-};
-
-export const admin = {
-  users: async (): Promise<AdminUser[]> =>
-    remoteOnly(async () => (await api.users.list()).map(adminUserFromApi)),
-  // API GAP: roles/permissions have no backend endpoints — mock remains.
-  roles: async (): Promise<Role[]> => {
-    await delay();
-    return [...mockRoles.filter((r) => !removedRoleIds.has(r.id)).map((r) => ({ ...r, ...roleUpdates.get(r.id) })), ...createdRoles];
-  },
-  // API GAP: audit logs have no backend endpoints — mock remains.
-  audit: async (): Promise<AuditEntry[]> => {
-    await delay();
-    return mockAudit;
-  },
-  // API GAP: master data (species, water-body types, patrol types…) has no
-  // backend source — mock remains.
-  masterData: async (): Promise<MasterData> => {
-    await delay();
-    return { ...mockMasterData, species: [...mockMasterData.species, ...createdSpecies] };
-  },
-  createSpecies: async (input: { name: string; category: string; status: SpeciesStatus }): Promise<void> => {
-    await delay();
-    createdSpecies.unshift({ id: `sp-created-${createdSpecies.length + 1}`, ...input });
-  },
-  // API GAP: site settings have no backend endpoints (options API exists but
-  // is not wired for these keys) — mock remains.
-  settings: async (): Promise<SiteSettings> => {
-    await delay();
-    return settingsOverride ?? mockSettings;
-  },
-  saveSettings: async (patch: Partial<SiteSettings>): Promise<SiteSettings> => {
-    await delay();
-    settingsOverride = { ...(settingsOverride ?? mockSettings), ...patch };
-    return settingsOverride;
-  },
-  // API GAP: notification templates have no backend endpoints — mock remains.
-  notificationTemplates: async (): Promise<NotificationTemplate[]> => {
-    await delay();
-    return mockNotificationTemplates.map((t) => ({ ...t, enabled: templateEnabledOverride.get(t.id) ?? t.enabled }));
-  },
-  setTemplateEnabled: async (id: string, enabled: boolean): Promise<void> => {
-    await delay();
-    templateEnabledOverride.set(id, enabled);
-  },
-  /**
-   * Admin-created account (no email infrastructure exists — nothing is ever
-   * "sent"). The caller generates a cryptographically random temporary
-   * password, shows it to the administrator exactly once, and is responsible
-   * for passing it on securely. The password is forwarded straight to the
-   * backend (which salts+hashes it) and never stored or logged here.
-   * The portal role is derived server-side from the cader — never sent.
-   */
-  createUser: async (input: {
-    name: string;
-    email: string;
-    cader: string;
-    phone?: string;
-    password: string;
-  }): Promise<AdminUser> =>
-    remoteOnly(async () => {
-      const created = await api.auth.register({
-        email: input.email,
-        password: input.password,
-        fullName: input.name,
-        cader: input.cader,
-        phone: input.phone?.trim() ? input.phone.trim() : undefined,
-      });
-      return adminUserFromApi(created);
-    }),
-  setUserStatus: async (id: string, status: AdminUser["status"]): Promise<AdminUser | undefined> => {
-    // "invited" has no backend transition (no invite endpoint) — API GAP.
-    if (status === "invited") return undefined;
-    const updated =
-      status === "active" ? await api.users.activate(id) : await api.users.deactivate(id);
-    return adminUserFromApi(updated);
-  },
-  removeUser: async (id: string): Promise<boolean> =>
-    remoteOnly(async () => {
-      await api.users.deactivate(id);
-      return true;
-    }),
-  createRole: async (input: { name: string; description: string; permissions: Role["permissions"] }): Promise<Role> => {
-    await delay();
-    const id = `role-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-    const record: Role = { id, name: input.name, description: input.description, userCount: 0, system: false, permissions: input.permissions };
-    createdRoles.unshift(record);
-    return record;
-  },
-  updateRole: async (id: string, patch: Partial<Role>): Promise<Role | undefined> => {
-    await delay();
-    if (!roleRecord(id)) return undefined;
-    roleUpdates.set(id, { ...roleUpdates.get(id), ...patch });
-    return roleRecord(id);
-  },
-  removeRole: async (id: string): Promise<boolean> => {
-    await delay();
-    if (!roleRecord(id) || roleRecord(id)?.system) return false;
-    removedRoleIds.add(id);
-    return true;
-  },
-};
-
-/* ------------------------------------------------------------------ */
 /* Forest hierarchy                                                    */
 /* ------------------------------------------------------------------ */
 
@@ -1290,7 +1138,7 @@ export const global = {
             id: u.id,
             title: u.fullName,
             subtitle: u.email ?? "",
-            href: u.role === "ADMIN" ? "/admin/users" : `/rangers/${u.id}`,
+            href: `/rangers/${u.id}`,
           });
         }
         for (const p of patrols) {

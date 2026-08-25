@@ -627,9 +627,8 @@ export const auth = {
 export const users = {
   list: (query: { role?: string; q?: string } = {}) =>
     request<ApiUser[]>("/api/users", { query }),
-  update: (id: string, patch: Partial<Pick<ApiUser, "fullName" | "role" | "cader" | "phone">> & { password?: string }) =>
+  update: (id: string, patch: Partial<Pick<ApiUser, "fullName" | "phone">>) =>
     request<ApiUser>(`/api/users/${id}`, { method: "PATCH", body: patch }),
-  activate: (id: string) => request<ApiUser>(`/api/users/${id}/activate`, { method: "POST" }),
   deactivate: (id: string) => request<ApiUser>(`/api/users/${id}/deactivate`, { method: "POST" }),
 };
 
@@ -755,38 +754,10 @@ async function requestForm<T>(path: string, file: File, fieldName = "file"): Pro
   return (await res.json()) as T;
 }
 
-export interface ApiAppRelease {
-  id: string;
-  versionCode: number;
-  versionName: string;
-  apkKey: string;
-  sha256: string;
-  sizeBytes: number;
-  notes: string | null;
-  isLatest: boolean;
-  createdAt: string;
-}
-
-export const appReleases = {
-  /** Public — mirrors what the mobile updater polls. */
-  latest: () => request<ApiAppRelease>("/api/app/latest", { auth: false }),
-  list: () => request<ApiAppRelease[]>("/api/app"),
-  uploadApk: (file: File) =>
-    requestForm<{ key: string; size: number; sha256: string; contentType: string }>("/api/uploads", file),
-  register: (body: {
-    versionCode: number;
-    versionName: string;
-    apkKey: string;
-    sha256: string;
-    sizeBytes: number;
-    notes?: string;
-  }) => request<ApiAppRelease>("/api/app", { method: "POST", body }),
-};
-
 export const health = {
   check: () => request<ApiHealth>("/api/health", { auth: false }),
 };
 
 /** Aggregate client mirroring the backend router tree (for discoverability + tooling). */
-export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, appReleases, health };
+export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, health };
 export default api;
