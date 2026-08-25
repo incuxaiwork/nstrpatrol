@@ -471,8 +471,36 @@ export function patrolFromApi(
     startScheduled: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
     startActual: firstPoint?.t ?? p.startedAt ?? undefined,
     endActual: lastPoint?.t ?? p.endedAt ?? undefined,
-    distanceKm: p.stats?.distanceKm ?? 0,
-    durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
+    distanceKm: (() => {
+      if (p.stats?.distanceKm) return p.stats.distanceKm;
+      // Fallback: compute from GPS points when PostGIS is unavailable
+      // (stats.distanceKm = 0). Simple Haversine sum over consecutive pairs.
+      if (points.length >= 2) {
+        let total = 0;
+        for (let i = 1; i < points.length; i++) {
+          const dLat = ((points[i].lat - points[i - 1].lat) * Math.PI) / 180;
+          const dLng = ((points[i].lng - points[i - 1].lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos((points[i - 1].lat * Math.PI) / 180) *
+              Math.cos((points[i].lat * Math.PI) / 180) *
+              Math.sin(dLng / 2) ** 2;
+          total += 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+        return Math.round(total * 100) / 100;
+      }
+      return 0;
+    })(),
+    durationMin: (() => {
+      if (p.stats?.durationSeconds) return Math.round(p.stats.durationSeconds / 60);
+      // Fallback: compute from GPS point timestamps when backend stats are
+      // 0 (PostGIS unavailable) but the points carry real timestamps.
+      if (firstPoint?.t && lastPoint?.t) {
+        const spanMs = new Date(lastPoint.t).getTime() - new Date(firstPoint.t).getTime();
+        if (spanMs > 0) return Math.round(spanMs / 60_000);
+      }
+      return 0;
+    })(),
     // Real coverage arrives only via GET /api/patrols/:id/coverage/summary on
     // the DETAIL view (services.patrols.get merges it); lists never carry it.
     checkpoints: undefined,

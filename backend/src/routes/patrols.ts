@@ -359,8 +359,17 @@ patrolsRouter.get('/:id', async (req, res) => {
     distanceKm = Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100;
     durationSeconds = Math.round(stats[0]?.durationSeconds ?? 0);
   } catch {
-    // PostGIS may not be available — fall back to simple count
-    pointCount = await prisma.patrolPoint.count({ where: { patrolId: id } });
+    // PostGIS may not be available — fall back to plain-PG queries that
+    // don't need the extension. Duration is pure EXTRACT(EPOCH); distance
+    // requires ST_Length and stays 0 without PostGIS.
+    const fallback = await prisma.$queryRaw<{ points: bigint; durationSeconds: number }[]>`
+      SELECT COUNT(id)::bigint AS points,
+        COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
+      FROM "PatrolPoint"
+      WHERE "patrolId" = ${id}
+    `;
+    pointCount = Number(fallback[0]?.points ?? 0n);
+    durationSeconds = Math.round(fallback[0]?.durationSeconds ?? 0);
   }
 
   const stepsAgg = await prisma.stepReading.aggregate({
