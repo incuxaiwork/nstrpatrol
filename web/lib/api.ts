@@ -317,10 +317,13 @@ export interface ApiPatrol {
     subDivisionId: string | null;
     division: string | null;
   } | null;
+  /** Aggregated patrol stats (distanceKm, durationSeconds). Provided by both
+   *  the list and detail endpoints. */
+  stats?: ApiPatrolStats;
 }
 
 export interface ApiPatrolStats {
-  points: number;
+  points?: number;
   distanceKm: number;
   durationSeconds: number;
 }

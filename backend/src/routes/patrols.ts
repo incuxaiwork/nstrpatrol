@@ -185,7 +185,64 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
 
   // Batched geography enrichment (≤1 query per hierarchy level for the list).
   const geoIndex = await resolvePatrolGeographyIndex(patrols);
-  res.json(patrols.map((p) => ({ ...p, geography: geographyFor(p, geoIndex) })));
+
+  // Batched stats enrichment — single SQL for all patrol IDs so the list
+  // carries distance/duration without N+1. PostGIS fall-back: when
+  // ST_Length fails the whole query is caught and re-run without the
+  // spatial column (duration still available via pure EXTRACT).
+  const ids = patrols.map((p) => p.id);
+  let statsMap = new Map<string, { distanceKm: number; durationSeconds: number }>();
+  if (ids.length > 0) {
+    try {
+      const rows = await prisma.$queryRaw<{ patrolId: string; distanceKm: number; durationSeconds: number }[]>`
+        SELECT "patrolId",
+          COALESCE(
+            CASE WHEN COUNT(id) >= 2 THEN
+              ST_Length(
+                ST_MakeLine(
+                  ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+                  ORDER BY timestamp
+                )::geography
+              ) / 1000.0
+            ELSE 0 END, 0
+          ) AS "distanceKm",
+          COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
+        FROM "PatrolPoint"
+        WHERE "patrolId" = ANY(${ids}::text[])
+        GROUP BY "patrolId"
+      `;
+      for (const r of rows) {
+        statsMap.set(r.patrolId, {
+          distanceKm: Math.round(r.distanceKm * 100) / 100,
+          durationSeconds: Math.round(r.durationSeconds),
+        });
+      }
+    } catch {
+      // PostGIS unavailable — duration still computable via pure PG.
+      const rows = await prisma.$queryRaw<{ patrolId: string; durationSeconds: number }[]>`
+        SELECT "patrolId",
+          COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
+        FROM "PatrolPoint"
+        WHERE "patrolId" = ANY(${ids}::text[])
+        GROUP BY "patrolId"
+      `;
+      for (const r of rows) {
+        statsMap.set(r.patrolId, {
+          distanceKm: 0,
+          durationSeconds: Math.round(r.durationSeconds),
+        });
+      }
+    }
+  }
+
+  res.json(patrols.map((p) => {
+    const s = statsMap.get(p.id);
+    return {
+      ...p,
+      geography: geographyFor(p, geoIndex),
+      stats: s ?? { distanceKm: 0, durationSeconds: 0 },
+    };
+  }));
 });
 
 const liveQuery = z.object({
