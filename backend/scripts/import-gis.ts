@@ -47,7 +47,6 @@ async function parseGeoJsonFile(file: string): Promise<GeoFeatureCollection> {
 }
 
 async function importBeats(beats: GeoFeatureCollection): Promise<number> {
-  // Beats carry no stable id in the source; key on name so the import is idempotent.
   const names = beats.features
     .map((f) => asText(f.properties['Beat'], '')?.toUpperCase() ?? '')
     .filter((n) => n.length > 0);
@@ -55,59 +54,93 @@ async function importBeats(beats: GeoFeatureCollection): Promise<number> {
     await prisma.beat.deleteMany({ where: { name: { in: names } } });
   }
 
+  // Bulk insert in batches of 20.
+  const BATCH = 20;
   let count = 0;
-  for (const feature of beats.features) {
-    if (!feature.geometry) continue;
-    const p = feature.properties;
-    const name = asText(p['Beat'], '') ?? '';
-    if (!name) continue;
+  const valid = beats.features.filter(f => f.geometry && asText(f.properties['Beat'], ''));
 
-    const beat = await prisma.beat.create({
-      data: {
-        name,
-        section: asText(p['Section']),
-        rangeName: asText(p['Range']),
-        division: asText(p['Division']),
-        circle: asText(p['Circle']),
-        district: asText(p['District']),
-        areaHa: asFloat(p['Area_ha']),
-      },
-    });
-    await prisma.$executeRaw`
-      UPDATE "Beat" SET geom = ST_GeomFromGeoJSON(${JSON.stringify(feature.geometry)}::text) WHERE id = ${beat.id}
-    `;
-    count++;
+  for (let i = 0; i < valid.length; i += BATCH) {
+    const batch = valid.slice(i, i + BATCH);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    for (const feature of batch) {
+      const p = feature.properties;
+      const name = asText(p['Beat'], '') ?? '';
+      values.push(`(gen_random_uuid()::text, $${idx}::text, $${idx + 1}::text, $${idx + 2}::text, $${idx + 3}::text, $${idx + 4}::text, $${idx + 5}::text, $${idx + 6}::double precision, now(), now())`);
+      params.push(name, asText(p['Section']), asText(p['Range']), asText(p['Division']), asText(p['Circle']), asText(p['District']), asFloat(p['Area_ha']));
+      idx += 7;
+      count++;
+    }
+
+    const sql = `INSERT INTO "Beat" (id, "name", "section", "rangeName", "division", "circle", "district", "areaHa", "createdAt", "updatedAt")
+      VALUES ${values.join(', ')}
+      RETURNING id, name`;
+    const inserted = await prisma.$queryRawUnsafe<{ id: string; name: string }[]>(sql, ...params);
+
+    // Set geometry for each inserted beat.
+    for (let j = 0; j < batch.length; j++) {
+      const beatId = inserted[j].id;
+      const geom = JSON.stringify(batch[j].geometry);
+      await prisma.$executeRaw`UPDATE "Beat" SET geom = ST_GeomFromGeoJSON(${geom}::text) WHERE id = ${beatId}`;
+    }
+    process.stdout.write(`  Inserted ${Math.min(i + BATCH, valid.length)}/${valid.length}\r`);
   }
+
+  console.log();
   return count;
 }
 
 async function importCompartments(compartments: GeoFeatureCollection): Promise<number> {
   await prisma.compartment.deleteMany({});
 
-  let count = 0;
-  for (const feature of compartments.features) {
-    if (!feature.geometry) continue;
-    const p = feature.properties;
-    const compNo = asText(p['COMP_NO'], '') ?? '';
-    if (!compNo) continue;
-
-    const beatName = asText(p['BEAT'], '')?.toUpperCase() ?? '';
-    const beat = beatName
-      ? await prisma.beat.findFirst({ where: { name: beatName }, select: { id: true } })
-      : null;
-
-    const comp = await prisma.compartment.create({
-      data: {
-        compNo,
-        areaHa: asFloat(p['AREA_HA']),
-        beatId: beat?.id ?? null,
-      },
-    });
-    await prisma.$executeRaw`
-      UPDATE "Compartment" SET geom = ST_GeomFromGeoJSON(${JSON.stringify(feature.geometry)}::text) WHERE id = ${comp.id}
-    `;
-    count++;
+  // Build beat name → id map in one query (includes fuzzy aliases).
+  const allBeats = await prisma.beat.findMany({ select: { id: true, name: true } });
+  const beatMap = new Map<string, string>();
+  for (const b of allBeats) {
+    beatMap.set(b.name, b.id);
+    // Also map normalized aliases: "G.V.PALLI" → stored as-is, but
+    // source may have "G V PALLI" — store both directions.
+    beatMap.set(b.name.replace(/\./g, ''), b.id);
+    beatMap.set(b.name.replace(/\s+/g, ''), b.id);
   }
+
+  // Bulk insert in batches of 50 using raw SQL for speed.
+  const BATCH = 50;
+  let count = 0;
+  const valid = compartments.features.filter(f => f.geometry && asText(f.properties['COMP_NO'], ''));
+
+  for (let i = 0; i < valid.length; i += BATCH) {
+    const batch = valid.slice(i, i + BATCH);
+    const values: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    for (const feature of batch) {
+      const p = feature.properties;
+      const compNo = asText(p['COMP_NO'], '') ?? '';
+      const areaHa = asFloat(p['AREA_HA']);
+      const beatName = asText(p['BEAT'], '')?.toUpperCase() ?? '';
+
+      // Fuzzy match: exact → strip dots → strip spaces
+      let beatId: string | null = null;
+      if (beatName) {
+        beatId = beatMap.get(beatName) ?? beatMap.get(beatName.replace(/\./g, '')) ?? beatMap.get(beatName.replace(/\s+/g, '')) ?? null;
+      }
+
+      values.push(`(gen_random_uuid()::text, $${idx}::text, $${idx + 1}::double precision, $${idx + 2}::text, ST_GeomFromGeoJSON($${idx + 3}::text), now())`);
+      params.push(compNo, areaHa, beatId, JSON.stringify(feature.geometry));
+      idx += 4;
+      count++;
+    }
+
+    const sql = `INSERT INTO "Compartment" (id, "compNo", "areaHa", "beatId", geom, "createdAt") VALUES ${values.join(', ')}`;
+    await prisma.$executeRawUnsafe(sql, ...params);
+    process.stdout.write(`  Inserted ${Math.min(i + BATCH, valid.length)}/${valid.length}\r`);
+  }
+
+  console.log();
   return count;
 }
 

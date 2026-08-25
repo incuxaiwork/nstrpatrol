@@ -30,7 +30,8 @@ uploadsRouter.get('/*key', async (req, res, next) => {
 
 uploadsRouter.use(requireAuth);
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 50 * 1024 * 1024 } });
+// APK releases are ~150 MB; keep generous headroom so release uploads pass.
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 256 * 1024 * 1024 } });
 
 uploadsRouter.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) throw new HttpError(400, 'validation_error', 'file field is required');

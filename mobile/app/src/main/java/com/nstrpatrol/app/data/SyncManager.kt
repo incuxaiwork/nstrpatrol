@@ -38,6 +38,7 @@ object SyncManager {
     suspend fun syncNow(
         dao: TelemetryDao,
         api: BackendApiClient,
+        deviceId: String? = null,
         onProgress: (Float) -> Unit = {}
     ): SyncSummary = withContext(Dispatchers.IO) {
         val totalItems = dao.sessionsToSync().size +
@@ -77,9 +78,9 @@ object SyncManager {
             advance(count)
         }
 
-        syncPatrols(dao, api, ok, fail)
-        syncPoints(dao, api, ok, fail)
-        syncReadings(dao, api, ok, fail)
+        syncPatrols(dao, api, deviceId, ok, fail)
+        syncPoints(dao, api, deviceId, ok, fail)
+        syncReadings(dao, api, deviceId, ok, fail)
         runCatching { dao.resetLocalPathIncidentsToPending() }
         syncIncidents(dao, api, ok, fail)
         syncActivitySegments(dao, api, ok, fail)
@@ -114,6 +115,7 @@ object SyncManager {
     private suspend fun syncPatrols(
         dao: TelemetryDao,
         api: BackendApiClient,
+        deviceId: String?,
         ok: (Int) -> Unit,
         fail: (Int, Throwable?) -> Unit
     ) {
@@ -137,6 +139,7 @@ object SyncManager {
                 put("totalSteps", session.totalSteps)
                 put("moveMinutes", session.moveMinutes)
                 session.detectedMethod?.let { put("detectedMethod", it) }
+                deviceId?.let { put("deviceId", it) }
             }
             // Idempotent: create first; if that fails (e.g. the patrol already
             // exists on the server from a prior attempt) fall back to completing
@@ -166,6 +169,7 @@ object SyncManager {
     private suspend fun syncPoints(
         dao: TelemetryDao,
         api: BackendApiClient,
+        deviceId: String?,
         ok: (Int) -> Unit,
         fail: (Int, Throwable?) -> Unit
     ) {
@@ -183,6 +187,7 @@ object SyncManager {
                     }
                     val body = JSONObject().apply {
                         put("patrolId", patrolId)
+                        deviceId?.let { put("deviceId", it) }
                         put("batches", JSONArray().put(JSONObject().apply {
                             put("entity", "points")
                             put("records", records)
@@ -197,6 +202,7 @@ object SyncManager {
                             put("id", patrolId)
                             put("type", "WALK")
                             put("name", "Patrol")
+                            deviceId?.let { put("deviceId", it) }
                         })
                         true
                     }.getOrDefault(false)
@@ -208,6 +214,7 @@ object SyncManager {
                         }
                         val body = JSONObject().apply {
                             put("patrolId", patrolId)
+                            deviceId?.let { put("deviceId", it) }
                             put("batches", JSONArray().put(JSONObject().apply {
                                 put("entity", "points")
                                 put("records", records)
@@ -242,6 +249,7 @@ object SyncManager {
     private suspend fun syncReadings(
         dao: TelemetryDao,
         api: BackendApiClient,
+        deviceId: String?,
         ok: (Int) -> Unit,
         fail: (Int, Throwable?) -> Unit
     ) {
@@ -297,6 +305,7 @@ object SyncManager {
                 runCatching {
                     val body = JSONObject().apply {
                         put("patrolId", patrolId)
+                        deviceId?.let { put("deviceId", it) }
                         put("batches", JSONArray().apply {
                             group.forEach { put(it) }
                         })
@@ -312,6 +321,7 @@ object SyncManager {
                             put("id", patrolId)
                             put("type", "WALK")
                             put("name", "Patrol")
+                            deviceId?.let { put("deviceId", it) }
                         })
                         true
                     }.getOrDefault(false)
@@ -320,6 +330,7 @@ object SyncManager {
                         val retrySuccess = runCatching {
                             val body = JSONObject().apply {
                                 put("patrolId", patrolId)
+                                deviceId?.let { put("deviceId", it) }
                                 put("batches", JSONArray().apply {
                                     group.forEach { put(it) }
                                 })
@@ -574,18 +585,20 @@ object SyncManager {
     }
 
     /**
-     * Pulls all patrols and their GPS points from the backend into the local
-     * database. This enables cross-device viewing: a patrol recorded on device A
-     * becomes visible (with route map) on device B after pulling.
+     * Pulls patrol data from the backend into the local Room DB.
      *
-     * Only upserts — existing local data (SYNCED or PENDING) is not overwritten.
-     * Returns the number of patrols pulled.
+     * Incremental: compares server updatedAt against local serverUpdatedAt
+     * to detect stale data. Existing patrols are refreshed when the server
+     * version is newer. Partial pulls (session saved but sub-data missing)
+     * are detected and retried.
+     *
+     * Returns the number of patrols pulled or refreshed.
      */
     suspend fun pullFromBackend(
         dao: TelemetryDao,
         api: BackendApiClient
     ): Int = withContext(Dispatchers.IO) {
-        Log.i(TAG, "Pulling patrols from backend")
+        Log.i(TAG, "Pulling patrols from backend (incremental)")
         val arr = api.getJsonArray("/api/patrols") ?: return@withContext 0
         var pulled = 0
         for (i in 0 until arr.length()) {
@@ -593,10 +606,22 @@ object SyncManager {
             val id = o.optString("id")
             if (id.isEmpty()) continue
 
-            // Skip if we already have a local session for this patrol
-            if (dao.patrolSession(id) != null) {
-                pulled++
-                continue
+            // Parse server updatedAt for staleness check
+            val serverUpdatedAtMs = parseIsoMs(o.optString("updatedAt"))
+
+            // Check local session — skip only if we have it AND it's not stale
+            val existing = dao.patrolSession(id)
+            if (existing != null) {
+                // Staleness: server is newer → refresh. Also refresh if local
+                // has 0 points (partial pull from a previous failed pull).
+                val localPoints = dao.patrolPointCount(id)
+                val isStale = serverUpdatedAtMs > existing.serverUpdatedAt
+                val isPartial = localPoints == 0 && existing.pointCount > 0
+                if (!isStale && !isPartial) {
+                    pulled++
+                    continue
+                }
+                Log.d(TAG, "Patrol $id stale (server=${serverUpdatedAtMs}, local=${existing.serverUpdatedAt}, localPoints=$localPoints, serverPoints=${existing.pointCount}) — refreshing")
             }
 
             // Fetch full detail from backend
@@ -630,7 +655,8 @@ object SyncManager {
                 avgSpeedKmh = if (!detail.isNull("avgSpeedKmh")) detail.optDouble("avgSpeedKmh") else 0.0,
                 pointCount = pointCount,
                 detectedMethod = detectedMethod,
-                syncStatus = "SYNCED"
+                syncStatus = "SYNCED",
+                serverUpdatedAt = serverUpdatedAtMs
             )
             dao.upsertPatrolSession(session)
 

@@ -22,11 +22,14 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "seed:org": "tsx scripts/seed-org.ts",
-    "import:gis": "tsx scripts/import-gis.ts"
+    "import:gis": "tsx scripts/import-gis.ts",
+    "import:personnel": "tsx scripts/import-personnel.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1112.0",
+    "@types/compression": "^1.8.1",
     "bcryptjs": "^3.0.3",
+    "compression": "^1.8.1",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",

@@ -9,6 +9,8 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -53,6 +55,7 @@ import com.nstrpatrol.app.data.ConnectivityObserver
 import com.nstrpatrol.app.data.NetworkStatus
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
+import com.nstrpatrol.app.data.ServerHealthMonitor
 import com.nstrpatrol.app.data.SettingsStore
 import com.nstrpatrol.app.data.SyncController
 import com.nstrpatrol.app.data.SyncScheduler
@@ -163,31 +166,28 @@ fun NstrApp() {
     LaunchedEffect(nav.current) {
         sessionStore.saveRoute(nav.current.key)
     }
-    val timeManager = remember { TrustedTimeManager(context.applicationContext) }
-    val settings = remember { SettingsStore(context.applicationContext) }
-    val telemetryManager = remember { GpsTelemetryManager(context.applicationContext, settings) }
-    // Process-scoped timer: survives Activity recreation so stop flows and
-    // orphan recovery always see the real patrol state (see PatrolState doc).
+    // Process-scoped telemetry + timer: survives Activity recreation so a
+    // patrol keeps sampling (and stop flows / orphan recovery always see the
+    // real patrol state) no matter how often the system rebuilds the Activity
+    // mid-drive. See PatrolState doc.
+    val timeGraph = remember { PatrolState.telemetryGraph(context) }
     val patrolTimer = PatrolState.timer
-    val database = remember { NstrDatabase.getInstance(context.applicationContext) }
-    val telemetryRecorder = remember {
-        TelemetryRecorder(
-            appContext = context.applicationContext,
-            patrolTimer = patrolTimer,
-            telemetryManager = telemetryManager,
-            timeManager = timeManager,
-            dao = database.telemetryDao(),
-            settings = settings
-        )
-    }
+    val timeManager = remember { timeGraph.timeManager }
+    val settings = remember { timeGraph.settings }
+    val telemetryManager = remember { timeGraph.telemetry }
+    val database = remember { timeGraph.database }
+    val telemetryRecorder = remember { timeGraph.recorder }
     val api: BackendApiClient = auth.apiClient()
     val syncScope = remember { CoroutineScope(SupervisorJob() + Dispatchers.IO) }
     val connectivity = remember { ConnectivityObserver(context) }
 
     // Schedule background sync: every 30 min while online + an immediate
     // network-gated sync so data flows as soon as connectivity returns.
+    // ServerHealthMonitor polls /api/health/ping every 15s so we know the
+    // backend itself is reachable — OS "online" alone is not enough.
     LaunchedEffect(Unit) {
         NetworkStatus.attach(context.applicationContext)
+        ServerHealthMonitor.attach(context.applicationContext)
         SyncScheduler.schedule(context.applicationContext)
         // Recover orphaned ACTIVE sessions: the in-memory patrol timer is lost
         // when the process is killed (force-stop, crash, reboot), so any session
@@ -230,6 +230,10 @@ fun NstrApp() {
         if (patrolTimer.patrolId == pid) {
             patrolTimer.stop()
             PatrolForegroundService.stop(context)
+            // Give the GPS radio back — the manager's periodic resync will
+            // re-register providers when a map screen or the next patrol
+            // needs them. Without this, listeners leak after every patrol.
+            telemetryManager.releaseLocationListeners()
         }
         syncScope.launch {
             val dao = database.telemetryDao()
@@ -257,7 +261,7 @@ fun NstrApp() {
                 withContext(Dispatchers.Main) { nav.navigateTo(Route.AllPatrols) }
             }
             // ...then best-effort sync; failures must not block navigation above.
-            SyncController.sync(dao, api)
+            SyncController.sync(dao, api, auth.deviceId())
             runCatching { api.completePatrol(pid) }
         }
     }
@@ -277,6 +281,17 @@ fun NstrApp() {
 
     /** Kicks off the actual patrol once location permission is available. */
     fun beginPatrol() {
+        // Battery saver silently starves GPS (network provider disabled, GNSS
+        // throttled) — the #1 cause of "vehicle was detected but no track on
+        // the map". Warn up front instead of losing an unrepeatable patrol.
+        val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isPowerSaveMode) {
+            Toast.makeText(
+                context,
+                "Battery saver is ON — GPS tracking may fail. Charge the phone or disable battery saver.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
         patrolTimer.start(timeManager.trustedUtcNow(), System.currentTimeMillis())
         PatrolForegroundService.start(context)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -348,16 +363,20 @@ fun NstrApp() {
         }
     }
 
-    // Sync is mobile -> server only, and event-driven: flush local buffers
-    // whenever connectivity is (re)gained (via ConnectivityObserver's network
-    // callback — no polling). Gated by the user's sync setting: only runs in
-    // Auto mode. Flipping Manual -> Auto also triggers an immediate sync.
+    // Auto-sync: flush PENDING rows whenever device is online AND server
+    // /api/health/ping is reachable. Health is polled every 15s by
+    // ServerHealthMonitor (no auth, no DB) so a waking backend is used within
+    // seconds. Gated by syncMode==Auto; flipping Manual→Auto also triggers.
     LaunchedEffect(Unit) {
-        combine(connectivity.isOnline, settings.syncMode) { online, mode ->
-            online && mode == SettingsStore.MODE_AUTO
+        combine(
+            connectivity.isOnline,
+            ServerHealthMonitor.reachable,
+            settings.syncMode
+        ) { online, reachable, mode ->
+            online && reachable && mode == SettingsStore.MODE_AUTO
         }.collect { shouldSync ->
             if (shouldSync) {
-                SyncController.sync(database.telemetryDao(), api)
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
             }
         }
     }
@@ -368,10 +387,13 @@ fun NstrApp() {
     // out of date (and the "sync queue" looks stuck).
     LaunchedEffect(patrolTimer.running.value) {
         while (patrolTimer.running.value) {
-            if (NetworkStatus.online.value && settings.syncMode.value == SettingsStore.MODE_AUTO) {
-                SyncController.sync(database.telemetryDao(), api)
+            if (NetworkStatus.online.value &&
+                ServerHealthMonitor.reachable.value &&
+                settings.syncMode.value == SettingsStore.MODE_AUTO
+            ) {
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
             }
-            delay(3 * 60 * 1000L)
+            delay(60_000L)
         }
     }
 
@@ -411,7 +433,7 @@ fun NstrApp() {
         if (isOnline) {
             isExiting = true
             syncScope.launch {
-                SyncController.sync(database.telemetryDao(), api)
+                SyncController.sync(database.telemetryDao(), api, auth.deviceId())
                 SyncController.state.first {
                     it is SyncController.SyncState.Success || it is SyncController.SyncState.Failed
                 }
@@ -435,7 +457,7 @@ fun NstrApp() {
             LoginScreen(
                 onLogin = { email, password ->
                     try {
-                        auth.login(email, password)
+                        auth.login(email, password, database)
                         // DISABLED FOR BETA: needsSetup = auth.needsFaceSetup()
                         sessionStore.saveRoute(Route.Dashboard.key)
                         null
@@ -490,7 +512,8 @@ fun NstrApp() {
             onTabSelected = nav::selectTab,
             onOpenPatrol = { patrolId -> nav.navigateTo(Route.PatrolReport(patrolId)) },
             dao = database.telemetryDao(),
-            api = api
+            api = api,
+            deviceId = auth.deviceId()
         )
 
         Route.Reports -> ReportsScreen(
@@ -510,7 +533,7 @@ fun NstrApp() {
         Route.Settings -> SettingsScreen(
             settings = settings,
             onLogout = {
-                auth.logout()
+                auth.logout(database)
                 sessionStore.clear()
                 nav.resetTo(Route.Login)
             },

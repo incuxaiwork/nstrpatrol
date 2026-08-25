@@ -142,8 +142,9 @@ fun MapsScreen(
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             mbtilesServer.start()
-            gisRepo.loadGisData()
         }
+        // Assets load instantly; backend syncs in background.
+        gisRepo.loadGisData()
     }
 
     DisposableEffect(Unit) {
@@ -162,6 +163,7 @@ fun MapsScreen(
 
     var miniMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
+    var styleReady by remember { mutableStateOf(false) }
 
     // When true the camera auto-follows the live patrol track; a user drag/zoom
     // gesture switches it off so they can inspect the map freely.
@@ -171,12 +173,16 @@ fun MapsScreen(
     val isRunning by patrolTimer.running.collectAsStateWithLifecycle()
     val movementInfo by movement.collectAsStateWithLifecycle()
     val liveTelemetry by telemetryManager.telemetry.collectAsStateWithLifecycle()
+
     var tick by remember { mutableStateOf(0L) }
     LaunchedEffect(isRunning) {
         if (isRunning) {
             while (true) {
+                // 2 s cadence: distance/move-min stay fresh enough for a live
+                // feel; instantaneous SPEED below updates even faster because
+                // it derives straight from the telemetry StateFlow.
                 tick++
-                delay(5000)
+                delay(2000)
             }
         }
     }
@@ -184,8 +190,22 @@ fun MapsScreen(
 
     var patrolPoints by remember { mutableStateOf(emptyList<PatrolPointEntity>()) }
     var totalDistance by remember { mutableStateOf(0.0) }
-    var avgSpeed by remember { mutableStateOf(0.0) }
     var moveMinutes by remember { mutableStateOf(0) }
+
+    // Live speed: prefer the GNSS receiver's own doppler speed (updates with
+    // every fix, ~1 s while tracking); fall back to the pace between the last
+    // two recorded points. Values under 1 km/h are GPS jitter — show 0.
+    val currentSpeedKmh: Double = run {
+        val gps = liveTelemetry.speedMps
+        val fromGps = if (gps != null && gps >= 0.28f) (gps * 3.6).coerceAtMost(160.0) else null
+        val derived = if (patrolPoints.size >= 2) {
+            val a = patrolPoints[patrolPoints.size - 2]
+            val b = patrolPoints.last()
+            val dt = (b.timestamp - a.timestamp) / 1000.0
+            if (dt > 0.5) computeDistance(listOf(a, b)) / dt * 3.6 else 0.0
+        } else 0.0
+        fromGps ?: derived.coerceIn(0.0, 160.0)
+    }
 
     LaunchedEffect(isRunning, tick) {
         // While a patrol is live, load its points; otherwise (e.g. the app was
@@ -201,12 +221,6 @@ fun MapsScreen(
             patrolPoints = dao.patrolPointsOrdered(pid)
             totalDistance = computeDistance(patrolPoints)
             if (isRunning) {
-                avgSpeed = if (patrolPoints.size >= 2) {
-                    val first = patrolPoints.first().timestamp
-                    val last = patrolPoints.last().timestamp
-                    val dur = (last - first) / 3_600_000.0
-                    if (dur > 0) (totalDistance / 1000) / dur else 0.0
-                } else 0.0
                 moveMinutes = dao.activeMovementSamplesForPatrol(pid) * 5 / 60
             }
         }
@@ -219,11 +233,12 @@ fun MapsScreen(
         }
     }
 
-    // Fill beat & compartment sources once GIS data is loaded. The sources are
-    // created (empty) when the style renders, so boundaries appear reliably even
-    // if the GeoJSON arrives after the map itself.
-    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef) {
-        if (!gisRepo.isDataLoaded) return@LaunchedEffect
+    // Fill beat & compartment sources once GIS data is loaded AND the map style
+    // is ready. This handles two scenarios:
+    //   - Fast path (assets): data loads before style → fires when styleReady changes
+    //   - Slow path (backend): style loads before data → fires when isDataLoaded changes
+    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef, styleReady) {
+        if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
         val beatGeo = gisRepo.beatGeoJsonString
         val compGeo = gisRepo.compartmentGeoJsonString
         miniMapRef?.style?.let { style ->
@@ -360,12 +375,17 @@ fun MapsScreen(
                                     style.addSource(rasterSource)
                                     style.addSource(satelliteSource)
                                     style.addSource(streetSource)
-                                    // Beat & compartment sources are always present
-                                    // (empty until GIS data loads); the LaunchedEffect
-                                    // below fills them in once loadGisData() finishes,
-                                    // so the boundaries always appear.
-                                    style.addSource(GeoJsonSource("beats-geojson-source", EMPTY_FEATURE_COLLECTION))
-                                    style.addSource(GeoJsonSource("comp-geojson-source", EMPTY_FEATURE_COLLECTION))
+
+                                    // Beat & compartment sources: push immediately if
+                                    // GIS data is already loaded (assets are fast), or
+                                    // start empty and let the LaunchedEffect fill them
+                                    // later when the backend/cache loads finish.
+                                    val beatInit = if (gisRepo.isDataLoaded) gisRepo.beatGeoJsonString else ""
+                                    val compInit = if (gisRepo.isDataLoaded) gisRepo.compartmentGeoJsonString else ""
+                                    style.addSource(GeoJsonSource("beats-geojson-source",
+                                        if (beatInit.isNotEmpty()) beatInit else EMPTY_FEATURE_COLLECTION))
+                                    style.addSource(GeoJsonSource("comp-geojson-source",
+                                        if (compInit.isNotEmpty()) compInit else EMPTY_FEATURE_COLLECTION))
 
                                     // 1. MBTiles Basemap Layer (offline fallback base)
                                     style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
@@ -404,7 +424,7 @@ fun MapsScreen(
                                         FillLayer("comp-fill-layer", "comp-geojson-source").apply {
                                             setProperties(
                                                 PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.fillOpacity(0.04f),
+                                                PropertyFactory.fillOpacity(0.15f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
@@ -415,8 +435,8 @@ fun MapsScreen(
                                         LineLayer("comp-line-layer", "comp-geojson-source").apply {
                                             setProperties(
                                                 PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.lineWidth(1.2f),
-                                                PropertyFactory.lineOpacity(0.75f),
+                                                PropertyFactory.lineWidth(1.6f),
+                                                PropertyFactory.lineOpacity(0.85f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
@@ -501,6 +521,9 @@ fun MapsScreen(
                                         .target(LatLng(15.92, 79.15))
                                         .zoom(11.8)
                                         .build()
+
+                                    // Signal that the style + all layers are ready.
+                                    styleReady = true
 
                                     // Tap listener for map features (Beats & Compartments)
                                     map.addOnMapClickListener { latLng ->
@@ -739,7 +762,7 @@ fun MapsScreen(
             if (isRunning) {
                 ActivePatrolOverlay(
                     distanceMeters = totalDistance,
-                    avgSpeedKmh = avgSpeed,
+                    currentSpeedKmh = currentSpeedKmh,
                     moveMinutes = moveMinutes,
                     durationFormatted = patrolTimer.elapsedFormatted(),
                     currentMode = movementInfo.mode,

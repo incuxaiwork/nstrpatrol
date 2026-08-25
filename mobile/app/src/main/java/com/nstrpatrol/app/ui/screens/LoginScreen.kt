@@ -24,18 +24,19 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
 import com.nstrpatrol.app.ui.components.FieldLabel
 import com.nstrpatrol.app.ui.components.PrimaryButton
 import com.nstrpatrol.app.ui.components.RemarksField
 import com.nstrpatrol.app.ui.theme.Background
 import com.nstrpatrol.app.ui.theme.ErrorRed
 import com.nstrpatrol.app.ui.theme.ForestGreen
-import com.nstrpatrol.app.ui.theme.NstrIcons
 import com.nstrpatrol.app.ui.theme.TextSecondary
 import kotlinx.coroutines.launch
 
@@ -62,17 +63,11 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(40.dp))
-            Box(
-                modifier = Modifier.size(64.dp).background(ForestGreen, CircleShape),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = NstrIcons.Paw,
-                    contentDescription = "NSTR Patrol",
-                    tint = Color.White,
-                    modifier = Modifier.size(64.dp)
-                )
-            }
+            Image(
+                painter = painterResource(R.drawable.nstr_logo),
+                contentDescription = "NSTR Patrol",
+                modifier = Modifier.size(96.dp)
+            )
             Spacer(Modifier.height(20.dp))
             Text(
                 text = stringResource(R.string.login_title),

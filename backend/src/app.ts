@@ -1,3 +1,4 @@
+import compression from 'compression';
 import cors from 'cors';
 import express from 'express';
 import helmet from 'helmet';
@@ -8,6 +9,7 @@ import { apiRouter } from './routes';
 export function createApp(): express.Express {
   const app = express();
 
+  app.use(compression());
   app.use(helmet());
   app.use(cors());
   app.use(express.json({ limit: '50mb' }));

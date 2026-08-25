@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import com.nstrpatrol.app.data.db.NstrDatabase
 import com.nstrpatrol.app.data.face.FaceRecognizer
 import com.nstrpatrol.app.data.map.ApiException
 import com.nstrpatrol.app.data.map.BackendApiClient
@@ -91,7 +92,10 @@ class AuthSession(context: Context) {
      * session, registers this device, and returns the signed-in user.
      * Throws on wrong credentials / network failure.
      */
-    suspend fun login(email: String, password: String): AuthUser = withContext(Dispatchers.IO) {
+    suspend fun login(email: String, password: String, db: NstrDatabase? = null): AuthUser = withContext(Dispatchers.IO) {
+        // If a different user was previously logged in, wipe local data so
+        // User B doesn't see User A's patrols/sensors/incidents.
+        val previousUserId = currentUser?.id
         val body = JSONObject()
             .put("email", email.trim())
             .put("password", password)
@@ -107,6 +111,11 @@ class AuthSession(context: Context) {
             .putString("user", userJson)
             .apply()
         client.setAccessToken(accessToken)
+        // Clear local Room DB if switching to a different user.
+        if (previousUserId != null && previousUserId != user.id && db != null) {
+            Log.i("AuthSession", "User switch ($previousUserId -> ${user.id}) — clearing local data")
+            db.clearAllTables()
+        }
         deviceScope.launch { registerDevice() }
         user
     }
@@ -245,8 +254,9 @@ class AuthSession(context: Context) {
         fallback
     }
 
-    /** Clears the stored session and the bearer token. */
-    fun logout() {
+    /** Clears the stored session, the bearer token, and all local data. */
+    fun logout(db: NstrDatabase? = null) {
+        db?.clearAllTables()
         prefs.edit().clear().apply()
         client.setAccessToken(null)
     }

@@ -6,6 +6,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 
@@ -46,15 +51,18 @@ data class GisLayerState(
 )
 
 /**
- * Loads forest beats + compartments GeoJSON. Source priority:
- *   1. Backend API (fresh data, written to a local cache file)
- *   2. Local cache (previously synced backend data, offline)
- *   3. Bundled assets (mark_beat.json / mark_comp.json) as a last resort
+ * Loads forest beats + compartments GeoJSON.
+ *
+ * Source priority:
+ *   1. Bundled assets (instant, zero network — map renders immediately)
+ *   2. Background sync from backend API (non-blocking, updates map if fresher data arrives)
+ *   3. Local disk cache (previously synced backend data, used if backend is unreachable)
  */
 class ForestGisRepository(private val context: Context) {
 
     private val api = BackendApiClient()
     private val cacheDir = File(context.filesDir, "gis")
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     var beatGeoJsonString: String = ""
         private set
@@ -72,34 +80,32 @@ class ForestGisRepository(private val context: Context) {
     val beatsList = mutableStateListOf<ForestBeatModel>()
     val compartmentsList = mutableStateListOf<ForestCompartmentModel>()
 
+    /**
+     * Load GIS data. Assets-first: map renders instantly, backend syncs in background.
+     * Must be called on Dispatchers.IO or will launch its own coroutine.
+     */
     fun loadGisData() {
         if (isDataLoaded) return
 
-        // 1. Backend, fresh copy synced to disk.
-        val backendBeats = api.getText("/api/gis/beats")
-        if (backendBeats != null) {
-            val backendComps = api.getText("/api/gis/compartments")
-            writeCache("beats.geojson", backendBeats)
-            backendComps?.let { writeCache("compartments.geojson", it) }
-            applyData(backendBeats, backendComps ?: readCache("compartments.geojson") ?: "")
-
-            isDataLoaded = beatGeoJsonString.isNotEmpty()
-            Log.d("ForestGisRepository", "Loaded beats/compartments from backend")
-            return
-        }
-
-        // 2. Cached copy from a previous sync (offline mode).
-        val cachedBeats = readCache("beats.geojson")
-        if (cachedBeats != null) {
-            applyData(cachedBeats, readCache("compartments.geojson") ?: "")
-            source = "cache"
-            isDataLoaded = beatGeoJsonString.isNotEmpty()
-            Log.d("ForestGisRepository", "Loaded beats/compartments from cache")
-            return
-        }
-
-        // 3. Bundled assets fallback.
+        // 1. Bundled assets FIRST — instant, zero network wait.
         loadFromAssets()
+
+        // 2. Background refresh from backend (non-blocking).
+        scope.launch { syncFromBackend() }
+    }
+
+    /**
+     * Blocking call that loads assets then syncs from backend.
+     * Use this when called from Dispatchers.IO and you want the initial
+     * load to complete before returning (e.g. during startup).
+     */
+    suspend fun loadGisDataBlocking() {
+        if (isDataLoaded) return
+
+        withContext(Dispatchers.IO) {
+            loadFromAssets()
+        }
+        syncFromBackend()
     }
 
     private fun loadFromAssets() {
@@ -113,14 +119,39 @@ class ForestGisRepository(private val context: Context) {
             }
             applyData(assetBeats, assetComps)
             source = "assets"
-            Log.d("ForestGisRepository", "Loaded beats/compartments from bundled assets")
+            isDataLoaded = beatGeoJsonString.isNotEmpty()
+            Log.d("ForestGisRepository", "Loaded ${beatsList.size} beats, ${compartmentsList.size} compartments from assets (instant)")
         } catch (e: Exception) {
-            Log.e("ForestGisRepository", "Error reading mark_beat.json", e)
+            Log.e("ForestGisRepository", "Error reading bundled assets", e)
+            isDataLoaded = false
         }
+    }
 
-        // Only signal "loaded" once the beat data (the layer the map waits for)
-        // parsed successfully, so the map is never blocked forever on a bad asset.
-        isDataLoaded = beatGeoJsonString.isNotEmpty()
+    private suspend fun syncFromBackend() {
+        withContext(Dispatchers.IO) {
+            try {
+                val backendBeats = api.getText("/api/gis/beats") ?: return@withContext
+                writeCache("beats.geojson", backendBeats)
+
+                var backendComps = api.getText("/api/gis/compartments")
+                if (backendComps == null) {
+                    Log.w("ForestGisRepository", "Compartments fetch failed, retrying...")
+                    backendComps = api.getText("/api/gis/compartments")
+                }
+                backendComps?.let { writeCache("compartments.geojson", it) }
+
+                val compData = backendComps ?: readCache("compartments.geojson") ?: return@withContext
+
+                // Update data on main thread so Compose recomposes.
+                withContext(Dispatchers.Main) {
+                    applyData(backendBeats, compData)
+                    source = "backend"
+                    Log.d("ForestGisRepository", "Background sync: ${beatsList.size} beats, ${compartmentsList.size} compartments from backend")
+                }
+            } catch (e: Exception) {
+                Log.d("ForestGisRepository", "Background sync failed (using assets): ${e.message}")
+            }
+        }
     }
 
     private fun applyData(beatGeoJson: String, compartmentGeoJson: String) {
@@ -169,7 +200,6 @@ class ForestGisRepository(private val context: Context) {
         }
         beatsList.clear()
         beatsList.addAll(newBeats)
-        Log.d("ForestGisRepository", "Parsed ${beatsList.size} forest beats")
     }
 
     private fun parseCompartments(geoJson: String) {
@@ -206,7 +236,6 @@ class ForestGisRepository(private val context: Context) {
             }
             compartmentsList.clear()
             compartmentsList.addAll(newComps)
-            Log.d("ForestGisRepository", "Parsed ${compartmentsList.size} compartments")
         } catch (e: Exception) {
             Log.e("ForestGisRepository", "Error parsing compartments", e)
         }

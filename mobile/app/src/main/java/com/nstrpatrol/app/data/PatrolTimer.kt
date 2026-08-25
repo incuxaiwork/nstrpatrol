@@ -1,6 +1,11 @@
 package com.nstrpatrol.app.data
 
+import android.content.Context
 import android.os.SystemClock
+import com.nstrpatrol.app.data.db.NstrDatabase
+import com.nstrpatrol.app.time.GpsTelemetryManager
+import com.nstrpatrol.app.time.TelemetryRecorder
+import com.nstrpatrol.app.time.TrustedTimeManager
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -78,4 +83,39 @@ class PatrolTimer {
  */
 object PatrolState {
     val timer: PatrolTimer = PatrolTimer()
+
+    @Volatile
+    private var graph: PatrolTelemetryGraph? = null
+
+    /**
+     * Process-wide telemetry components. Both used to be `remember { }` in the
+     * Activity, so an Activity recreation silently replaced them mid-patrol:
+     * the old recorder stopped sampling with its composition while the timer
+     * (and the foreground service) kept going, and nothing restarted sampling
+     * afterwards — patrols lost their GPS trace from that point on. Holding
+     * them here gives every composition the SAME instances.
+     */
+    fun telemetryGraph(context: Context): PatrolTelemetryGraph =
+        graph ?: synchronized(this) {
+            graph ?: PatrolTelemetryGraph(context.applicationContext).also { graph = it }
+        }
+}
+
+/**
+ * Owns the long-lived telemetry pipeline for the whole process lifetime.
+ * Created lazily on first access and never recreated.
+ */
+class PatrolTelemetryGraph(appContext: Context) {
+    val settings = SettingsStore(appContext)
+    val timeManager = TrustedTimeManager(appContext)
+    val database = NstrDatabase.getInstance(appContext)
+    val telemetry = GpsTelemetryManager(appContext, settings)
+    val recorder = TelemetryRecorder(
+        appContext = appContext,
+        patrolTimer = PatrolState.timer,
+        telemetryManager = telemetry,
+        timeManager = timeManager,
+        dao = database.telemetryDao(),
+        settings = settings
+    )
 }

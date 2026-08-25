@@ -101,6 +101,8 @@ model Patrol {
   createdAt             DateTime               @default(now())
   updatedAt             DateTime               @updatedAt
   userId                String
+  /// Physical device that recorded this patrol (ANDROID_ID).
+  deviceId              String?
   patrolMethod          String?
   beat                  String?
   armedStatus           String?

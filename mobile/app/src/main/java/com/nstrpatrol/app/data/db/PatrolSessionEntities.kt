@@ -26,5 +26,8 @@ data class PatrolSessionEntity(
     val avgSpeedKmh: Double = 0.0,
     val pointCount: Int = 0,
     val faceVerified: Boolean = false,
-    val syncStatus: String = "PENDING"
+    val syncStatus: String = "PENDING",
+    /// Server-side updatedAt for staleness detection during incremental pull.
+    /// 0 = not yet tracked (local-only or legacy pulled session).
+    val serverUpdatedAt: Long = 0
 )
