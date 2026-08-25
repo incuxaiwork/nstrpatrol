@@ -437,7 +437,7 @@ export function patrolFromApi(
       subDivisionId: string | null;
       division: string | null;
     } | null;
-    stats?: { points?: number; distanceKm?: number; durationSeconds?: number };
+    stats?: { points?: number; distanceKm?: number | null; durationSeconds?: number };
   },
   points: { lat: number; lng: number; t?: string | null }[] = [],
   patrolIncidents: { patrolId?: string | null; photos?: string[] }[] = []
@@ -472,9 +472,10 @@ export function patrolFromApi(
     startActual: firstPoint?.t ?? p.startedAt ?? undefined,
     endActual: lastPoint?.t ?? p.endedAt ?? undefined,
     distanceKm: (() => {
-      if (p.stats?.distanceKm) return p.stats.distanceKm;
-      // Fallback: compute from GPS points when PostGIS is unavailable
-      // (stats.distanceKm = 0). Simple Haversine sum over consecutive pairs.
+      // Prefer authoritative backend distance (PostGIS or pure-PG Haversine).
+      if (typeof p.stats?.distanceKm === 'number') return p.stats.distanceKm;
+      // Defensive fallback: compute Haversine from already-loaded GPS points
+      // when backend stats are entirely absent (e.g. no GPS points at all).
       if (points.length >= 2) {
         let total = 0;
         for (let i = 1; i < points.length; i++) {
@@ -489,7 +490,7 @@ export function patrolFromApi(
         }
         return Math.round(total * 100) / 100;
       }
-      return 0;
+      return null;
     })(),
     durationMin: (() => {
       if (p.stats?.durationSeconds) return Math.round(p.stats.durationSeconds / 60);

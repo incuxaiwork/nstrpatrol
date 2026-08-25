@@ -324,7 +324,8 @@ export interface ApiPatrol {
 
 export interface ApiPatrolStats {
   points?: number;
-  distanceKm: number;
+  /** null when no GPS points exist (no GROUP BY row); 0 is genuine zero distance. */
+  distanceKm: number | null;
   durationSeconds: number;
 }
 

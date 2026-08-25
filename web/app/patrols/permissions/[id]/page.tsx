@@ -270,7 +270,7 @@ export default function AuthorizationDetailPage() {
                   { key: "ranger", header: "Ranger", render: (p) => <span className="text-ink-soft">{p.leader}</span> },
                   { key: "area", header: "Area", render: (p) => <span className="text-xs text-ink-soft">{unitName(p.beat)}</span> },
                   { key: "duration", header: "Duration", sortValue: (p) => p.durationMin, render: (p) => <span className="text-ink-soft">{p.durationMin > 0 ? formatMinutes(p.durationMin) : "—"}</span> },
-                  { key: "distance", header: "Distance", sortValue: (p) => p.distanceKm, render: (p) => <span className="text-ink-soft">{p.distanceKm > 0 ? formatKm(p.distanceKm) : "—"}</span> },
+                  { key: "distance", header: "Distance", sortValue: (p) => p.distanceKm ?? -1, render: (p) => <span className="text-ink-soft">{p.distanceKm != null ? formatKm(p.distanceKm) : "—"}</span> },
                   { key: "status", header: "Status", sortValue: (p) => p.status, render: (p) => <Badge tone={patrolStatusTone[p.status]}>{patrolStatusLabel[p.status]}</Badge> },
                   {
                     key: "actions", header: "",

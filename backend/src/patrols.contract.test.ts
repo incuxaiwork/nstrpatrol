@@ -130,6 +130,9 @@ function lastRawCall() {
 beforeEach(() => {
   jest.clearAllMocks();
   invalidateUserScope();
+  // Default: $queryRaw returns empty array (list endpoint stats query).
+  // Tests that need specific SQL results override via mockRaw().
+  prisma.$queryRaw.mockResolvedValue([]);
 });
 
 describe('patrol geography enrichment (GET /api/patrols)', () => {

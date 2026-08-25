@@ -53,7 +53,7 @@ export default function PatrolReportsPage() {
   const avgCoverage = coverageValues.length
     ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
     : null;
-  const totalDistance = filtered.reduce((a, r) => a + r.distanceKm, 0);
+  const totalDistance = filtered.reduce((a, r) => a + (r.distanceKm ?? 0), 0);
   const totalIncidents = filtered.reduce((a, r) => a + r.incidents, 0);
 
   const exportRows = filtered.map((r) => ({
@@ -209,7 +209,7 @@ export default function PatrolReportsPage() {
             <div className="space-y-3 p-4">
               <p className="text-sm text-ink-soft">{r.summary}</p>
               <div className="grid grid-cols-4 gap-2 border-t border-line pt-3 text-center">
-                <ReportStat label="Distance" value={formatKm(r.distanceKm)} />
+                <ReportStat label="Distance" value={r.distanceKm != null ? formatKm(r.distanceKm) : "—"} />
                 <ReportStat label="Checkpoints" value={r.checkpoints ?? "—"} />
                 <ReportStat label="Observations" value={r.observations} />
                 <ReportStat label="Photos" value={r.photos} />

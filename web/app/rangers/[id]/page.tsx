@@ -177,7 +177,7 @@ export default function RangerDetailPage() {
                 </div>
                 <p className="mt-2 text-sm text-ink-soft">
                   {geoLabel(currentPatrol.beat)} · started {timeAgo(currentPatrol.startScheduled)}
-                  {currentPatrol.distanceKm > 0 && ` · ${formatKm(currentPatrol.distanceKm)} covered`}
+                  {currentPatrol.distanceKm != null && currentPatrol.distanceKm > 0 && ` · ${formatKm(currentPatrol.distanceKm)} covered`}
                 </p>
                 <div className="mt-3 flex gap-2">
                   <button
@@ -211,7 +211,7 @@ export default function RangerDetailPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">{p.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {formatMinutes(p.durationMin)} · {formatKm(p.distanceKm)} · {timeAgo(p.startScheduled)}
+                        {formatMinutes(p.durationMin)} · {p.distanceKm != null ? formatKm(p.distanceKm) : "—"} · {timeAgo(p.startScheduled)}
                       </span>
                     </span>
                     <JurisdictionBadge state={resolveJurisdiction(p, auths.data ?? []).state} />

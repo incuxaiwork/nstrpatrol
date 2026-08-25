@@ -89,7 +89,7 @@ export default function PatrolDetailPage() {
       <div className="mt-4">
         <StatRow
           items={[
-            { label: "Distance", value: patrol.distanceKm > 0 ? formatKm(patrol.distanceKm) : "—" },
+            { label: "Distance", value: patrol.distanceKm != null ? formatKm(patrol.distanceKm) : "—" },
             { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
             { label: "Checkpoints", value: patrol.checkpoints ?? "Not available" },
             { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },

@@ -114,7 +114,7 @@ export default function PatrolHistoryPage() {
                       <span className="block text-xs text-ink-soft">
                         {patrol.leader} · {patrol.beat || "Unknown beat"} · {timeAgo(patrol.startScheduled)}
                         {patrol.durationMin > 0 && ` · ${formatMinutes(patrol.durationMin)}`}
-                        {patrol.distanceKm > 0 && ` · ${formatKm(patrol.distanceKm)}`}
+                        {patrol.distanceKm != null && patrol.distanceKm > 0 && ` · ${formatKm(patrol.distanceKm)}`}
                       </span>
                     </span>
                     <Badge tone={patrolStatusTone[patrol.status]}>{patrolStatusLabel[patrol.status]}</Badge>

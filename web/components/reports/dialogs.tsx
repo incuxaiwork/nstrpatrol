@@ -193,7 +193,7 @@ export function PatrolsReportDialog({ open, onClose }: { open: boolean; onClose(
               { key: "method", header: "Method", render: (r) => (r.patrol.method ? patrolMethodLabels[r.patrol.method] ?? r.patrol.method : "—") },
               { key: "leader", header: "Leader", render: (r) => r.patrol.leader },
               { key: "area", header: "Area", render: (r) => `${geoLabel(r.patrol.range)} / ${geoLabel(r.patrol.beat)}` },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
               { key: "duration", header: "Duration", render: (r) => `${r.patrol.durationMin} min` },
             ]}
           />
@@ -278,7 +278,7 @@ export function PatrolReportDialog({
         </ReportSection>
         <ReportSection title="Performance">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <ReportStat label="Distance" value={`${p.distanceKm.toFixed(1)} km`} />
+            <ReportStat label="Distance" value={p.distanceKm != null ? `${p.distanceKm.toFixed(1)} km` : "—"} />
             <ReportStat label="Duration" value={`${p.durationMin} min`} />
             <ReportStat label="Coverage" value={p.coveragePct != null ? `${p.coveragePct}%` : "—"} />
             <ReportStat label="Checkpoints" value={p.checkpoints ?? "—"} />
@@ -605,7 +605,7 @@ export function RangerReportDialog({
               { key: "type", header: "Type", render: (r) => r.patrol.type ? patrolTypeLabels[r.patrol.type] ?? r.patrol.type : "�" },
               { key: "method", header: "Method", render: (r) => (r.patrol.method ? patrolMethodLabels[r.patrol.method] ?? r.patrol.method : "—") },
               { key: "area", header: "Area", render: (r) => `${geoLabel(r.patrol.range)} / ${geoLabel(r.patrol.beat)}` },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
               { key: "coverage", header: "Coverage", render: (r) => (r.patrol.coveragePct != null ? `${r.patrol.coveragePct}%` : "—") },
             ]}
           />
@@ -821,7 +821,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
               { key: "status", header: "Status", render: (r) => statusBadge(r.patrol) },
               { key: "leader", header: "Leader", render: (r) => r.patrol.leader },
               { key: "beat", header: "Beat", render: (r) => geoLabel(r.patrol.beat) },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
               { key: "coverage", header: "Coverage", render: (r) => (r.patrol.coveragePct != null ? `${r.patrol.coveragePct}%` : "—") },
             ]}
           />

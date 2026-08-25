@@ -92,7 +92,7 @@ export default function PatrolReplayPage() {
 
       <StatRow
         items={[
-          { label: "Distance", value: patrol.distanceKm > 0 ? `${patrol.distanceKm} km` : "—" },
+          { label: "Distance", value: patrol.distanceKm != null ? `${patrol.distanceKm} km` : "—" },
           { label: "Duration", value: patrol.durationMin > 0 ? `${patrol.durationMin} min` : "—" },
           { label: "Checkpoints", value: patrol.checkpoints },
           { label: "Events", value: events.length },

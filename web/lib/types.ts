@@ -159,7 +159,7 @@ export interface Patrol {
   endScheduled?: string;
   startActual?: string;
   endActual?: string;
-  distanceKm: number;
+  distanceKm: number | null;
   durationMin: number;
   /** Real ForestGrid coverage (patrol detail only). Absent = unavailable — never 0. */
   coveragePct?: number;

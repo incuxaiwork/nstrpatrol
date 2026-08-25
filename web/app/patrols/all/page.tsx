@@ -197,8 +197,8 @@ export default function AllPatrolsPage() {
                   render: (r) => <span className="text-ink-soft">{timeAgo(r.patrol.startScheduled)}</span> },
                 { key: "duration", header: "Duration", sortValue: (r) => r.patrol.durationMin,
                   render: (r) => <span className="text-ink-soft">{r.patrol.durationMin > 0 ? formatMinutes(r.patrol.durationMin) : "—"}</span> },
-                { key: "distance", header: "Distance", sortValue: (r) => r.patrol.distanceKm,
-                  render: (r) => <span className="text-ink-soft">{r.patrol.distanceKm > 0 ? formatKm(r.patrol.distanceKm) : "—"}</span> },
+                { key: "distance", header: "Distance", sortValue: (r) => r.patrol.distanceKm ?? -1,
+                  render: (r) => <span className="text-ink-soft">{r.patrol.distanceKm != null ? formatKm(r.patrol.distanceKm) : "—"}</span> },
                 { key: "status", header: "Status", sortValue: (r) => r.patrol.status,
                   render: (r) => <Badge tone={patrolStatusTone[r.patrol.status]} dot>{patrolStatusLabel[r.patrol.status]}</Badge> },
                 {

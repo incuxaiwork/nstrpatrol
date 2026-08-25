@@ -218,17 +218,43 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
         });
       }
     } catch {
-      // PostGIS unavailable — duration still computable via pure PG.
-      const rows = await prisma.$queryRaw<{ patrolId: string; durationSeconds: number }[]>`
-        SELECT "patrolId",
-          COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
-        FROM "PatrolPoint"
-        WHERE "patrolId" = ANY(${ids}::text[])
+      // PostGIS shared library unavailable — compute distance via pure-PG
+      // Haversine and duration via EXTRACT(EPOCH), both without spatial
+      // extensions. Single batched query for all patrol IDs (no N+1).
+      const rows = await prisma.$queryRaw<{
+        patrolId: string; distanceKm: number; durationSeconds: number;
+      }[]>`
+        WITH ordered AS (
+          SELECT "patrolId", longitude, latitude, "timestamp",
+            LAG(longitude) OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLng",
+            LAG(latitude)  OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLat"
+          FROM "PatrolPoint"
+          WHERE "patrolId" = ANY(${ids}::text[])
+        )
+        SELECT
+          "patrolId",
+          COALESCE(
+            SUM(
+              CASE WHEN "prevLat" IS NOT NULL AND "prevLng" IS NOT NULL
+                AND latitude  IS NOT NULL AND longitude IS NOT NULL
+                AND NOT (latitude = 0 AND longitude = 0)
+                AND NOT ("prevLat" = 0 AND "prevLng" = 0)
+              THEN 2 * 6371000.0 * ASIN(SQRT(
+                POWER(SIN(RADIANS(latitude  - "prevLat") / 2.0), 2) +
+                COS(RADIANS("prevLat")) * COS(RADIANS(latitude)) *
+                POWER(SIN(RADIANS(longitude - "prevLng") / 2.0), 2)
+              )) ELSE 0 END
+            ) / 1000.0, 0
+          ) AS "distanceKm",
+          COALESCE(
+            EXTRACT(EPOCH FROM MAX("timestamp") - MIN("timestamp")), 0
+          ) AS "durationSeconds"
+        FROM ordered
         GROUP BY "patrolId"
       `;
       for (const r of rows) {
         statsMap.set(r.patrolId, {
-          distanceKm: 0,
+          distanceKm: Math.round(r.distanceKm * 100) / 100,
           durationSeconds: Math.round(r.durationSeconds),
         });
       }
@@ -240,7 +266,7 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
     return {
       ...p,
       geography: geographyFor(p, geoIndex),
-      stats: s ?? { distanceKm: 0, durationSeconds: 0 },
+      stats: s ?? null,
     };
   }));
 });
@@ -416,16 +442,43 @@ patrolsRouter.get('/:id', async (req, res) => {
     distanceKm = Math.round((stats[0]?.distanceKm ?? 0) * 100) / 100;
     durationSeconds = Math.round(stats[0]?.durationSeconds ?? 0);
   } catch {
-    // PostGIS may not be available — fall back to plain-PG queries that
-    // don't need the extension. Duration is pure EXTRACT(EPOCH); distance
-    // requires ST_Length and stays 0 without PostGIS.
-    const fallback = await prisma.$queryRaw<{ points: bigint; durationSeconds: number }[]>`
-      SELECT COUNT(id)::bigint AS points,
-        COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
-      FROM "PatrolPoint"
-      WHERE "patrolId" = ${id}
+    // PostGIS shared library unavailable (e.g. Railway missing postgis-3.so)
+    // — compute distance via pure-PG Haversine and duration via EXTRACT(EPOCH).
+    // RADIANS, SIN, COS, SQRT, ASIN, POWER are core PostgreSQL math
+    // functions; no spatial extension needed.
+    const fallback = await prisma.$queryRaw<{
+      points: bigint; distanceKm: number; durationSeconds: number;
+    }[]>`
+      WITH ordered AS (
+        SELECT longitude, latitude,
+          LAG(longitude) OVER (ORDER BY "timestamp") AS "prevLng",
+          LAG(latitude)  OVER (ORDER BY "timestamp") AS "prevLat"
+        FROM "PatrolPoint"
+        WHERE "patrolId" = ${id}
+      )
+      SELECT
+        (SELECT COUNT(*) FROM "PatrolPoint" WHERE "patrolId" = ${id})::bigint AS points,
+        COALESCE(
+          SUM(
+            CASE WHEN "prevLat" IS NOT NULL AND "prevLng" IS NOT NULL
+              AND latitude  IS NOT NULL AND longitude IS NOT NULL
+              AND NOT (latitude = 0 AND longitude = 0)
+              AND NOT ("prevLat" = 0 AND "prevLng" = 0)
+            THEN 2 * 6371000.0 * ASIN(SQRT(
+              POWER(SIN(RADIANS(latitude  - "prevLat") / 2.0), 2) +
+              COS(RADIANS("prevLat")) * COS(RADIANS(latitude)) *
+              POWER(SIN(RADIANS(longitude - "prevLng") / 2.0), 2)
+            )) ELSE 0 END
+          ) / 1000.0, 0
+        ) AS "distanceKm",
+        COALESCE(
+          (SELECT EXTRACT(EPOCH FROM MAX("timestamp") - MIN("timestamp"))
+           FROM "PatrolPoint" WHERE "patrolId" = ${id}), 0
+        ) AS "durationSeconds"
+      FROM ordered
     `;
     pointCount = Number(fallback[0]?.points ?? 0n);
+    distanceKm = Math.round((fallback[0]?.distanceKm ?? 0) * 100) / 100;
     durationSeconds = Math.round(fallback[0]?.durationSeconds ?? 0);
   }
 

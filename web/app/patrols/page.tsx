@@ -324,8 +324,8 @@ export default function PatrolsPage() {
             },
             {
               key: "distance", header: "Distance",
-              sortValue: (r) => r.distanceKm,
-              render: (r) => <span className="text-ink-soft">{r.distanceKm > 0 ? formatKm(r.distanceKm) : "—"}</span>,
+              sortValue: (r) => r.distanceKm ?? -1,
+              render: (r) => <span className="text-ink-soft">{r.distanceKm != null ? formatKm(r.distanceKm) : "—"}</span>,
             },
             {
               key: "observations", header: "Obs.",
