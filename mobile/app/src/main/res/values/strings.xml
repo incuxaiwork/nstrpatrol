@@ -17,6 +17,7 @@
 
     <!-- Common actions -->
     <string name="action_save_details">SAVE DETAILS</string>
+    <string name="action_start_patrol">START PATROL</string>
     <string name="action_back">Back</string>
     <string name="action_submit">Submit</string>
     <string name="action_cancel">Cancel</string>

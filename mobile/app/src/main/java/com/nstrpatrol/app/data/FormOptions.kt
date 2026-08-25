@@ -8,7 +8,7 @@ package com.nstrpatrol.app.data
  * content itself is sourced from the backend/DB.
  */
 object Options {
-    val patrolTypes = listOf("Combing_Surveillance", "General Duties")
+    val patrolTypes = listOf("COMBING SURVEILLANCE", "GENERAL DUTIES")
     val patrolMethods = listOf(
         "Foot", "Motor Cycle", "Four Wheeler", "Boat", "Cycle", "Aerial", "Elephant", "Horse", "Camel"
     )

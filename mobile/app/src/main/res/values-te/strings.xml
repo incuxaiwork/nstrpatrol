@@ -7,6 +7,7 @@
     <string name="nav_reports">నివేదికలు</string>
     <string name="nav_settings">సెట్టింగులు</string>
     <string name="action_save_details">వివరాలు సేవ్ చేయి</string>
+    <string name="action_start_patrol">గస్తీ ప్రారంభించు</string>
     <string name="action_back">వెనుకకు</string>
     <string name="action_submit">సమర్పించు</string>
     <string name="action_cancel">రద్దు చేయి</string>
