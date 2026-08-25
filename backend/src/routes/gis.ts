@@ -9,10 +9,22 @@ export const gisRouter = Router();
 const geoCache = new Map<string, { at: number; body: string }>();
 const GEO_TTL_MS = 15 * 60_000;
 
+/* Asset metadata cache: small payload, rarely changes. */
+const assetCache = new Map<string, { at: number; body: string }>();
+const ASSET_CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
+
+const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
+
 async function cachedGeo(key: string, load: () => Promise<string>): Promise<string> {
   const hit = geoCache.get(key);
   if (hit && Date.now() - hit.at < GEO_TTL_MS) return hit.body;
-  const body = await load();
+  let body: string;
+  try {
+    body = await load();
+  } catch (err: any) {
+    console.error(`[gis] ${key} query failed:`, err?.message ?? err);
+    body = EMPTY_FC;
+  }
   geoCache.set(key, { at: Date.now(), body });
   return body;
 }
@@ -221,20 +233,33 @@ gisRouter.get('/grids', async (_req, res) => {
  * Metadata for all stored map assets (no blobs).
  */
 gisRouter.get('/assets', async (_req, res) => {
-  const assets = await prisma.mapAsset.findMany({ orderBy: { resourceKey: 'asc' } });
-  res.json(
-    assets.map((a) => ({
-      id: a.id,
-      resourceKey: a.resourceKey,
-      contentType: a.contentType,
-      storagePath: a.storagePath,
-      sizeBytes: a.sizeBytes,
-      sha256: a.sha256,
-      version: a.version,
-      createdAt: a.createdAt,
-      updatedAt: a.updatedAt,
-    })),
-  );
+  const cached = assetCache.get('list');
+  if (cached && Date.now() - cached.at < ASSET_CACHE_TTL_MS) {
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(cached.body);
+    return;
+  }
+
+  const assets = await prisma.mapAsset.findMany({
+    orderBy: { resourceKey: 'asc' },
+    select: {
+      id: true,
+      resourceKey: true,
+      contentType: true,
+      storagePath: true,
+      sizeBytes: true,
+      sha256: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  const body = JSON.stringify(assets);
+  assetCache.set('list', { at: Date.now(), body });
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(body);
 });
 
 /**

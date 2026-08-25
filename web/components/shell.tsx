@@ -14,6 +14,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { useApp } from "@/lib/store";
 import { auth as authService } from "@/lib/services";
 import { navModules, breadcrumbsFor, type NavItem } from "@/lib/nav";
+import { prefetchRoute } from "@/lib/prefetch";
 import { Avatar, Badge } from "@/components/ui";
 import { DivisionContextChip } from "@/components/forest-context";
 import {
@@ -374,6 +375,7 @@ function Sidebar({
                 <div className={cn("flex items-center rounded-md", active ? "bg-forest-800 text-white" : "text-ink-soft hover:bg-forest-50 hover:text-forest-900")}>
                   <Link
                     href={m.href}
+                    onMouseEnter={() => prefetchRoute(m.href)}
                     className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-sm font-medium"
                   >
                     <Icon name={m.icon} size={17} className="shrink-0" />
@@ -395,6 +397,7 @@ function Sidebar({
                       <Link
                         key={c.href}
                         href={c.href}
+                        onMouseEnter={() => prefetchRoute(c.href)}
                         onClick={() => setOpenGroup(null)}
                         className={cn(
                           "block truncate rounded px-2.5 py-1.5 text-[13px]",
@@ -441,6 +444,7 @@ function Sidebar({
               <Link
                 href={m.href}
                 onClick={onCloseMobile}
+                onMouseEnter={() => prefetchRoute(m.href)}
                 className={cn(
                   "flex items-center gap-2.5 rounded-md px-2.5 py-2.5 text-sm font-medium",
                   isActive(m) ? "bg-forest-800 text-white" : "text-ink-soft hover:bg-forest-50"
@@ -454,6 +458,7 @@ function Sidebar({
                   key={c.href}
                   href={c.href}
                   onClick={onCloseMobile}
+                  onMouseEnter={() => prefetchRoute(c.href)}
                   className={cn(
                     "ml-6 block rounded px-2.5 py-1.5 text-[13px]",
                     pathname === c.href ? "bg-forest-50 font-medium text-forest-900" : "text-ink-soft"

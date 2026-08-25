@@ -22,7 +22,7 @@ import type { DutyStatus } from "@/lib/types";
 
 export default function RangersPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.list());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
 
   const [status, setStatus] = useState("");
   const [division, setDivision] = useState("");

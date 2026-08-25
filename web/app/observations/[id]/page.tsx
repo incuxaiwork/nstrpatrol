@@ -20,13 +20,12 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
 import { timeAgo, geoLabel } from "@/lib/utils";
-import { useEffect } from "react";
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: obs, error, loading, reload } = useAsyncData(() => observations.get(params.id));
   const patrol = useAsyncData(() => (obs?.patrolId ? patrols.get(obs.patrolId) : Promise.resolve(undefined)));
-  const spatial = useAsyncData(() => gis.spatial());
+  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [actionNote, setActionNote] = useState("");
@@ -36,9 +35,6 @@ export default function ObservationDetailPage() {
   if (loading || !obs || spatial.loading || !spatial.data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
-    if (obs) {
-      console.log(obs);
-    }
   return (
     <div>
       <PageHeader

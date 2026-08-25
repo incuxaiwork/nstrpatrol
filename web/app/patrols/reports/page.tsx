@@ -27,7 +27,7 @@ const PAGE_SIZE = 8;
 export default function PatrolReportsPage() {
   const router = useRouter();
   const { pushToast } = useApp();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.reports());
+  const { data, error, loading, reload } = useAsyncData(() => patrols.reports(), [], { cacheKey: "patrols:reports" });
   const [type, setType] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);

@@ -33,8 +33,8 @@ export default function AuthorizationDetailPage() {
   const router = useRouter();
   const { pushToast } = useApp();
   const { data: auth, error, loading, reload } = useAsyncData(() => authorizations.get(params.id));
-  const roster = useAsyncData(() => rangers.list());
-  const allPatrols = useAsyncData(() => patrols.list());
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  const allPatrols = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
   const [confirmAction, setConfirmAction] = useState<"revoke" | "reject" | "complete" | null>(null);
   const [extendUntil, setExtendUntil] = useState("");
 

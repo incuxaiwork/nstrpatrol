@@ -27,10 +27,10 @@ const PAGE_SIZE = 10;
 
 export default function AllPatrolsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.list());
-  const auths = useAsyncData(() => authorizations.list());
-  const roster = useAsyncData(() => rangers.list());
-  const teams = useAsyncData(() => rangers.teams());
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
+  const auths = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  const teams = useAsyncData(() => rangers.teams(), [], { cacheKey: "rangers:teams" });
 
   const [status, setStatus] = useState(initialParam("status"));
   const [jurisdiction, setJurisdiction] = useState(initialParam("jurisdiction"));

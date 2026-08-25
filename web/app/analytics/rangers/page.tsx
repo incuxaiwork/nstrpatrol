@@ -18,8 +18,8 @@ import type { Ranger } from "@/lib/types";
 
 export default function RangerAnalyticsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.list());
-  const patrolStats = useAsyncData(() => analytics.monthly());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  const patrolStats = useAsyncData(() => analytics.monthly(), [], { cacheKey: "analytics:monthly" });
 
   if (loading || !data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;

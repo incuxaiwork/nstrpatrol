@@ -29,7 +29,7 @@ export default function PatrolReplayPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const spatial = useAsyncData(() => gis.spatial());
+  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
 
   const [playback, setPlayback] = useState(0);
   const [seek, setSeek] = useState<{ key: number; value: number } | null>(null);

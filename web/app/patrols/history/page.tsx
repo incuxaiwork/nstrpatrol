@@ -22,7 +22,7 @@ import type { JurisdictionState } from "@/lib/types";
 
 export default function PatrolHistoryPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.list());
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
   const auths = useAsyncData(() => authorizations.list());
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");

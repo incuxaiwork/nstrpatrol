@@ -13,6 +13,18 @@ export const patrolsRouter = Router();
 patrolsRouter.use(requireAuth);
 
 /* ------------------------------------------------------------------ */
+/* Lightweight in-memory TTL cache for patrol list                     */
+/* ------------------------------------------------------------------ */
+
+interface CacheEntry<T> { at: number; body: T }
+const patrolListCache = new Map<string, CacheEntry<string>>();
+const PATROL_LIST_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 10_000;
+
+function patrolListCacheKey(userId: string, q: Record<string, unknown>): string {
+  return `${userId}:${q.mine ?? ''}:${q.status ?? ''}:${q.forestId ?? ''}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* Geography enrichment                                                */
 /* ------------------------------------------------------------------ */
 
@@ -101,6 +113,84 @@ function geographyFor(
   };
 }
 
+/**
+ * Batched stats enrichment — single SQL for all patrol IDs so the list
+ * carries distance/duration without N+1. PostGIS fall-back: when
+ * ST_Length fails the whole query is caught and re-run without the
+ * spatial column (duration still available via pure EXTRACT).
+ */
+async function loadPatrolStats(
+  ids: string[],
+): Promise<Map<string, { distanceKm: number; durationSeconds: number }>> {
+  const statsMap = new Map<string, { distanceKm: number; durationSeconds: number }>();
+  if (ids.length === 0) return statsMap;
+
+  try {
+    const rows = await prisma.$queryRaw<{ patrolId: string; distanceKm: number; durationSeconds: number }[]>`
+      SELECT "patrolId",
+        COALESCE(
+          CASE WHEN COUNT(id) >= 2 THEN
+            ST_Length(
+              ST_MakeLine(
+                ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
+                ORDER BY timestamp
+              )::geography
+            ) / 1000.0
+          ELSE 0 END, 0
+        ) AS "distanceKm",
+        COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
+      FROM "PatrolPoint"
+      WHERE "patrolId" = ANY(${ids}::text[])
+      GROUP BY "patrolId"
+    `;
+    for (const r of rows) {
+      statsMap.set(r.patrolId, {
+        distanceKm: Math.round(r.distanceKm * 100) / 100,
+        durationSeconds: Math.round(r.durationSeconds),
+      });
+    }
+  } catch {
+    const rows = await prisma.$queryRaw<{
+      patrolId: string; distanceKm: number; durationSeconds: number;
+    }[]>`
+      WITH ordered AS (
+        SELECT "patrolId", longitude, latitude, "timestamp",
+          LAG(longitude) OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLng",
+          LAG(latitude)  OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLat"
+        FROM "PatrolPoint"
+        WHERE "patrolId" = ANY(${ids}::text[])
+      )
+      SELECT
+        "patrolId",
+        COALESCE(
+          SUM(
+            CASE WHEN "prevLat" IS NOT NULL AND "prevLng" IS NOT NULL
+              AND latitude  IS NOT NULL AND longitude IS NOT NULL
+              AND NOT (latitude = 0 AND longitude = 0)
+              AND NOT ("prevLat" = 0 AND "prevLng" = 0)
+            THEN 2 * 6371000.0 * ASIN(SQRT(
+              POWER(SIN(RADIANS(latitude  - "prevLat") / 2.0), 2) +
+              COS(RADIANS("prevLat")) * COS(RADIANS(latitude)) *
+              POWER(SIN(RADIANS(longitude - "prevLng") / 2.0), 2)
+            )) ELSE 0 END
+          ) / 1000.0, 0
+        ) AS "distanceKm",
+        COALESCE(
+          EXTRACT(EPOCH FROM MAX("timestamp") - MIN("timestamp")), 0
+        ) AS "durationSeconds"
+      FROM ordered
+      GROUP BY "patrolId"
+    `;
+    for (const r of rows) {
+      statsMap.set(r.patrolId, {
+        distanceKm: Math.round(r.distanceKm * 100) / 100,
+        durationSeconds: Math.round(r.durationSeconds),
+      });
+    }
+  }
+  return statsMap;
+}
+
 const patrolCreateSchema = z.object({
   id: z.string().min(1).max(50).optional(),
   forestId: z.string().cuid().nullish(),
@@ -158,6 +248,7 @@ patrolsRouter.post('/', validateBody(patrolCreateSchema), async (req, res) => {
       syncStatus: 'SYNCED',
     },
   });
+  patrolListCache.clear();
   res.status(201).json(patrol);
 });
 
@@ -169,6 +260,20 @@ const patrolListQuery = z.object({
 
 patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
   const q = req.query as z.infer<typeof patrolListQuery>;
+
+  // Server-side read cache: deduplicates rapid sequential polls for the same
+  // list (e.g. dashboard auto-refresh every 2s). The cache is per-user+query,
+  // keyed on userId + filter params; a 10s TTL is enough to eliminate bursts
+  // without stale-data risk.
+  const cacheKey = patrolListCacheKey(req.user!.id, q);
+  const hit = patrolListCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < PATROL_LIST_TTL_MS) {
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(hit.body);
+    return;
+  }
+
   const base: Record<string, unknown> = {};
   if (q.forestId) base.forestId = q.forestId;
   if (q.status) base.status = q.status;
@@ -183,85 +288,15 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
     orderBy: { createdAt: 'desc' },
   });
 
-  // Batched geography enrichment (≤1 query per hierarchy level for the list).
-  const geoIndex = await resolvePatrolGeographyIndex(patrols);
-
-  // Batched stats enrichment — single SQL for all patrol IDs so the list
-  // carries distance/duration without N+1. PostGIS fall-back: when
-  // ST_Length fails the whole query is caught and re-run without the
-  // spatial column (duration still available via pure EXTRACT).
+  // Batched geography + stats enrichment — run in parallel to avoid
+  // sequential DB round-trips (geography ~3 queries, stats ~1-2 queries).
   const ids = patrols.map((p) => p.id);
-  let statsMap = new Map<string, { distanceKm: number; durationSeconds: number }>();
-  if (ids.length > 0) {
-    try {
-      const rows = await prisma.$queryRaw<{ patrolId: string; distanceKm: number; durationSeconds: number }[]>`
-        SELECT "patrolId",
-          COALESCE(
-            CASE WHEN COUNT(id) >= 2 THEN
-              ST_Length(
-                ST_MakeLine(
-                  ST_SetSRID(ST_MakePoint(longitude, latitude), 4326)
-                  ORDER BY timestamp
-                )::geography
-              ) / 1000.0
-            ELSE 0 END, 0
-          ) AS "distanceKm",
-          COALESCE(EXTRACT(EPOCH FROM (MAX("timestamp") - MIN("timestamp"))), 0) AS "durationSeconds"
-        FROM "PatrolPoint"
-        WHERE "patrolId" = ANY(${ids}::text[])
-        GROUP BY "patrolId"
-      `;
-      for (const r of rows) {
-        statsMap.set(r.patrolId, {
-          distanceKm: Math.round(r.distanceKm * 100) / 100,
-          durationSeconds: Math.round(r.durationSeconds),
-        });
-      }
-    } catch {
-      // PostGIS shared library unavailable — compute distance via pure-PG
-      // Haversine and duration via EXTRACT(EPOCH), both without spatial
-      // extensions. Single batched query for all patrol IDs (no N+1).
-      const rows = await prisma.$queryRaw<{
-        patrolId: string; distanceKm: number; durationSeconds: number;
-      }[]>`
-        WITH ordered AS (
-          SELECT "patrolId", longitude, latitude, "timestamp",
-            LAG(longitude) OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLng",
-            LAG(latitude)  OVER (PARTITION BY "patrolId" ORDER BY "timestamp") AS "prevLat"
-          FROM "PatrolPoint"
-          WHERE "patrolId" = ANY(${ids}::text[])
-        )
-        SELECT
-          "patrolId",
-          COALESCE(
-            SUM(
-              CASE WHEN "prevLat" IS NOT NULL AND "prevLng" IS NOT NULL
-                AND latitude  IS NOT NULL AND longitude IS NOT NULL
-                AND NOT (latitude = 0 AND longitude = 0)
-                AND NOT ("prevLat" = 0 AND "prevLng" = 0)
-              THEN 2 * 6371000.0 * ASIN(SQRT(
-                POWER(SIN(RADIANS(latitude  - "prevLat") / 2.0), 2) +
-                COS(RADIANS("prevLat")) * COS(RADIANS(latitude)) *
-                POWER(SIN(RADIANS(longitude - "prevLng") / 2.0), 2)
-              )) ELSE 0 END
-            ) / 1000.0, 0
-          ) AS "distanceKm",
-          COALESCE(
-            EXTRACT(EPOCH FROM MAX("timestamp") - MIN("timestamp")), 0
-          ) AS "durationSeconds"
-        FROM ordered
-        GROUP BY "patrolId"
-      `;
-      for (const r of rows) {
-        statsMap.set(r.patrolId, {
-          distanceKm: Math.round(r.distanceKm * 100) / 100,
-          durationSeconds: Math.round(r.durationSeconds),
-        });
-      }
-    }
-  }
+  const [geoIndex, statsMap] = await Promise.all([
+    resolvePatrolGeographyIndex(patrols),
+    loadPatrolStats(ids),
+  ]);
 
-  res.json(patrols.map((p) => {
+  const body = JSON.stringify(patrols.map((p) => {
     const s = statsMap.get(p.id);
     return {
       ...p,
@@ -269,6 +304,11 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
       stats: s ?? null,
     };
   }));
+
+  patrolListCache.set(cacheKey, { at: Date.now(), body });
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(body);
 });
 
 const liveQuery = z.object({
@@ -846,6 +886,7 @@ patrolsRouter.post('/:id/start', validateBody(startSchema), async (req, res) => 
     where: { id },
     data: { status: 'ACTIVE', startedAt, syncStatus: 'SYNCED' },
   });
+  patrolListCache.clear();
   res.status(200).json({ status: updated.status, startedAt });
 });
 
@@ -894,5 +935,6 @@ patrolsRouter.post('/:id/complete', validateBody(completeSchema), async (req, re
       detectedMethod: body.detectedMethod ?? undefined,
     },
   });
+  patrolListCache.clear();
   res.status(200).json({ status: updated.status, endedAt });
 });

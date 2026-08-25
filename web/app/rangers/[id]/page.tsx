@@ -30,8 +30,8 @@ export default function RangerDetailPage() {
   const { pushToast } = useApp();
   const { data: ranger, error, loading, reload } = useAsyncData(() => rangers.get(params.id));
   const trend = useAsyncData(() => rangers.trend(params.id));
-  const auths = useAsyncData(() => authorizations.list());
-  const patrolData = useAsyncData(() => patrols.list());
+  const auths = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
+  const patrolData = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
   const [removeOpen, setRemoveOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
 

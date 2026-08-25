@@ -57,9 +57,9 @@ function monthEndIST(): string {
 
 export default function PatrolsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.list());
-  const roster = useAsyncData(() => rangers.list());
-  const hierarchyData = useAsyncData(() => hierarchy.units());
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "patrols:roster" });
+  const hierarchyData = useAsyncData(() => hierarchy.units(), [], { cacheKey: "patrols:hierarchy" });
 
   /* ── Filter state — all default to "" (= All) ── */
   const [status, setStatus] = useState("");

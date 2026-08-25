@@ -54,8 +54,8 @@ export default function SosControlRoomPage() {
   const { pushToast, user } = useApp();
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const casesData = useAsyncData(() => sosService.cases());
-  const feedData = useAsyncData(() => sosService.feed());
+  const casesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases" });
+  const feedData = useAsyncData(() => sosService.feed(), [], { cacheKey: "sos:feed" });
 
   const cases = casesData.data ?? [];
   const pendingCount = cases.filter((c) => c.incident.status === "SUBMITTED").length;

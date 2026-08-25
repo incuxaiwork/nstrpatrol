@@ -25,7 +25,7 @@ const label: Record<EquipmentItem["status"], string> = {
 };
 
 export default function EquipmentPage() {
-  const { data, error, loading, reload } = useAsyncData(() => rangers.equipment());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.equipment(), [], { cacheKey: "rangers:equipment" });
 
   if (loading || !data) return <SkeletonRows rows={5} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;

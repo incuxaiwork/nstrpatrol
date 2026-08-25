@@ -31,7 +31,7 @@ import { FOREST_CONTEXT, GRID_SIZES, DEFAULT_GRID_SIZE, gridSizeLabel, type Grid
 import { tagBeats, tagCompartments, tagGrids, type TaggedGrid } from "@/lib/grid-regions";
 import { buildAnalysisGrid } from "@/lib/gis/grid";
 import type { GridCoverageInfo, LivePathFeature, LiveRangerFeature } from "@/lib/map-space";
-import type { GisMarker, GisRoute } from "@/lib/mock/gis";
+import type { GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
   return b.isZeroPatrol === true;
@@ -224,8 +224,16 @@ function GisWorkspace() {
   const searchParams = useSearchParams();
   const sosParam = searchParams.get("sos");
   // Beats come from the backend GIS API (GeoJSON → GL layers).
-  const beatsData = useAsyncData(() => gis.beats());
-  const assetsData = useAsyncData(() => gis.assets());
+  // Spatial layers — single consolidated fetch (was 5 separate useAsyncData hooks,
+  // each triggering re-renders independently even though they shared one network call).
+  const spatialData = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
+  const beatsData = { data: spatialData.data?.beats ?? null, loading: spatialData.loading, error: spatialData.error, reload: spatialData.reload };
+  const compartmentsData = { data: spatialData.data?.compartments ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
+  const boundaryData = { data: spatialData.data?.boundary ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
+  const gridsData = { data: spatialData.data?.grids ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
+  const extentData = { data: spatialData.data?.extent ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
+
+  const assetsData = useAsyncData(() => gis.assets(), [], { cacheKey: "gis:assets" });
   const [rawSelected, setSelected] = useState<string | null>(null);
   // No patrol preselected — play/pause appears only after the admin picks one.
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
@@ -240,26 +248,27 @@ function GisWorkspace() {
   const [selectedGridIds, setSelectedGridIds] = useState<ReadonlySet<string>>(new Set());
   const [hoveredGridId, setHoveredGridId] = useState<string | null>(null);
 
-  const markersData = useAsyncData(() => gis.markers());
+  const markersData = useAsyncData(() => gis.markers(), [], { cacheKey: "gis:markers" });
   // LIVE tracking (GET /api/patrols/live) — ACTIVE patrols, latest valid fix
   // and bounded recent path, polled while this page is mounted only.
   const liveTracking = useLiveTracking();
   const liveFeed = liveTracking.feed;
   const liveSkewMs = liveFeed?.skewMs ?? 0;
   const now = useTicker(5000);
-  const routesData = useAsyncData(() => gis.routes());
-  const heatData = useAsyncData(() => gis.heat());
-  const rangersData = useAsyncData(() => servicesRangers.list());
-  const observationsData = useAsyncData(() => servicesObservations.list());
-  const compartmentsData = useAsyncData(() => gis.compartments());
-  const boundaryData = useAsyncData(() => gis.boundary());
-  const gridsData = useAsyncData(() => gis.grids());
-  const extentData = useAsyncData(() => gis.extent());
+  // Historical patrol routes: deferred until user enables the routes layer
+  // (was loaded eagerly on mount — 11 API calls including per-patrol point fetches).
+  const routesData = useAsyncData(
+    () => layerState.routes ? gis.routes() : Promise.resolve([] as GisRoute[]),
+    [layerState.routes],
+    { cacheKey: "gis:routes" }
+  );
+  const rangersData = useAsyncData(() => servicesRangers.list(), [], { cacheKey: "rangers:list" });
+  const observationsData = useAsyncData(() => servicesObservations.list(), [], { cacheKey: "observations:list" });
   // Authoritative coverage (GET /api/coverage/grids). Backend computes the
   // scope; the frontend only joins + displays. Non-blocking: the map and the
   // analysis grid stay usable while this loads.
   // Real hierarchy register for the region filters (independent of the map).
-  const unitsData = useAsyncData(() => hierarchyService.units());
+  const unitsData = useAsyncData(() => hierarchyService.units(), [], { cacheKey: "hierarchy:units" });
 
   // Region attribution of beats → compartments → grids over the real
   // polygons (shared projection space — exact within it). Division is
@@ -317,7 +326,7 @@ function GisWorkspace() {
   // Live SOS alert feed (Part B) — powers the dedicated SOS map layer and
   // the ?sos= deep link. Strict remote; a failure surfaces as an inline
   // note, never as fabricated points.
-  const sosCasesData = useAsyncData(() => sosService.cases());
+  const sosCasesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases" });
   const sosCases = useMemo(() => sosCasesData.data ?? [], [sosCasesData.data]);
   const sosAlerts = useMemo(
     () =>
@@ -435,21 +444,14 @@ function GisWorkspace() {
     };
   }, [unitsData.data]);
 
-  if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data || extentData.loading || !extentData.data)
-    return <SkeletonRows rows={8} />;
-  if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
-  if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
-  if (boundaryData.error) return <ErrorState message={boundaryData.error.message} onRetry={boundaryData.reload} />;
-  if (gridsData.error) return <ErrorState message={gridsData.error.message} onRetry={gridsData.reload} />;
-  if (extentData.error) return <ErrorState message={extentData.error.message} onRetry={extentData.reload} />;
-
-  const beats = beatsData.data;
-  const compartments = compartmentsData.data;
-  const boundary = boundaryData.data;
-  const grids = gridsData.data;
+  const spatialReady = Boolean(spatialData.data);
+  const beats = beatsData.data ?? [];
+  const compartments = compartmentsData.data ?? [];
+  const boundary = boundaryData.data ?? [];
+  const grids = gridsData.data ?? [];
   const markers = markersData.data ?? [];
   const routes = routesData.data ?? [];
-  const heat = heatData.data ?? [];
+  const heat: HeatBlock[] = [];
   const units = unitsData.data ?? null;
 
   // Selecting a patrol route on the map arms the replay for that patrol —
@@ -693,7 +695,15 @@ function GisWorkspace() {
                   />
                 ) : undefined
               }
-              statusChip={statusChip}
+              statusChip={spatialData.error ? (
+                <p className="inline-block max-w-full truncate rounded-md border border-danger/30 bg-danger-soft px-2.5 py-1.5 text-[11px] text-danger shadow-card">
+                  Spatial layers failed — {spatialData.error.message}
+                </p>
+              ) : !spatialReady ? (
+                <p className="inline-block max-w-full truncate rounded-md border border-line bg-white/95 px-2.5 py-1.5 text-[11px] text-ink-soft shadow-card">
+                  Loading spatial layers…
+                </p>
+              ) : statusChip}
               regionFilter={regionFilter}
             />
           </Card>

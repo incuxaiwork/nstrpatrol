@@ -34,7 +34,7 @@ export default function ObservationsListPage() {
 function ObservationsList() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data, error, loading, reload } = useAsyncData(() => observations.list());
+  const { data, error, loading, reload } = useAsyncData(() => observations.list(), [], { cacheKey: "observations:list" });
 
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
   const [subcategory, setSubcategory] = useState("");

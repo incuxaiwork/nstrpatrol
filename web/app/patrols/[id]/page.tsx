@@ -33,8 +33,8 @@ export default function PatrolDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const auths = useAsyncData(() => authorizations.list());
-  const spatial = useAsyncData(() => gis.spatial());
+  const auths = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
+  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
   const [reportOpen, setReportOpen] = useState(false);
 
   const jurisdiction = useMemo(

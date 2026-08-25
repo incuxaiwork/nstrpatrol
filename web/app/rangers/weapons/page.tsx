@@ -16,7 +16,7 @@ const tone: Record<Weapon["status"], BadgeTone> = { issued: "forest", armory: "n
 const label: Record<Weapon["status"], string> = { issued: "Issued", armory: "In armory", maintenance: "Maintenance" };
 
 export default function WeaponsPage() {
-  const { data, error, loading, reload } = useAsyncData(() => rangers.weapons());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.weapons(), [], { cacheKey: "rangers:weapons" });
 
   if (loading || !data) return <SkeletonRows rows={5} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;

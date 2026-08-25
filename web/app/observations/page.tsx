@@ -31,7 +31,7 @@ const categoryIcon: Record<string, IconName> = {
 
 export default function ObservationsDashboardPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => observations.list());
+  const { data, error, loading, reload } = useAsyncData(() => observations.list(), [], { cacheKey: "observations:list" });
 
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");

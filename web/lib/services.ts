@@ -118,14 +118,25 @@ export const patrols = (() => {
   let listCached: { data: Patrol[]; at: number } | null = null;
   let listInflight: Promise<Patrol[]> | null = null;
 
+  let rawCached: { data: ApiPatrol[]; at: number } | null = null;
+  let rawInflight: Promise<ApiPatrol[]> | null = null;
+
   async function fetchList(): Promise<Patrol[]> {
     const rows = await api.patrols.list();
     return rows.map((p) => patrolFromApi(p));
   }
 
-  /** Expose raw API rows so rangers.list() can reuse the same network call. */
+  /** Expose raw API rows so rangers.list() can reuse the same network call.
+   *  Uses its own cache + inflight dedupe to prevent duplicate network calls
+   *  when multiple services call rawList() concurrently. */
   async function rawList(): Promise<ApiPatrol[]> {
-    return api.patrols.list();
+    if (rawCached && Date.now() - rawCached.at < LIST_TTL_MS) return rawCached.data;
+    if (rawInflight) return rawInflight;
+    rawInflight = api.patrols.list().then(
+      (data) => { rawCached = { data, at: Date.now() }; rawInflight = null; return data; },
+      (err) => { rawInflight = null; throw err; },
+    );
+    return rawInflight;
   }
 
   return {
@@ -692,7 +703,7 @@ export const gis = {
    * Strict: no mock fallback — failures surface as error states.
    */
   spatial: (() => {
-    const TTL_MS = 30_000;
+    const TTL_MS = 300_000;
     let cached: {
       data: {
         beats: BeatPolygon[];
@@ -1154,6 +1165,7 @@ export const workAnalytics = {
 /* ------------------------------------------------------------------ */
 
 let hierarchyCache: HierarchyTree | null = null;
+let hierarchyInflight: Promise<HierarchyTree> | null = null;
 
 export const hierarchy = {
 /** Division → range → beat tree + compartment register, derived from the
@@ -1161,12 +1173,15 @@ export const hierarchy = {
  *  Strict: no mock fallback — failures surface as error states. */
   units: async (): Promise<HierarchyTree> => {
     if (hierarchyCache) return hierarchyCache;
-    const tree = await remoteOnly(async () => {
+    if (hierarchyInflight) return hierarchyInflight;
+    hierarchyInflight = remoteOnly(async () => {
       const [beatFc, compFc] = await Promise.all([api.gis.beats(), api.gis.compartments()]);
       return hierarchyFromGeoJson(beatFc, compFc);
-    });
-    hierarchyCache = tree;
-    return tree;
+    }).then(
+      (tree) => { hierarchyCache = tree; hierarchyInflight = null; return tree; },
+      (err) => { hierarchyInflight = null; throw err; },
+    );
+    return hierarchyInflight;
   },
   compartments: async (): Promise<HierarchyTree["compartments"]> => (await hierarchy.units()).compartments,
 };
