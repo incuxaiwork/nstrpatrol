@@ -1,0 +1,286 @@
+============================================================
+NSTR PATROL — FEATURE OVERVIEW FOR RANGE OFFICERS
+============================================================
+Version: 1.0.10 | Date: August 2026
+============================================================
+
+
+1. DASHBOARD (Home Screen)
+------------------------------------------------------------
+
+The Dashboard is the first screen officers see after logging in.
+It provides a quick summary of the day's activity and one-tap
+access to key functions.
+
+What the officer sees:
+
+  - Greeting with the officer's name and time of day.
+  - Active Patrol banner — shows the currently running patrol
+    (if any) with a tap to open the full report.
+  - Activity Rings — three circular gauges showing:
+      * Steps taken today (target: 10,000)
+      * Move minutes (target: 60 min)
+      * Calories burned (target: 500)
+  - Today's Stats — four cards showing:
+      * Distance covered (km)
+      * Patrol duration
+      * Heart points earned
+      * Number of patrols completed today
+  - Quick Actions — six shortcut buttons:
+      * Start Patrol — goes directly to the Patrol Start screen
+      * Sync Queue — view pending sync data
+      * SOS — emergency alert
+      * Quick Capture — fast observation recording
+  - Logs & Alerts — view recent activity and alerts
+
+
+2. MAPS
+------------------------------------------------------------
+
+The Maps screen shows the forest boundary, beats, and
+compartments on an interactive map with live patrol tracking.
+
+What the officer sees:
+
+  OFFLINE MAP
+  - The map works completely offline using a pre-loaded tile
+    atlas. No internet connection is needed in the forest.
+
+  GIS LAYERS
+  - Forest Beat Boundaries — 44 beats for Markapur Division
+    shown as green outlined polygons with name labels.
+  - Forest Compartments — 448 compartments shown as amber
+    outlined polygons within each beat.
+  - Tap any beat or compartment to see its details (name,
+    area, range, division, etc.) in a pop-up panel.
+
+  LIVE TRACKING
+  - While a patrol is running, the officer's path is drawn
+    as a yellow line on the map.
+  - A blue dot shows the current position in real time.
+  - The map auto-follows the officer at close zoom.
+  - Speed, distance, and duration are shown in an overlay
+    at the bottom of the screen.
+
+  LAYER CONTROLS
+  - A layer panel lets the officer toggle:
+      * MBTiles Offline Basemap (on by default)
+      * Forest Beat Boundaries (on by default)
+      * Forest Compartments (on by default)
+      * Satellite Imagery (online, when connected)
+      * Street Map (online, when connected)
+      * My Patrol Track (on by default)
+
+  MAP CONTROLS
+  - Zoom in/out buttons
+  - Compass reset (North-up)
+  - Recenter on my location
+  - Map legend showing what each color means
+
+
+3. PATROL FLOW
+------------------------------------------------------------
+
+The patrol system records the officer's movement, duration,
+and route during each patrol shift.
+
+3.1 STARTING A PATROL
+
+  The officer fills in:
+  - Patrol Type — Walk, Bicycle, Vehicle, Motor Cycle,
+    Boat, Aerial, Stationary, or General Duties
+  - Patrol Method — selected from the department's list
+  - Beat — which forest beat to patrol
+  - Armed Status — Armed or Unarmed (and which arm if armed)
+
+  Tapping "Start Patrol" begins GPS tracking immediately.
+  The app runs in the background even if the phone screen
+  is off or another app is open.
+
+3.2 DURING THE PATROL
+
+  While patrolling, the officer can switch to the Maps screen
+  to see their live position, path, speed, and the surrounding
+  beat/compartment boundaries.
+
+  The dashboard shows the active patrol banner with a quick
+  link to the patrol report.
+
+3.3 PATROL REPORT
+
+  Once the patrol is ended (via "End Patrol" button), a full
+  report is generated showing:
+
+  - Route Map — the complete patrol path on a map with
+    options to switch between offline, satellite, and street
+    views.
+  - Summary Stats:
+      * Total distance covered
+      * Total duration
+      * Number of GPS points recorded
+      * Current speed (km/h)
+      * Sync status (uploaded to server or pending)
+  - Activity Rings — same as dashboard (steps, move minutes,
+    calories)
+  - Movement Breakdown — a timeline showing what mode of
+    transport was used during each segment of the patrol
+    (e.g., walking for 20 min, then vehicle for 10 min)
+  - Team Details — patrol type, method, beat, armed status,
+    detected movement mode
+  - Timing — start time, end time, sync status
+
+3.4 ALL PATROLS
+
+  A list of all past and current patrols with:
+  - Filter by All, Active, or Completed
+  - Each patrol shows: type, beat, status, date/time,
+    distance, steps, and whether it has been synced
+  - Tap any patrol to open its full report
+  - "Refresh" button to push local data to the server
+  - "Pull from Cloud" button to download data from other
+    devices
+
+
+4. INCIDENT REPORTS
+------------------------------------------------------------
+
+Officers can report incidents observed during patrol. Each
+report auto-captures the GPS location, time, officer name,
+badge, and beat — no manual entry needed.
+
+4.1 REPORT CATEGORIES
+
+  HUMAN IMPACT
+  Report unauthorized human activity in the forest.
+  - Type of human impact (e.g., encroachment, theft)
+  - Action taken
+  - Severity (Low / Medium / High)
+  - Time elapsed since observation
+  - Photo evidence
+  - Remarks
+
+  ANIMAL MORTALITY
+  Report dead or injured animals found during patrol.
+  - Species type and specific species
+  - Probable cause of death
+  - Condition of the carcass
+  - Sex and age counts (male, sub-adult, young)
+  - Severity
+  - Photo evidence
+  - Remarks
+
+  SIGHTINGS
+  Record direct or indirect wildlife sightings.
+  - Type of sign (direct sighting, pugmark, scat, etc.)
+  - Species type and specific species
+  - Age of tracks and signs
+  - Severity
+  - Photo evidence
+  - Remarks
+
+  WATER SOURCE
+  Report on the condition of water sources in the forest.
+  - Type of water source (pond, stream, etc.)
+  - Whether it is dry
+  - How full it is (10% to 100%)
+  - Water quality
+  - Whether humans or animals are present
+  - Types of human/animal signs observed
+  - Species seen at the water source
+  - Severity
+  - Photo evidence
+  - Remarks
+
+  QUICK CAPTURE
+  For fast, informal observations that don't fit a category.
+  - Optional sign type
+  - Optional remarks
+  - Photo evidence
+  - Auto-captured location and time
+
+4.2 SOS EMERGENCY
+
+  A large red SOS button sends an emergency alert with the
+  officer's current GPS location to designated emergency
+  contacts.
+
+  How it works:
+  - Tap the SOS button
+  - A 5-second countdown starts (with cancel option)
+  - After countdown, the alert is sent to the server
+  - If offline, the alert is queued and sent when connection
+    returns
+  - Emergency contacts loaded from the server are shown
+    with tap-to-call functionality
+
+4.3 REPORT MANAGEMENT
+
+  All submitted incidents appear in the Reports screen:
+  - Each incident shows its category, title, date, and
+    status (Submitted / Verified / Resolved / Rejected)
+  - Tap any incident to see full details including photos
+  - Officers can view the GPS coordinates, timestamp, and
+    other auto-captured data for each report
+
+
+5. ADDITIONAL FEATURES
+------------------------------------------------------------
+
+  SETTINGS
+  - Language selection (multiple Indian languages supported)
+  - GPS recording settings (poll rate, displacement, etc.)
+  - Sync mode (auto or manual)
+  - Officer profile display
+  - Logout
+
+  GPS DIAGNOSTICS
+  - Real-time GPS health score and accuracy meter
+  - Satellite constellation status (GPS, GLONASS, Galileo,
+    BeiDou, QZSS, NavIC)
+  - Signal strength bars for visible satellites
+  - Live compass with heading, bearing, and calibration
+  - Device info (OS version, battery, app version)
+  - Full diagnostic report that can be copied or shared
+
+  OFFLINE SUPPORT
+  - The app works fully offline in the forest
+  - All data is stored locally and synced when connectivity
+    returns
+  - Background sync runs periodically and on connection gain
+  - Maps work offline via pre-loaded tile atlas
+
+  DATA SYNC
+  - Automatic background sync every 30 minutes when online
+  - Immediate sync when connectivity is regained
+  - While patrolling, sync runs every 3 minutes
+  - Manual "Sync" and "Pull from Cloud" buttons available
+  - Data from multiple officers' devices is merged on the
+    server
+
+  APP UPDATES
+  - The app checks for updates on launch
+  - If an update is available, a dialog shows the version,
+    size, and release notes
+  - The officer can tap "Update" to download and install
+    directly — no need to visit an app store
+
+
+============================================================
+SUMMARY
+============================================================
+
+NSTR Patrol provides forest officers with:
+
+  1. A complete offline-capable patrol tracking system
+  2. Interactive forest maps with 44 beats and 448
+     compartments
+  3. Real-time GPS tracking with live speed and distance
+  4. Four types of incident reporting with photo evidence
+  5. Emergency SOS with auto-location
+  6. Automatic data sync across devices
+  7. Comprehensive GPS diagnostics
+
+All data is captured automatically (GPS, time, officer info)
+to minimize manual entry and ensure accuracy.
+
+============================================================

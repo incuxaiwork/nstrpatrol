@@ -135,19 +135,20 @@ fun PatrolStartScreen(
             activeTab = BottomTab.Patrol,
             onTabSelected = onTabSelected
         ) {
-            Spacer(Modifier.height(12.dp))
-            SectionHeader(text = stringResource(R.string.patrol_start_team))
-            Spacer(Modifier.height(8.dp))
-            PhotoPlaceholder(
-                actionText = stringResource(R.string.patrol_photo_action),
-                hint = stringResource(R.string.patrol_photo_hint),
-                photoPaths = photoPaths,
-                onClick = { onOpenCamera(photoSlot) },
-                onRemovePhoto = { path ->
-                    PhotoStore.removePath(photoSlot, path)
-                    photoPaths = PhotoStore.paths(photoSlot)
-                }
-            )
+            // Photo capture section (disabled for beta)
+            // Spacer(Modifier.height(12.dp))
+            // SectionHeader(text = stringResource(R.string.patrol_start_team))
+            // Spacer(Modifier.height(8.dp))
+            // PhotoPlaceholder(
+            //     actionText = stringResource(R.string.patrol_photo_action),
+            //     hint = stringResource(R.string.patrol_photo_hint),
+            //     photoPaths = photoPaths,
+            //     onClick = { onOpenCamera(photoSlot) },
+            //     onRemovePhoto = { path ->
+            //         PhotoStore.removePath(photoSlot, path)
+            //         photoPaths = PhotoStore.paths(photoSlot)
+            //     }
+            // )
 
             // DISABLED FOR BETA (face recognition moved to feature/facerecognization):
             // Spacer(Modifier.height(12.dp))
@@ -257,7 +258,7 @@ fun PatrolStartScreen(
             )
 
             Spacer(Modifier.height(20.dp))
-            PrimaryButton(text = stringResource(R.string.action_save_details), onClick = {
+            PrimaryButton(text = stringResource(R.string.action_start_patrol), onClick = {
                 showErrors = true
                 if (patrolType == null || patrolMethod == null || beat == null) {
                     return@PrimaryButton
@@ -403,6 +404,8 @@ private fun mapPatrolType(type: String?): String = when (type) {
     "BICYCLE", "Cycle" -> "BICYCLE"
     "VEHICLE", "Motor Cycle", "Four Wheeler", "Boat", "Aerial" -> "VEHICLE"
     "STATIONARY" -> "STATIONARY"
+    "COMBING SURVEILLANCE" -> "COMBING"
+    "GENERAL DUTIES" -> "GENERAL"
     else -> "WALK"
 }
 

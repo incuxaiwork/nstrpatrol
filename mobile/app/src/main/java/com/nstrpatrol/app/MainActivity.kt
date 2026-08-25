@@ -55,7 +55,6 @@ import com.nstrpatrol.app.data.ConnectivityObserver
 import com.nstrpatrol.app.data.NetworkStatus
 import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
-import com.nstrpatrol.app.data.ServerHealthMonitor
 import com.nstrpatrol.app.data.SettingsStore
 import com.nstrpatrol.app.data.SyncController
 import com.nstrpatrol.app.data.SyncScheduler
@@ -183,11 +182,8 @@ fun NstrApp() {
 
     // Schedule background sync: every 30 min while online + an immediate
     // network-gated sync so data flows as soon as connectivity returns.
-    // ServerHealthMonitor polls /api/health/ping every 15s so we know the
-    // backend itself is reachable — OS "online" alone is not enough.
     LaunchedEffect(Unit) {
         NetworkStatus.attach(context.applicationContext)
-        ServerHealthMonitor.attach(context.applicationContext)
         SyncScheduler.schedule(context.applicationContext)
         // Recover orphaned ACTIVE sessions: the in-memory patrol timer is lost
         // when the process is killed (force-stop, crash, reboot), so any session
@@ -363,17 +359,13 @@ fun NstrApp() {
         }
     }
 
-    // Auto-sync: flush PENDING rows whenever device is online AND server
-    // /api/health/ping is reachable. Health is polled every 15s by
-    // ServerHealthMonitor (no auth, no DB) so a waking backend is used within
-    // seconds. Gated by syncMode==Auto; flipping Manual→Auto also triggers.
+    // Sync is mobile -> server only, and event-driven: flush local buffers
+    // whenever connectivity is (re)gained (via ConnectivityObserver's network
+    // callback — no polling). Gated by the user's sync setting: only runs in
+    // Auto mode. Flipping Manual -> Auto also triggers an immediate sync.
     LaunchedEffect(Unit) {
-        combine(
-            connectivity.isOnline,
-            ServerHealthMonitor.reachable,
-            settings.syncMode
-        ) { online, reachable, mode ->
-            online && reachable && mode == SettingsStore.MODE_AUTO
+        combine(connectivity.isOnline, settings.syncMode) { online, mode ->
+            online && mode == SettingsStore.MODE_AUTO
         }.collect { shouldSync ->
             if (shouldSync) {
                 SyncController.sync(database.telemetryDao(), api, auth.deviceId())
@@ -387,13 +379,10 @@ fun NstrApp() {
     // out of date (and the "sync queue" looks stuck).
     LaunchedEffect(patrolTimer.running.value) {
         while (patrolTimer.running.value) {
-            if (NetworkStatus.online.value &&
-                ServerHealthMonitor.reachable.value &&
-                settings.syncMode.value == SettingsStore.MODE_AUTO
-            ) {
+            if (NetworkStatus.online.value && settings.syncMode.value == SettingsStore.MODE_AUTO) {
                 SyncController.sync(database.telemetryDao(), api, auth.deviceId())
             }
-            delay(60_000L)
+            delay(3 * 60 * 1000L)
         }
     }
 
