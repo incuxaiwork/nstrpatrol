@@ -4,16 +4,10 @@
  * Auth-aware shell wrapper: redirects anonymous users to /login and hides
  * the admin chrome (sidebar/topbar) on the login screen.
  *
- * The session lives in localStorage, which the server cannot see. Reading it
- * during render made SSR emit the placeholder while a signed-in client
- * hydrated straight into <AppShell> — a hydration mismatch. Instead we read
- * the store through useSyncExternalStore: server render and hydration both
- * return null (unknown), then React re-renders with the live client value.
- *
- * The server snapshot returns null (not false) to distinguish "still
- * hydrating" from "genuinely not authenticated". This prevents the race
- * where the redirect useEffect fires with the stale server-snapshot false
- * before the subscription corrects to the real client value.
+ * Auth check uses useSyncExternalStore with a null server snapshot to avoid
+ * hydration mismatches. During the null (hydrating) phase, children render
+ * immediately inside AppShell — no blank loading screen. Redirect only fires
+ * after the subscription confirms the user is genuinely unauthenticated.
  */
 
 import { useEffect, useSyncExternalStore } from "react";
@@ -27,9 +21,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
 
   const onLogin = pathname === "/login";
 
-  // Server snapshot returns null (unknown), not false (not authed).
-  // This prevents the redirect effect from firing during hydration
-  // before the subscription corrects to the real client value.
+  // Server snapshot returns null (hydrating). Client resolves to true/false.
   const authed = useSyncExternalStore(subscribeToAuth, hasSession, () => null);
 
   useEffect(() => {
@@ -39,13 +31,8 @@ export function Shell({ children }: { children: React.ReactNode }) {
   }, [authed, onLogin, router]);
 
   if (onLogin) return <>{children}</>;
-  if (authed === null) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-surface text-sm text-ink-soft">
-        Loading…
-      </div>
-    );
-  }
-  if (!authed) return null;
+  // Render children immediately — no blank loading screen.
+  // If auth fails, the redirect effect fires on the next tick.
+  if (!authed) return <>{children}</>;
   return <AppShell>{children}</AppShell>;
 }

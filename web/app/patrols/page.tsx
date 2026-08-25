@@ -175,7 +175,7 @@ export default function PatrolsPage() {
   }, []);
 
   /* ── Loading / error states ── */
-  if (loading || !data || roster.loading || !roster.data || hierarchyData.loading || !hierarchyData.data) return <SkeletonRows rows={8} />;
+  if (loading || !data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   return (
