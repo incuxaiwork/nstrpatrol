@@ -367,8 +367,8 @@ export interface ApiPatrolCoverageSummary {
   patrolId: string;
   totalCells: number;
   patrolledCells: number;
-  /** Server-rounded to one decimal. */
-  coveragePercent: number;
+  /** null when PostGIS is unavailable; server-rounded to one decimal otherwise. */
+  coveragePercent: number | null;
   pointCount: number;
 }
 
@@ -665,7 +665,7 @@ export const patrols = {
 };
 
 export const incidents = {
-  list: (query: { mine?: boolean; status?: string; type?: string; from?: string; to?: string } = {}) =>
+  list: (query: { mine?: boolean; status?: string; type?: string; from?: string; to?: string; patrolId?: string } = {}) =>
     request<ApiIncident[]>("/api/incidents", {
       query: { ...query, mine: query.mine ? "true" : undefined },
     }),

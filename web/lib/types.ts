@@ -161,8 +161,8 @@ export interface Patrol {
   endActual?: string;
   distanceKm: number | null;
   durationMin: number;
-  /** Real ForestGrid coverage (patrol detail only). Absent = unavailable — never 0. */
-  coveragePct?: number;
+  /** Real ForestGrid coverage (patrol detail only). null = PostGIS unavailable; absent = no data. */
+  coveragePct?: number | null;
   /** No checkpoint entity/API exists — undefined from real data, never 0. */
   checkpoints?: number;
   incidents: number;
@@ -206,7 +206,8 @@ export interface PatrolReport {
   reportDate: string;
   period: string;
   durationMin: number;
-  distanceKm: number;
+  /** null = unavailable; 0 = genuinely zero distance. */
+  distanceKm: number | null;
   /** Real value when available; absent (never 0) otherwise. */
   coveragePct?: number;
   checkpoints?: number;

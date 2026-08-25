@@ -315,6 +315,8 @@ export interface PatrolCoverageSummary {
   totalCells: number;
   patrolledCells: number;
   pointCount: number;
+  /** false when PostGIS is unavailable and spatial attribution could not run. */
+  spatial?: boolean;
 }/**
  * Coverage of ONE patrol over the authoritative ForestGrid — identical
  * spatial semantics to runGridCoverage (cell universe = ForestGrid ∩ Beat
@@ -339,32 +341,58 @@ export async function runPatrolCoverageSummary(
     );
   }
 
-  const rows = await prisma.$queryRaw<{ totalCells: number; patrolledCells: number; pointCount: number }[]>`
-    WITH scoped_cells AS (
-      SELECT fg.id AS "cellId", fg.geom
+  try {
+    const rows = await prisma.$queryRaw<{ totalCells: number; patrolledCells: number; pointCount: number }[]>`
+      WITH scoped_cells AS (
+        SELECT fg.id AS "cellId", fg.geom
+        FROM "ForestGrid" fg
+        WHERE ${Prisma.join(cellConds, ' AND ')}
+      ),
+      attrib AS (
+        SELECT sc."cellId",
+               COUNT(pp.id)::int AS "pointCount"
+        FROM scoped_cells sc
+        LEFT JOIN "PatrolPoint" pp
+          ON pp."patrolId" = ${patrolId}
+         AND ST_Intersects(sc.geom, pp.geom)
+        GROUP BY sc."cellId"
+      )
+      SELECT COUNT(*)::int AS "totalCells",
+             COUNT(*) FILTER (WHERE COALESCE(a."pointCount", 0) > 0)::int AS "patrolledCells",
+             COALESCE(SUM(COALESCE(a."pointCount", 0)), 0)::bigint AS "pointCount"
+      FROM attrib a
+    `;
+    const row = rows[0];
+    return {
+      totalCells: Number(row?.totalCells ?? 0),
+      patrolledCells: Number(row?.patrolledCells ?? 0),
+      pointCount: Number(row?.pointCount ?? 0n),
+      spatial: true,
+    };
+  } catch {
+    // PostGIS unavailable — fall back to non-spatial cell count.
+    // Cannot determine which cells the patrol touched without
+    // ST_Intersects, so report total cells only; coveragePercent
+    // becomes null to signal the data gap honestly.
+    const fallbackConds: Prisma.Sql[] = [];
+    if (forestId) fallbackConds.push(Prisma.sql`fg."forestId" = ${forestId}`);
+
+    const totalRows = await prisma.$queryRaw<{ totalCells: number }[]>`
+      SELECT COUNT(*)::int AS "totalCells"
       FROM "ForestGrid" fg
-      WHERE ${Prisma.join(cellConds, ' AND ')}
-    ),
-    attrib AS (
-      SELECT sc."cellId",
-             COUNT(pp.id)::int AS "pointCount"
-      FROM scoped_cells sc
-      LEFT JOIN "PatrolPoint" pp
-        ON pp."patrolId" = ${patrolId}
-       AND ST_Intersects(sc.geom, pp.geom)
-      GROUP BY sc."cellId"
-    )
-    SELECT COUNT(*)::int AS "totalCells",
-           COUNT(*) FILTER (WHERE COALESCE(a."pointCount", 0) > 0)::int AS "patrolledCells",
-           COALESCE(SUM(COALESCE(a."pointCount", 0)), 0)::bigint AS "pointCount"
-    FROM attrib a
-  `;
-  const row = rows[0];
-  return {
-    totalCells: Number(row?.totalCells ?? 0),
-    patrolledCells: Number(row?.patrolledCells ?? 0),
-    pointCount: Number(row?.pointCount ?? 0n),
-  };
+      ${fallbackConds.length > 0 ? Prisma.sql`WHERE ${Prisma.join(fallbackConds, ' AND ')}` : Prisma.sql``}
+    `;
+    const pointRows = await prisma.$queryRaw<{ pointCount: bigint }[]>`
+      SELECT COUNT(*)::bigint AS "pointCount"
+      FROM "PatrolPoint" WHERE "patrolId" = ${patrolId}
+    `;
+    return {
+      totalCells: Number(totalRows[0]?.totalCells ?? 0),
+      patrolledCells: 0,
+      pointCount: Number(pointRows[0]?.pointCount ?? 0n),
+      spatial: false,
+    };
+  }
 }
 
 /** GET /api/coverage/grids?forestId=&rangeId=&beatId=&from=&to= */

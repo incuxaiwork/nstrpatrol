@@ -558,12 +558,14 @@ patrolsRouter.get('/:id/coverage/summary', async (req, res) => {
     ? ((await prisma.beat.findFirst({ where: { name: patrol.beat }, select: { name: true } }))?.name ?? null)
     : null;
 
-  const { totalCells, patrolledCells, pointCount } = await runPatrolCoverageSummary(
+  const { totalCells, patrolledCells, pointCount, spatial } = await runPatrolCoverageSummary(
     id,
     beatName,
     patrol.forestId,
   );
-  const coveragePercent = totalCells > 0 ? Math.round((patrolledCells / totalCells) * 1000) / 10 : 0;
+  const coveragePercent = spatial === false
+    ? null
+    : totalCells > 0 ? Math.round((patrolledCells / totalCells) * 1000) / 10 : 0;
   res.json({ patrolId: id, totalCells, patrolledCells, coveragePercent, pointCount });
 });
 
@@ -582,7 +584,11 @@ patrolsRouter.get('/:id/points', async (req, res) => {
   }
 
   const pts = await prisma.patrolPoint.findMany({
-    where: { patrolId: id },
+    where: {
+      patrolId: id,
+      latitude: { not: 0 },
+      longitude: { not: 0 },
+    },
     orderBy: { timestamp: 'asc' },
     select: {
       latitude: true,

@@ -65,6 +65,7 @@ const incidentListQuery = z.object({
   mine: z.literal('true').optional(),
   status: z.enum(['SUBMITTED', 'VERIFIED', 'RESOLVED', 'REJECTED']).optional(),
   type: z.enum(['HUMAN_IMPACT', 'ANIMAL_MORTALITY', 'SIGHTING', 'WATER_SOURCE', 'QUICK_CAPTURE', 'GENERAL']).optional(),
+  patrolId: z.string().max(50).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
 });
@@ -74,6 +75,7 @@ incidentsRouter.get('/', validateQuery(incidentListQuery), async (req, res) => {
   const base: Record<string, unknown> = {};
   if (q.status) base.status = q.status;
   if (q.type) base.type = q.type;
+  if (q.patrolId) base.patrolId = q.patrolId;
   if (q.from || q.to) {
     base.occurredAt = {
       ...(q.from ? { gte: q.from } : {}),

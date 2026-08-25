@@ -193,7 +193,7 @@ export default function PatrolReplayPage() {
           <Card>
             <CardHeader title="Coverage" icon="target" subtitle="ForestGrid cells touched by this patrol (live from the backend)" />
             <div className="p-4">
-              {patrol.coveragePct === undefined ? (
+              {patrol.coveragePct == null ? (
                 <p className="text-sm text-ink-soft">
                   Coverage unavailable — the backend could not compute it for this patrol.
                 </p>

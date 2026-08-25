@@ -113,21 +113,44 @@ export const auth = {
 /* Patrols                                                            */
 /* ------------------------------------------------------------------ */
 
-export const patrols = {
-  list: async (): Promise<Patrol[]> =>
-    remoteOnly(async () => (await api.patrols.list()).map((p) => patrolFromApi(p))),
-  get: async (id: string): Promise<Patrol | undefined> =>
-    remoteOnly(async () => {
-      const [p, points, incidents, coverage] = await Promise.all([
-        api.patrols.get(id),
-        api.patrols.points(id).catch(() => [] as { lat: number; lng: number; t?: string | null }[]),
-        api.incidents.list().catch(() => []),
-        // Real ForestGrid coverage — detail-only (never per list row).
-        api.patrols.coverageSummary(id).catch(() => null),
-      ]);
-      const patrol = patrolFromApi(p, points, incidents);
-      return coverage ? { ...patrol, coveragePct: coverage.coveragePercent } : patrol;
-    }),
+export const patrols = (() => {
+  const LIST_TTL_MS = 15_000;
+  let listCached: { data: Patrol[]; at: number } | null = null;
+  let listInflight: Promise<Patrol[]> | null = null;
+
+  async function fetchList(): Promise<Patrol[]> {
+    const rows = await api.patrols.list();
+    return rows.map((p) => patrolFromApi(p));
+  }
+
+  /** Expose raw API rows so rangers.list() can reuse the same network call. */
+  async function rawList(): Promise<ApiPatrol[]> {
+    return api.patrols.list();
+  }
+
+  return {
+    list: async (): Promise<Patrol[]> => {
+      if (listCached && Date.now() - listCached.at < LIST_TTL_MS) return listCached.data;
+      if (listInflight) return listInflight;
+      listInflight = fetchList().then(
+        (data) => { listCached = { data, at: Date.now() }; listInflight = null; return data; },
+        (err) => { listInflight = null; throw err; },
+      );
+      return listInflight;
+    },
+    rawList,
+    get: async (id: string): Promise<Patrol | undefined> =>
+      remoteOnly(async () => {
+        const [p, points, incidents, coverage] = await Promise.all([
+          api.patrols.get(id),
+          api.patrols.points(id).catch(() => [] as { lat: number; lng: number; t?: string | null }[]),
+          api.incidents.list({ patrolId: id }).catch(() => []),
+          // Real ForestGrid coverage — detail-only (never per list row).
+          api.patrols.coverageSummary(id).catch(() => null),
+        ]);
+        const patrol = patrolFromApi(p, points, incidents);
+        return coverage ? { ...patrol, coveragePct: coverage.coveragePercent } : patrol;
+      }),
   // API GAP: no status-filtered patrol endpoint beyond the shared list
   // (backend list supports ?status, but no page consumes this yet).
   byStatus: async (status: PatrolStatus): Promise<Patrol[]> => {
@@ -135,8 +158,7 @@ export const patrols = {
     return mockPatrols.filter((p) => p.status === status);
   },
   /** Patrol report documents composed from real patrol + incident records.
-   *  The backend has no report endpoint; list-level stats (distance/duration)
-   *  are not exposed by GET /api/patrols, so those read 0 (API GAP). */
+   *  Stats (distance/duration) come from the backend batched stats endpoint. */
   reports: async (): Promise<PatrolReport[]> =>
     remoteOnly(async () => {
       const [patrolRows, incidents] = await Promise.all([api.patrols.list(), api.incidents.list()]);
@@ -153,8 +175,8 @@ export const patrols = {
           leader: p.user?.fullName ?? "Unassigned",
           reportDate: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
           period: "—",
-          durationMin: 0,
-          distanceKm: 0,
+          durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
+          distanceKm: p.stats?.distanceKm ?? null,
           observations: mine.length,
           incidents: mine.length,
           photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
@@ -164,7 +186,8 @@ export const patrols = {
     }),
   typeLabels: patrolTypeLabels,
   methodLabels: patrolMethodLabels,
-};
+  };
+})();
 
 /* ------------------------------------------------------------------ */
 /* Patrol authorizations (special patrol permissions)                 */
@@ -322,7 +345,7 @@ const createdRangers: Ranger[] = [];
  */
 const livePatrolSet = async (): Promise<{ userId: string; status: string; startedAt: string | null; endedAt: string | null }[]> => {
   try {
-    return await api.patrols.list();
+    return await patrols.rawList();
   } catch {
     return [];
   }

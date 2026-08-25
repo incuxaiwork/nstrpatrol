@@ -205,6 +205,7 @@ export interface PatrolSummary {
 export function patrolsSummary(rows: PatrolRow[]): PatrolSummary {
   let coverageSum = 0;
   let coverageCount = 0;
+  let distanceKnown = false;
   const s: PatrolSummary = { total: 0, ongoing: 0, completed: 0, planned: 0, cancelled: 0, delayed: 0, assigned: 0, totalKm: 0, totalHours: 0, avgCoverage: 0, checkpoints: 0, observations: 0, incidents: 0 };
   for (const r of rows) {
     const p = r.patrol;
@@ -215,13 +216,17 @@ export function patrolsSummary(rows: PatrolRow[]): PatrolSummary {
     else if (p.status === "cancelled") s.cancelled += 1;
     else if (p.status === "delayed") s.delayed += 1;
     else if (p.status === "assigned") s.assigned += 1;
-    s.totalKm += p.distanceKm || 0;
+    if (p.distanceKm != null) { s.totalKm += p.distanceKm; distanceKnown = true; }
     s.totalHours += (p.durationMin || 0) / 60;
     s.checkpoints += p.checkpoints ?? 0;
     s.observations += p.observations;
     s.incidents += p.incidents;
     if (p.coveragePct != null) { coverageSum += p.coveragePct; coverageCount += 1; }
   }
+  // If no patrol reported distance, leave totalKm at 0 — the caller should
+  // check whether any distance data was available rather than reading "0 km"
+  // when the real reason is no data.
+  if (!distanceKnown) s.totalKm = 0;
   // Average only over patrols that actually report coverage.
   s.avgCoverage = coverageCount ? Math.round(coverageSum / coverageCount) : 0;
   return s;
