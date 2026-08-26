@@ -72,10 +72,24 @@ authRouter.post('/login', validateBody(loginSchema), async (req, res) => {
     data: { refreshTokenHash: refresh.hash },
   });
 
+  // Look up range and beat names for geofencing
+  let rangeName: string | null = null;
+  let beatName: string | null = null;
+  let section: string | null = null;
+  if (user.rangeId) {
+    const range = await prisma.range.findUnique({ where: { id: user.rangeId }, select: { name: true } });
+    rangeName = range?.name ?? null;
+  }
+  if (user.beatId) {
+    const beat = await prisma.beat.findUnique({ where: { id: user.beatId }, select: { name: true, section: true } });
+    beatName = beat?.name ?? null;
+    section = beat?.section ?? null;
+  }
+
   res.json({
     accessToken: signAccessToken(user.id, user.role),
     refreshToken: refresh.token,
-    user: serializeUser(user),
+    user: { ...serializeUser(user), rangeName, beatName, section },
   });
 });
 
@@ -114,7 +128,21 @@ authRouter.get('/me', requireAuth, async (req, res) => {
     where: { id: req.user!.id },
     select: userSelect,
   });
-  res.json(user);
+
+  let rangeName: string | null = null;
+  let beatName: string | null = null;
+  let section: string | null = null;
+  if (user.rangeId) {
+    const range = await prisma.range.findUnique({ where: { id: user.rangeId }, select: { name: true } });
+    rangeName = range?.name ?? null;
+  }
+  if (user.beatId) {
+    const beat = await prisma.beat.findUnique({ where: { id: user.beatId }, select: { name: true, section: true } });
+    beatName = beat?.name ?? null;
+    section = beat?.section ?? null;
+  }
+
+  res.json({ ...user, rangeName, beatName, section });
 });
 
 const passwordSchemaBody = z.object({

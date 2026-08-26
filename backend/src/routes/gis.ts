@@ -1,6 +1,11 @@
 import { Router } from 'express';
 import { prisma } from '../db/prisma';
 import { param } from '../lib/http';
+import { requireAuth } from '../middleware/auth';
+import { validateBody } from '../middleware/validate';
+import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export const gisRouter = Router();
 
@@ -23,39 +28,44 @@ async function cachedGeo(key: string, load: () => Promise<string>): Promise<stri
  * original mark_beat.json so existing mobile parsing keeps working.
  */
 gisRouter.get('/beats', async (_req, res) => {
+  const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
   const body = await cachedGeo('beats', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', id,
-          'geometry', ST_AsGeoJSON(geom)::json,
-          'properties', json_build_object(
-            'OBJECTID_1', id,
-            'Beat', name,
-            'Section', COALESCE(section, ''),
-            'Range', COALESCE("rangeName", ''),
-            'Division', COALESCE(division, ''),
-            'Circle', COALESCE(circle, ''),
-            'District', COALESCE(district, ''),
-            'Area_ha', COALESCE("areaHa", 0)
-          )
-        ) AS feature
-        FROM "Beat"
-        WHERE geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '${EMPTY_FC}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', id,
+            'geometry', ST_AsGeoJSON(geom)::json,
+            'properties', json_build_object(
+              'OBJECTID_1', id,
+              'Beat', name,
+              'Section', COALESCE(section, ''),
+              'Range', COALESCE("rangeName", ''),
+              'Division', COALESCE(division, ''),
+              'Circle', COALESCE(circle, ''),
+              'District', COALESCE(district, ''),
+              'Area_ha', COALESCE("areaHa", 0)
+            )
+          ) AS feature
+          FROM "Beat"
+          WHERE geom IS NOT NULL
+        ) t
+      `;
+      return rows[0]?.geojson ?? EMPTY_FC;
+    } catch {
+      return EMPTY_FC;
+    }
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(body);
 });
 
@@ -64,36 +74,41 @@ gisRouter.get('/beats', async (_req, res) => {
  * Forest compartments as a GeoJSON FeatureCollection.
  */
 gisRouter.get('/compartments', async (_req, res) => {
+  const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
   const body = await cachedGeo('compartments', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', c.id,
-          'geometry', ST_AsGeoJSON(c.geom)::json,
-          'properties', json_build_object(
-            'OBJECTID_1', c.id,
-            'COMP_NO', c."compNo",
-            'BEAT', COALESCE(b.name, ''),
-            'AREA_HA', COALESCE(c."areaHa", 0)
-          )
-        ) AS feature
-        FROM "Compartment" c
-        LEFT JOIN "Beat" b ON b.id = c."beatId"
-        WHERE c.geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '${EMPTY_FC}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', c.id,
+            'geometry', ST_AsGeoJSON(c.geom)::json,
+            'properties', json_build_object(
+              'OBJECTID_1', c.id,
+              'COMP_NO', c."compNo",
+              'BEAT', COALESCE(b.name, ''),
+              'AREA_HA', COALESCE(c."areaHa", 0)
+            )
+          ) AS feature
+          FROM "Compartment" c
+          LEFT JOIN "Beat" b ON b.id = c."beatId"
+          WHERE c.geom IS NOT NULL
+        ) t
+      `;
+      return rows[0]?.geojson ?? EMPTY_FC;
+    } catch {
+      return EMPTY_FC;
+    }
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(body);
 });
 
@@ -104,35 +119,40 @@ const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
  * Reserved forest boundary polygons as a GeoJSON FeatureCollection.
  */
 gisRouter.get('/boundary', async (_req, res) => {
+  const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
   const body = await cachedGeo('boundary', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', fb.id,
-          'geometry', ST_AsGeoJSON(fb.geom)::json,
-          'properties', json_build_object(
-            'name', COALESCE(fb.name, f.name, ''),
-            'forestId', fb."forestId",
-            'forestCode', COALESCE(f.code, '')
-          )
-        ) AS feature
-        FROM "ForestBoundary" fb
-        LEFT JOIN "Forest" f ON f.id = fb."forestId"
-        WHERE fb.geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '${EMPTY_FC}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', fb.id,
+            'geometry', ST_AsGeoJSON(fb.geom)::json,
+            'properties', json_build_object(
+              'name', COALESCE(fb.name, f.name, ''),
+              'forestId', fb."forestId",
+              'forestCode', COALESCE(f.code, '')
+            )
+          ) AS feature
+          FROM "ForestBoundary" fb
+          LEFT JOIN "Forest" f ON f.id = fb."forestId"
+          WHERE fb.geom IS NOT NULL
+        ) t
+      `;
+      return rows[0]?.geojson ?? EMPTY_FC;
+    } catch {
+      return EMPTY_FC;
+    }
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(body);
 });
 
@@ -141,33 +161,38 @@ gisRouter.get('/boundary', async (_req, res) => {
  * Forest reference grids as a GeoJSON FeatureCollection.
  */
 gisRouter.get('/grids', async (_req, res) => {
+  const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
   const body = await cachedGeo('grids', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', fg.id,
-          'geometry', ST_AsGeoJSON(fg.geom)::json,
-          'properties', json_build_object(
-            'gridCode', COALESCE(fg."gridCode", ''),
-            'forestId', fg."forestId"
-          )
-        ) AS feature
-        FROM "ForestGrid" fg
-        WHERE fg.geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '${EMPTY_FC}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', fg.id,
+            'geometry', ST_AsGeoJSON(fg.geom)::json,
+            'properties', json_build_object(
+              'gridCode', COALESCE(fg."gridCode", ''),
+              'forestId', fg."forestId"
+            )
+          ) AS feature
+          FROM "ForestGrid" fg
+          WHERE fg.geom IS NOT NULL
+        ) t
+      `;
+      return rows[0]?.geojson ?? EMPTY_FC;
+    } catch {
+      return EMPTY_FC;
+    }
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.setHeader('Cache-Control', 'public, max-age=3600');
   res.send(body);
 });
 
@@ -215,4 +240,114 @@ gisRouter.get('/assets/:resourceKey', async (req, res) => {
   res.setHeader('X-Asset-Version', String(asset.version));
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.send(Buffer.from(asset.data));
+});
+
+/* ── Geofencing ─────────────────────────────────────────────────────────── */
+
+/** Load the bundled beat GeoJSON (mark_beat.json) for point-in-polygon checks. */
+let _beatFeatures: any[] = [];
+let _beatFeaturesLoaded = false;
+function loadBeatFeatures(): any[] {
+  if (_beatFeaturesLoaded) return _beatFeatures;
+  _beatFeaturesLoaded = true;
+  try {
+    const assetPath = path.resolve(process.cwd(), 'mark_beat.json');
+    const raw = fs.readFileSync(assetPath, 'utf-8');
+    const fc = JSON.parse(raw);
+    _beatFeatures = fc.features ?? [];
+  } catch {
+    _beatFeatures = [];
+  }
+  return _beatFeatures;
+}
+
+/** Ray-casting point-in-polygon. Coordinates are [lng, lat] (GeoJSON order). */
+function pointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Check if a point is inside a GeoJSON geometry (Polygon or MultiPolygon). */
+function pointInGeometry(lng: number, lat: number, geom: any): boolean {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') {
+    return pointInPolygon(lng, lat, geom.coordinates[0]);
+  }
+  if (geom.type === 'MultiPolygon') {
+    return geom.coordinates.some((polygon: number[][][]) => pointInPolygon(lng, lat, polygon[0]));
+  }
+  return false;
+}
+
+const validateLocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  beatName: z.string().trim().max(160).optional(),
+  rangeName: z.string().trim().max(160).optional(),
+});
+
+/**
+ * POST /api/gis/validate-location
+ * Checks if a GPS coordinate falls within the assigned beat or range polygon.
+ * Used by the mobile app to verify the officer is in their designated area
+ * before starting a patrol.
+ */
+gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationSchema), (req, res) => {
+  const { lat, lng, beatName, rangeName } = req.body;
+  const features = loadBeatFeatures();
+
+  if (features.length === 0) {
+    res.json({ valid: false, reason: 'no_gis_data', message: 'Beat geometry data not available' });
+    return;
+  }
+
+  // If a specific beat is assigned, check containment in that beat only
+  if (beatName) {
+    const normalised = beatName.toUpperCase();
+    const match = features.find((f: any) =>
+      (f.properties?.Beat ?? '').toUpperCase() === normalised
+    );
+    if (!match) {
+      res.json({ valid: false, reason: 'beat_not_found', message: `Beat "${beatName}" not found in GIS data` });
+      return;
+    }
+    const inside = pointInGeometry(lng, lat, match.geometry);
+    res.json({
+      valid: inside,
+      reason: inside ? 'inside_beat' : 'outside_beat',
+      beat: match.properties?.Beat,
+      range: match.properties?.Range,
+    });
+    return;
+  }
+
+  // If a range is assigned (FRO/DyRO/FSO), check containment in any beat of that range
+  if (rangeName) {
+    const normalised = rangeName.toUpperCase();
+    const rangeBeats = features.filter((f: any) =>
+      (f.properties?.Range ?? '').toUpperCase() === normalised
+    );
+    if (rangeBeats.length === 0) {
+      res.json({ valid: false, reason: 'range_not_found', message: `Range "${rangeName}" not found in GIS data` });
+      return;
+    }
+    const insideBeat = rangeBeats.find((f: any) => pointInGeometry(lng, lat, f.geometry));
+    res.json({
+      valid: !!insideBeat,
+      reason: insideBeat ? 'inside_range' : 'outside_range',
+      beat: insideBeat?.properties?.Beat ?? null,
+      range: rangeName,
+    });
+    return;
+  }
+
+  // No assignment — allow (admin / unassigned)
+  res.json({ valid: true, reason: 'no_assignment', message: 'No beat or range assignment to validate against' });
 });

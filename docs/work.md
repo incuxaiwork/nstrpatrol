@@ -54,7 +54,7 @@ yearly =>  1,98,240
     * SOS & Alerts (2hrs)
         - Add the SOS alerts into the web in realtime without reloading page.
     * SOS & Alerts (2hrs)
-        - Add the SOS alerts into the web in realtime without reloading page.ate reports (Change the vlues in compartments dropdown)
+    - Add the SOS alerts into the web in realtime without reloading page.ate reports (Change the vlues in compartments dropdown)
         - Design reports layout (Speak with FO)
         - remove all patrols KPI card, redo of the elements in theh page
     * Ranger Mangement 

@@ -143,6 +143,15 @@ class BackendApiClient {
         if (matchScore != null) put("matchScore", matchScore.toDouble())
     })
 
+    /** Validates whether a GPS coordinate falls within the officer's assigned beat/range. */
+    fun validateLocation(lat: Double, lng: Double, beatName: String?, rangeName: String?): JSONObject =
+        postJson("/api/gis/validate-location", JSONObject().apply {
+            put("lat", lat)
+            put("lng", lng)
+            if (beatName != null) put("beatName", beatName)
+            if (rangeName != null) put("rangeName", rangeName)
+        })
+
     /** Lists the signed-in user's registered devices (includes verification state). */
     fun myDevices(): JSONArray = getJsonArray("/api/devices") ?: JSONArray()
 
