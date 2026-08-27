@@ -138,11 +138,9 @@ class ForestGisRepository(private val context: Context) {
     fun loadGisData() {
         if (isDataLoaded) return
 
-        // 1. Bundled assets FIRST — instant, zero network wait.
+        // Bundled assets only — instant, zero network wait.
+        // Backend sync re-enabled in a future release.
         loadFromAssets()
-
-        // 2. Background refresh from backend (non-blocking).
-        scope.launch { syncFromBackend() }
     }
 
     /**
@@ -155,9 +153,8 @@ class ForestGisRepository(private val context: Context) {
     }
 
     /**
-     * Blocking call that loads assets then syncs from backend.
-     * Use this when called from Dispatchers.IO and you want the initial
-     * load to complete before returning (e.g. during startup).
+     * Blocking call that loads assets only.
+     * Backend sync re-enabled in a future release.
      */
     suspend fun loadGisDataBlocking() {
         if (isDataLoaded) return
@@ -165,7 +162,6 @@ class ForestGisRepository(private val context: Context) {
         withContext(Dispatchers.IO) {
             loadFromAssets()
         }
-        syncFromBackend()
     }
 
     private fun loadFromAssets() {
