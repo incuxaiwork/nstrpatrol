@@ -270,9 +270,8 @@ class AuthSession(context: Context) {
         fallback
     }
 
-    /** Clears the stored session, the bearer token, and all local data. */
-    fun logout(db: NstrDatabase? = null) {
-        db?.clearAllTables()
+    /** Clears the stored session and bearer token; preserves local data for reuse. */
+    fun logout() {
         prefs.edit().clear().apply()
         client.setAccessToken(null)
     }

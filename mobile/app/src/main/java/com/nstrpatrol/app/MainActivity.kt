@@ -522,7 +522,7 @@ fun NstrApp() {
         Route.Settings -> SettingsScreen(
             settings = settings,
             onLogout = {
-                auth.logout(database)
+                auth.logout()
                 sessionStore.clear()
                 nav.resetTo(Route.Login)
             },
