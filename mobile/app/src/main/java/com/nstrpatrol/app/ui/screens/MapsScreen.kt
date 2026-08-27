@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
@@ -62,6 +63,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -238,6 +240,22 @@ fun MapsScreen(
     //   - Fast path (assets): data loads before style → fires when styleReady changes
     //   - Slow path (backend): style loads before data → fires when isDataLoaded changes
     LaunchedEffect(gisRepo.isDataLoaded, miniMapRef, styleReady) {
+        if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
+        val beatGeo = gisRepo.beatGeoJsonString
+        val compGeo = gisRepo.compartmentGeoJsonString
+        miniMapRef?.style?.let { style ->
+            if (beatGeo.isNotEmpty()) {
+                style.getSourceAs<GeoJsonSource>("beats-geojson-source")?.setGeoJson(beatGeo)
+            }
+            if (compGeo.isNotEmpty()) {
+                style.getSourceAs<GeoJsonSource>("comp-geojson-source")?.setGeoJson(compGeo)
+            }
+        }
+    }
+
+    // Push updated GIS data to MapLibre when backend sync completes.
+    // Keys on source + counts so it re-fires when data actually changes.
+    LaunchedEffect(gisRepo.source, gisRepo.beatsList.size, gisRepo.compartmentsList.size) {
         if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
         val beatGeo = gisRepo.beatGeoJsonString
         val compGeo = gisRepo.compartmentGeoJsonString
@@ -686,6 +704,16 @@ fun MapsScreen(
                         }
                     }
                 )
+
+                // Refresh GIS Data from Backend
+                FloatingControlButton(
+                    icon = Icons.Filled.Refresh,
+                    contentDescription = "Refresh Map Data",
+                    onClick = {
+                        gisRepo.forceRefresh()
+                        Toast.makeText(context, "Refreshing map data...", Toast.LENGTH_SHORT).show()
+                    }
+                )
             }
 
             // COMPACT MAP LEGEND (Bottom-Left)
@@ -748,6 +776,21 @@ fun MapsScreen(
                 .fillMaxWidth()
         ) {
             MapContent(modifier = Modifier.fillMaxSize())
+
+            // GIS SYNC STATUS BADGE (Top-Left, below coordinates when patrolling)
+            if (!isRunning) {
+                SyncStatusBadge(
+                    source = gisRepo.source,
+                    lastSyncTime = gisRepo.lastSyncTime,
+                    beatCount = gisRepo.beatsList.size,
+                    compCount = gisRepo.compartmentsList.size,
+                    isSyncing = gisRepo.isSyncing,
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(12.dp)
+                )
+            }
+
             val liveLat = patrolPoints.lastOrNull()?.latitude ?: liveTelemetry.latitude
             val liveLon = patrolPoints.lastOrNull()?.longitude ?: liveTelemetry.longitude
             if (isRunning && liveLat != null && liveLon != null) {
@@ -1220,5 +1263,91 @@ private fun CoordinatesChip(
             fontSize = 12.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+@Composable
+private fun SyncStatusBadge(
+    source: String,
+    lastSyncTime: Long,
+    beatCount: Int,
+    compCount: Int,
+    isSyncing: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val sourceLabel = when (source) {
+        "backend" -> "Live"
+        "cache" -> "Cached"
+        "assets" -> "Offline"
+        else -> "—"
+    }
+    val sourceColor = when (source) {
+        "backend" -> ForestGreen
+        "cache" -> Color(0xFFF57C00)
+        "assets" -> TextSecondary
+        else -> TextSecondary
+    }
+    val timeAgo = if (lastSyncTime > 0) {
+        val diff = System.currentTimeMillis() - lastSyncTime
+        when {
+            diff < 60_000 -> "Just now"
+            diff < 3_600_000 -> "${diff / 60_000}m ago"
+            diff < 86_400_000 -> "${diff / 3_600_000}h ago"
+            else -> "${diff / 86_400_000}d ago"
+        }
+    } else "Never"
+
+    Card(
+        modifier = modifier,
+        shape = RoundedCornerShape(8.dp),
+        colors = CardDefaults.cardColors(containerColor = Surface.copy(alpha = 0.92f)),
+        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (isSyncing) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = null,
+                    tint = ForestGreen,
+                    modifier = Modifier
+                        .size(12.dp)
+                        .then(
+                            Modifier.graphicsLayer {
+                                rotationZ = (System.currentTimeMillis() / 10) % 360f
+                            }
+                        )
+                )
+            }
+            Text(
+                text = sourceLabel,
+                color = sourceColor,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "·",
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+            Text(
+                text = "$beatCount beats · $compCount comps",
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+            Text(
+                text = "·",
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+            Text(
+                text = timeAgo,
+                color = TextSecondary,
+                fontSize = 10.sp
+            )
+        }
     }
 }

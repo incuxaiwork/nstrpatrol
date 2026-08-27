@@ -112,6 +112,26 @@ gisRouter.get('/compartments', async (_req, res) => {
   res.send(body);
 });
 
+/**
+ * GET /api/gis/version
+ * Lightweight hash of beat + compartment counts so mobile can decide
+ * whether to re-fetch the full GeoJSON layers.
+ */
+gisRouter.get('/version', async (_req, res) => {
+  const [beatRow, compRow] = await Promise.all([
+    prisma.$queryRaw<{ cnt: bigint; maxUpdated: Date | null }[]>`
+      SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Beat"
+    `,
+    prisma.$queryRaw<{ cnt: bigint; maxUpdated: Date | null }[]>`
+      SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Compartment"
+    `,
+  ]);
+  res.json({
+    beats: { count: Number(beatRow[0]?.cnt ?? 0), lastUpdated: beatRow[0]?.maxUpdated ?? null },
+    compartments: { count: Number(compRow[0]?.cnt ?? 0), lastUpdated: compRow[0]?.maxUpdated ?? null },
+  });
+});
+
 const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
