@@ -2,13 +2,13 @@
 
 FROM node:24-alpine AS deps
 WORKDIR /app
-COPY backend/package.json backend/package-lock.json ./
+COPY package.json package-lock.json ./
 RUN npm ci
 
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
-COPY backend/ .
+COPY . .
 RUN npx prisma generate && npm run build
 
 FROM node:24-alpine AS runtime
