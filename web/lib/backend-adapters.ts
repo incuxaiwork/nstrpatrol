@@ -14,7 +14,6 @@ import type {
   PatrolEvent,
   PatrolMethod,
   PatrolStatus,
-  AdminUser,
   NotificationItem,
   Ranger,
 } from "@/lib/types";
@@ -148,15 +147,21 @@ export interface GridPolygon {
   compId?: string;
 }
 
-/** All outer rings of a Polygon or MultiPolygon + overall bbox. */
+/** All outer rings of a Polygon or MultiPolygon (one entry per part). */
 function ringsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): LngLatRing[][] {
   const g = feature.geometry;
   if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
-  const coords = g.coordinates as unknown[][];
-  return coords.map((poly: unknown) => {
+  /* Normalize to a list of polygons first — for a plain Polygon the
+   * coordinates ARE the single polygon's ring list; taking [0] of each
+   * ring would grab a coordinate pair instead of the outer ring. */
+  const polys: unknown[][] =
+    g.type === "Polygon" ? [g.coordinates as unknown[]] : (g.coordinates as unknown[][]);
+  return polys.map((poly) => {
     const outer = Array.isArray(poly) ? poly[0] : poly;
     if (!Array.isArray(outer)) return [];
-    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+    return (outer as number[][])
+      .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      .map(([lon, lat]) => ({ lon, lat }));
   });
 }
 
@@ -198,23 +203,32 @@ export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExten
 
 export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentPolygon[] {
   const features = fc.features.filter(
-    (f) => (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
       Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
-  return features.map((f, i) => {
-    const ring = ringOf(f);
+  /* One polygon per outer ring — MultiPolygons expand into sibling parts
+   * sharing compNo/beat/area (deterministic -pN id suffixes) so no feature
+   * ever silently disappears from the map. */
+  return features.flatMap((f, i) => {
+    const compNo = String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`);
+    const beat = String(f.properties.BEAT ?? "");
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
-    return {
-      id: String(f.id ?? `api-comp-${i}`),
-      compNo: String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`),
-      beat: String(f.properties.BEAT ?? ""),
-      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
-      areaHa: Number.isFinite(area) ? area : 0,
-    };
+    const areaHa = Number.isFinite(area) ? area : 0;
+    const baseId = String(f.id ?? `api-comp-${i}`);
+    return ringsOf(f)
+      .filter((ring) => ring.length > 0)
+      .map((ring, part) => ({
+        id: part === 0 ? baseId : `${baseId}-p${part + 1}`,
+        compNo,
+        beat,
+        points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+        areaHa,
+      }));
   });
 }
 
@@ -411,9 +425,19 @@ export function patrolFromApi(
     startedAt?: string | null;
     endedAt?: string | null;
     createdAt?: string;
+    beat?: string | null;
     forest?: { code?: string } | null;
     user?: { fullName?: string } | null;
-    stats?: { points?: number; distanceKm?: number; durationSeconds?: number };
+    geography?: {
+      beatId: string | null;
+      beat: string | null;
+      range: string | null;
+      rangeId: string | null;
+      subDivision: string | null;
+      subDivisionId: string | null;
+      division: string | null;
+    } | null;
+    stats?: { points?: number; distanceKm?: number | null; durationSeconds?: number };
   },
   points: { lat: number; lng: number; t?: string | null }[] = [],
   patrolIncidents: { patrolId?: string | null; photos?: string[] }[] = []
@@ -428,23 +452,59 @@ export function patrolFromApi(
     id: p.id,
     code: `PT-${p.id.slice(-6).toUpperCase()}`,
     title: p.name ?? (p.forest?.code ? `${p.forest.code} patrol` : "Field patrol"),
-    type: "general-duties",
+    // No semantic patrol-type entity exists in the backend — leave undefined
+    // ("—" / "Unavailable" in the UI). The device's movement mode is mapped
+    // separately into `method`.
+    type: undefined,
     method: p.type ? patrolMethodMap[p.type] ?? undefined : undefined,
     status: (p.status ? patrolStatusMap[p.status] : undefined) ?? "ongoing",
     objective: p.description ?? "",
-    division: "",
-    range: "",
-    beat: "",
+    // Authoritative server-resolved geography only. Unresolved levels stay
+    // "" (rendered "—"), never guessed.
+    division: p.geography?.division ?? "",
+    subDivision: p.geography?.subDivision ?? "",
+    range: p.geography?.range ?? "",
+    beat: p.geography?.beat ?? p.beat ?? "",
     teamId: "",
     leader: p.user?.fullName ?? "",
     members: [],
     startScheduled: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
     startActual: firstPoint?.t ?? p.startedAt ?? undefined,
     endActual: lastPoint?.t ?? p.endedAt ?? undefined,
-    distanceKm: p.stats?.distanceKm ?? 0,
-    durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
-    coveragePct: 0,
-    checkpoints: 0,
+    distanceKm: (() => {
+      // Prefer authoritative backend distance (PostGIS or pure-PG Haversine).
+      if (typeof p.stats?.distanceKm === 'number') return p.stats.distanceKm;
+      // Defensive fallback: compute Haversine from already-loaded GPS points
+      // when backend stats are entirely absent (e.g. no GPS points at all).
+      if (points.length >= 2) {
+        let total = 0;
+        for (let i = 1; i < points.length; i++) {
+          const dLat = ((points[i].lat - points[i - 1].lat) * Math.PI) / 180;
+          const dLng = ((points[i].lng - points[i - 1].lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos((points[i - 1].lat * Math.PI) / 180) *
+              Math.cos((points[i].lat * Math.PI) / 180) *
+              Math.sin(dLng / 2) ** 2;
+          total += 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+        return Math.round(total * 100) / 100;
+      }
+      return null;
+    })(),
+    durationMin: (() => {
+      if (p.stats?.durationSeconds) return Math.round(p.stats.durationSeconds / 60);
+      // Fallback: compute from GPS point timestamps when backend stats are
+      // 0 (PostGIS unavailable) but the points carry real timestamps.
+      if (firstPoint?.t && lastPoint?.t) {
+        const spanMs = new Date(lastPoint.t).getTime() - new Date(firstPoint.t).getTime();
+        if (spanMs > 0) return Math.round(spanMs / 60_000);
+      }
+      return 0;
+    })(),
+    // Real coverage arrives only via GET /api/patrols/:id/coverage/summary on
+    // the DETAIL view (services.patrols.get merges it); lists never carry it.
+    checkpoints: undefined,
     incidents: mine.length,
     observations: mine.length,
     photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
@@ -545,38 +605,6 @@ export function observationFromApi(i: {
 }
 
 /* ------------------------------------------------------------------ */
-/* Admin users ↔ backend users                                         */
-/* ------------------------------------------------------------------ */
-
-const roleIdFromApi: Record<string, string> = {
-  ADMIN: "admin",
-  RANGER: "ranger",
-};
-
-export function adminUserFromApi(u: {
-  id: string;
-  fullName?: string;
-  email?: string;
-  role?: string;
-  isActive?: boolean;
-  cader?: string | null;
-}): AdminUser {
-  return {
-    id: u.id,
-    name: u.fullName ?? "",
-    email: u.email ?? "",
-    roleId: u.role ? roleIdFromApi[u.role] ?? u.role.toLowerCase() : "ranger",
-    status: u.isActive === false ? "disabled" : "active",
-    division: "",
-    created: "",
-  };
-}
-
-export function registerRoleFromWeb(roleId: string): "ADMIN" | "RANGER" {
-  return roleId === "admin" ? "ADMIN" : "RANGER";
-}
-
-/* ------------------------------------------------------------------ */
 /* Users → rangers                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -595,6 +623,7 @@ export function rangerFromApi(
     phone?: string | null;
     isActive?: boolean;
     createdAt?: string | null;
+    beatId?: string | null;
   },
   patrols: { userId: string; status: string; startedAt: string | null; endedAt: string | null }[] = []
 ): Ranger {
@@ -618,12 +647,16 @@ export function rangerFromApi(
     division: "",
     range: "",
     beat: "",
+    // Real DB assignment id when the backend has finalized a beat assignment
+    // (users API). No name resolution exists yet — never fabricated.
+    assignedBeatId: u.beatId ?? undefined,
     teamId: "",
     stats: {
       patrols: mine.length,
       distanceKm: 0,
       fieldHours: Math.round(fieldHours * 10) / 10,
-      coveragePct: 0,
+      // No per-ranger coverage aggregate exists in the backend — the field
+      // stays undefined ("—") rather than a fabricated 0%.
       observations: 0,
       incidents: 0,
     },

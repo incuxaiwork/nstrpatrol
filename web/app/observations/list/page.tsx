@@ -16,7 +16,6 @@ import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
@@ -35,7 +34,7 @@ export default function ObservationsListPage() {
 function ObservationsList() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { data, error, loading, reload } = useAsyncData(() => observations.list());
+  const { data, error, loading, reload } = useAsyncData(() => observations.list(), [], { cacheKey: "observations:list" });
 
   const [category, setCategory] = useState(searchParams.get("category") ?? "");
   const [subcategory, setSubcategory] = useState("");
@@ -109,7 +108,7 @@ function ObservationsList() {
       status: observationStatusLabel[o.status],
       recordedBy: o.recordedBy,
       recordedAt: new Date(o.recordedAt).toISOString(),
-      division: unitName(o.division),
+      division: o.division || "—",
       patrolId: o.patrolId ?? "",
     })));
   };

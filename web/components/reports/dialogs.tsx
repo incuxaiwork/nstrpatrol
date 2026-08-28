@@ -63,7 +63,7 @@ import {
 import { categoryMeta } from "@/lib/mock/observations";
 import { patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels, patrolMethodLabels } from "@/lib/mock/patrols";
-import { unitName } from "@/lib/mock/hierarchy";
+import { geoLabel } from "@/lib/utils";
 import { severityTone } from "@/lib/nav";
 import { regionMatches } from "@/lib/reports/report-types";
 import type { Observation, ObservationCategory, Patrol, Ranger } from "@/lib/types";
@@ -189,11 +189,11 @@ export function PatrolsReportDialog({ open, onClose }: { open: boolean; onClose(
               { key: "code", header: "Patrol", render: (r) => patrolCodeCell(r.patrol.code) },
               { key: "title", header: "Title", render: (r) => <span className="font-medium text-ink">{r.patrol.title}</span> },
               { key: "status", header: "Status", render: (r) => statusBadge(r.patrol) },
-              { key: "type", header: "Type", render: (r) => patrolTypeLabels[r.patrol.type] ?? r.patrol.type },
+              { key: "type", header: "Type", render: (r) => r.patrol.type ? patrolTypeLabels[r.patrol.type] ?? r.patrol.type : "�" },
               { key: "method", header: "Method", render: (r) => (r.patrol.method ? patrolMethodLabels[r.patrol.method] ?? r.patrol.method : "—") },
               { key: "leader", header: "Leader", render: (r) => r.patrol.leader },
-              { key: "area", header: "Area", render: (r) => `${unitName(r.patrol.range)} / ${unitName(r.patrol.beat)}` },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
+              { key: "area", header: "Area", render: (r) => `${geoLabel(r.patrol.range)} / ${geoLabel(r.patrol.beat)}` },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
               { key: "duration", header: "Duration", render: (r) => `${r.patrol.durationMin} min` },
             ]}
           />
@@ -251,7 +251,7 @@ export function PatrolReportDialog({
       </p>
       <p className="text-xs text-ink-soft">
         This report covers the selected patrol record only — date, period and area are taken from the
-        patrol itself ({unitName(patrol.division)} / {unitName(patrol.range)} / {unitName(patrol.beat)}).
+        patrol itself ({geoLabel(patrol.division)} / {geoLabel(patrol.range)} / {geoLabel(patrol.beat)}).
       </p>
     </div>
   );
@@ -261,12 +261,12 @@ export function PatrolReportDialog({
     const eventTone = (k: string) =>
       k === "incident" || k === "sos" ? "danger" : k === "observation" ? "warning" : k === "checkpoint" ? "info" : "forest";
     return (
-      <ReportPreview title={`Patrol Report — ${p.code}`} meta={r.meta} filterSummary={{ Patrol: p.code, Title: p.title, Area: `${unitName(p.division)} / ${unitName(p.range)} / ${unitName(p.beat)}` }}>
+      <ReportPreview title={`Patrol Report — ${p.code}`} meta={r.meta} filterSummary={{ Patrol: p.code, Title: p.title, Area: `${geoLabel(p.division)} / ${geoLabel(p.range)} / ${geoLabel(p.beat)}` }}>
         <ReportSection title="Patrol information">
           <StatRow
             items={[
               { label: "Status", value: patrolStatusLabelOf(p.status) },
-              { label: "Type", value: patrolTypeLabels[p.type] ?? p.type },
+              { label: "Type", value: p.type ? patrolTypeLabels[p.type] ?? p.type : "�" },
               { label: "Method", value: p.method ? patrolMethodLabels[p.method] ?? p.method : "—" },
               { label: "Leader", value: r.leaderName },
               { label: "Scheduled", value: dateLabel(p.startScheduled) },
@@ -278,10 +278,10 @@ export function PatrolReportDialog({
         </ReportSection>
         <ReportSection title="Performance">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-            <ReportStat label="Distance" value={`${p.distanceKm.toFixed(1)} km`} />
+            <ReportStat label="Distance" value={p.distanceKm != null ? `${p.distanceKm.toFixed(1)} km` : "—"} />
             <ReportStat label="Duration" value={`${p.durationMin} min`} />
-            <ReportStat label="Coverage" value={`${p.coveragePct}%`} />
-            <ReportStat label="Checkpoints" value={p.checkpoints} />
+            <ReportStat label="Coverage" value={p.coveragePct != null ? `${p.coveragePct}%` : "—"} />
+            <ReportStat label="Checkpoints" value={p.checkpoints ?? "—"} />
             <ReportStat label="Observations" value={p.observations} />
             <ReportStat label="Incidents" value={p.incidents} />
             <ReportStat label="Photos" value={p.photos} />
@@ -464,7 +464,7 @@ export function ObservationsReportDialog({ open, onClose }: { open: boolean; onC
               { key: "status", header: "Status", render: (o) => o.status },
               { key: "recordedAt", header: "Recorded", render: (o) => dateLabel(o.recordedAt) },
               { key: "recordedBy", header: "Recorder", render: (o) => o.recordedBy },
-              { key: "area", header: "Area", render: (o) => `${unitName(o.range)} / ${unitName(o.beat)}` },
+              { key: "area", header: "Area", render: (o) => `${geoLabel(o.range)} / ${geoLabel(o.beat)}` },
             ]}
           />
         </ReportSection>
@@ -581,7 +581,7 @@ export function RangerReportDialog({
       <ReportPreview
         title={`Ranger Report — ${report.ranger.name}`}
         meta={report.meta}
-        filterSummary={{ ...report.filters, Ranger: `${report.ranger.code} · ${report.ranger.designation}`, Area: `${unitName(report.ranger.division)} / ${unitName(report.ranger.range)} / ${unitName(report.ranger.beat)}` }}
+        filterSummary={{ ...report.filters, Ranger: `${report.ranger.code} · ${report.ranger.designation}`, Area: `${geoLabel(report.ranger.division)} / ${geoLabel(report.ranger.range)} / ${geoLabel(report.ranger.beat)}` }}
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <ReportStat label="Patrols" value={s.patrols} />
@@ -602,11 +602,11 @@ export function RangerReportDialog({
               { key: "code", header: "Patrol", render: (r) => patrolCodeCell(r.patrol.code) },
               { key: "title", header: "Title", render: (r) => r.patrol.title },
               { key: "status", header: "Status", render: (r) => statusBadge(r.patrol) },
-              { key: "type", header: "Type", render: (r) => patrolTypeLabels[r.patrol.type] ?? r.patrol.type },
+              { key: "type", header: "Type", render: (r) => r.patrol.type ? patrolTypeLabels[r.patrol.type] ?? r.patrol.type : "�" },
               { key: "method", header: "Method", render: (r) => (r.patrol.method ? patrolMethodLabels[r.patrol.method] ?? r.patrol.method : "—") },
-              { key: "area", header: "Area", render: (r) => `${unitName(r.patrol.range)} / ${unitName(r.patrol.beat)}` },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
-              { key: "coverage", header: "Coverage", render: (r) => `${r.patrol.coveragePct}%` },
+              { key: "area", header: "Area", render: (r) => `${geoLabel(r.patrol.range)} / ${geoLabel(r.patrol.beat)}` },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
+              { key: "coverage", header: "Coverage", render: (r) => (r.patrol.coveragePct != null ? `${r.patrol.coveragePct}%` : "—") },
             ]}
           />
         </ReportSection>
@@ -745,7 +745,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
                   checked={filters.rangerIds.includes(r.id)}
                   onChange={() => setFilters((f) => ({ ...f, rangerIds: toggleId(f.rangerIds, r.id) }))}
                 />
-                {r.name} · {unitName(r.beat)}
+                {r.name} · {geoLabel(r.beat)}
               </label>
             ))}
           </div>
@@ -820,9 +820,9 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
               { key: "title", header: "Title", render: (r) => r.patrol.title },
               { key: "status", header: "Status", render: (r) => statusBadge(r.patrol) },
               { key: "leader", header: "Leader", render: (r) => r.patrol.leader },
-              { key: "beat", header: "Beat", render: (r) => unitName(r.patrol.beat) },
-              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm.toFixed(1) },
-              { key: "coverage", header: "Coverage", render: (r) => `${r.patrol.coveragePct}%` },
+              { key: "beat", header: "Beat", render: (r) => geoLabel(r.patrol.beat) },
+              { key: "distance", header: "Dist (km)", render: (r) => r.patrol.distanceKm != null ? r.patrol.distanceKm.toFixed(1) : "—" },
+              { key: "coverage", header: "Coverage", render: (r) => (r.patrol.coveragePct != null ? `${r.patrol.coveragePct}%` : "—") },
             ]}
           />
         </ReportSection>
@@ -837,7 +837,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
               { key: "title", header: "Title", render: (o) => o.title },
               { key: "severity", header: "Severity", render: (o) => <Badge tone={severityTone[o.severity]}>{o.severity}</Badge> },
               { key: "recordedBy", header: "Recorder", render: (o) => o.recordedBy },
-              { key: "beat", header: "Beat", render: (o) => unitName(o.beat) },
+              { key: "beat", header: "Beat", render: (o) => geoLabel(o.beat) },
             ]}
           />
         </ReportSection>
@@ -848,7 +848,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
             onRowClick={(r) => router.push(`/rangers/${r.ranger.id}`)}
             columns={[
               { key: "name", header: "Ranger", render: (r) => <span className="font-medium text-ink">{r.ranger.name}</span> },
-              { key: "beat", header: "Beat", render: (r) => unitName(r.ranger.beat) },
+              { key: "beat", header: "Beat", render: (r) => geoLabel(r.ranger.beat) },
               { key: "patrols", header: "Patrols", render: (r) => r.patrols },
               { key: "observations", header: "Observations", render: (r) => r.observations },
               { key: "incidents", header: "Incidents", render: (r) => r.incidents },

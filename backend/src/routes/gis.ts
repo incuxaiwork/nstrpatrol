@@ -14,10 +14,22 @@ export const gisRouter = Router();
 const geoCache = new Map<string, { at: number; body: string }>();
 const GEO_TTL_MS = 15 * 60_000;
 
+/* Asset metadata cache: small payload, rarely changes. */
+const assetCache = new Map<string, { at: number; body: string }>();
+const ASSET_CACHE_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 30_000;
+
+const EMPTY_FC = '{"type":"FeatureCollection","features":[]}';
+
 async function cachedGeo(key: string, load: () => Promise<string>): Promise<string> {
   const hit = geoCache.get(key);
   if (hit && Date.now() - hit.at < GEO_TTL_MS) return hit.body;
-  const body = await load();
+  let body: string;
+  try {
+    body = await load();
+  } catch (err: any) {
+    console.error(`[gis] ${key} query failed:`, err?.message ?? err);
+    body = EMPTY_FC;
+  }
   geoCache.set(key, { at: Date.now(), body });
   return body;
 }
@@ -132,6 +144,51 @@ gisRouter.get('/version', async (_req, res) => {
   });
 });
 
+/**
+ * GET /api/gis/ranges
+ * Forest ranges as a GeoJSON FeatureCollection.
+ *
+ * The Range table carries names only (no geometry), so each range polygon is
+ * derived server-side as the ST_Union of its beats' real geometries grouped by
+ * Beat.rangeName — ONE authoritative derivation in SQL instead of client-side
+ * convex hulls. Properties mirror the beats shape so mobile parsing keeps
+ * working ('Range' carries the verbatim range name).
+ */
+gisRouter.get('/ranges', async (_req, res) => {
+  const body = await cachedGeo('ranges', async () => {
+    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+      SELECT COALESCE(
+        json_build_object(
+          'type', 'FeatureCollection',
+          'features', json_agg(feature)
+        )::text,
+        '{"type":"FeatureCollection","features":[]}'
+      ) AS geojson
+      FROM (
+        SELECT json_build_object(
+          'type', 'Feature',
+          'id', 'range-' || b."rangeName",
+          'geometry', ST_AsGeoJSON(ST_Union(b.geom))::json,
+          'properties', json_build_object(
+            'OBJECTID_1', MIN(b.id),
+            'Range', b."rangeName",
+            'Division', COALESCE(MIN(b.division), ''),
+            'beatCount', COUNT(*)::int,
+            'Area_ha', ROUND(SUM(COALESCE(b."areaHa", 0)))::int
+          )
+        ) AS feature
+        FROM "Beat" b
+        WHERE b.geom IS NOT NULL AND b."rangeName" IS NOT NULL AND b."rangeName" <> ''
+        GROUP BY b."rangeName"
+      ) t
+    `;
+    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+  });
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(body);
+});
+
 const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
@@ -221,20 +278,33 @@ gisRouter.get('/grids', async (_req, res) => {
  * Metadata for all stored map assets (no blobs).
  */
 gisRouter.get('/assets', async (_req, res) => {
-  const assets = await prisma.mapAsset.findMany({ orderBy: { resourceKey: 'asc' } });
-  res.json(
-    assets.map((a) => ({
-      id: a.id,
-      resourceKey: a.resourceKey,
-      contentType: a.contentType,
-      storagePath: a.storagePath,
-      sizeBytes: a.sizeBytes,
-      sha256: a.sha256,
-      version: a.version,
-      createdAt: a.createdAt,
-      updatedAt: a.updatedAt,
-    })),
-  );
+  const cached = assetCache.get('list');
+  if (cached && Date.now() - cached.at < ASSET_CACHE_TTL_MS) {
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(cached.body);
+    return;
+  }
+
+  const assets = await prisma.mapAsset.findMany({
+    orderBy: { resourceKey: 'asc' },
+    select: {
+      id: true,
+      resourceKey: true,
+      contentType: true,
+      storagePath: true,
+      sizeBytes: true,
+      sha256: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  const body = JSON.stringify(assets);
+  assetCache.set('list', { at: Date.now(), body });
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(body);
 });
 
 /**

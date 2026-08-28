@@ -62,12 +62,17 @@ export type AuthorizationStatus =
 /**
  * Jurisdiction validation of a patrol against the ranger's home area and any
  * special authorization that covers the patrol.
+ *
+ * `unknown` — the ranger's organizational home could not be resolved from
+ * real data (no roster match / no assignment). This is a neutral data-gap
+ * state, NOT a violation.
  */
 export type JurisdictionState =
   | "normal"
   | "authorized-exception"
   | "pending-review"
-  | "requires-review";
+  | "requires-review"
+  | "unknown";
 
 /**
  * Jurisdiction foundation (frontend data/context only — NOT enforcement).
@@ -131,11 +136,17 @@ export interface Patrol {
   id: string;
   code: string;
   title: string;
-  type: PatrolType;
+  /**
+   * Semantic patrol type. No backend entity exists yet — always undefined
+   * from real data (never a fabricated default). Movement mode lives in
+   * `method` (WALK/BICYCLE/VEHICLE/STATIONARY).
+   */
+  type?: PatrolType;
   method?: PatrolMethod;
   status: PatrolStatus;
   objective: string;
   division: string;
+  subDivision: string;
   range: string;
   beat: string;
   compartment?: string;
@@ -148,10 +159,12 @@ export interface Patrol {
   endScheduled?: string;
   startActual?: string;
   endActual?: string;
-  distanceKm: number;
+  distanceKm: number | null;
   durationMin: number;
-  coveragePct: number;
-  checkpoints: number;
+  /** Real ForestGrid coverage (patrol detail only). null = PostGIS unavailable; absent = no data. */
+  coveragePct?: number | null;
+  /** No checkpoint entity/API exists — undefined from real data, never 0. */
+  checkpoints?: number;
   incidents: number;
   observations: number;
   photos: number;
@@ -185,7 +198,7 @@ export interface PatrolReport {
   patrolId: string;
   code: string;
   title: string;
-  type: PatrolType;
+  type?: PatrolType;
   division: string;
   range: string;
   beat: string;
@@ -193,9 +206,11 @@ export interface PatrolReport {
   reportDate: string;
   period: string;
   durationMin: number;
-  distanceKm: number;
-  coveragePct: number;
-  checkpoints: number;
+  /** null = unavailable; 0 = genuinely zero distance. */
+  distanceKm: number | null;
+  /** Real value when available; absent (never 0) otherwise. */
+  coveragePct?: number;
+  checkpoints?: number;
   observations: number;
   incidents: number;
   photos: number;
@@ -234,7 +249,8 @@ export interface Ranger {
     patrols: number;
     distanceKm: number;
     fieldHours: number;
-    coveragePct: number;
+    /** Per-ranger coverage has no backend aggregate — undefined, never 0. */
+    coveragePct?: number;
     observations: number;
     incidents: number;
   };
@@ -349,16 +365,18 @@ export interface DashboardSummary {
   reportsToday: number;
   rangersOnDuty: number;
   rangersTotal: number;
-  coveragePct: number;
-  coverageToday: number;
+  /** Division coverage — null when no authoritative source is available. */
+  coveragePct: number | null;
+  coverageToday: number | null;
   patrolsTotal: number;
   normalTotal: number;
   authorizedTotal: number;
   incidentsTotal: number;
   zeroPatrolZones: number;
-  zeroPatrolList: { beat: string; days: number }[];
+  /** `days` only when the data source actually provides it (never fabricated). */
+  zeroPatrolList: { beat: string; days?: number }[];
   byStatus: { status: PatrolStatus; count: number }[];
-  incidentsToday: { title: string; severity: ObservationSeverity; time: string }[];
+  incidentsToday: { id: string; title: string; severity: ObservationSeverity; time: string }[];
   recentReports: Observation[];
   todayPatrols: Patrol[];
   activity: { hour: string; patrols: number; reports: number }[];
@@ -380,70 +398,6 @@ export interface NotificationItem {
   read: boolean;
   /** Real deep link when one exists (e.g. SOS → /sos#<incidentId>). */
   href?: string;
-}
-
-export interface AdminUser {
-  id: string;
-  name: string;
-  email: string;
-  roleId: string;
-  status: "active" | "invited" | "disabled";
-  division: string;
-  lastActive?: string;
-  created: string;
-}
-
-export interface Role {
-  id: string;
-  name: string;
-  description: string;
-  userCount: number;
-  system: boolean;
-  permissions: Record<string, "full" | "view" | "manage" | "none">;
-}
-
-export interface PermissionEntry {
-  module: string;
-  label: string;
-  levels: { label: string; value: "full" | "view" | "manage" | "none" }[];
-}
-
-export interface AuditEntry {
-  id: string;
-  user: string;
-  action: string;
-  target: string;
-  module: string;
-  time: string;
-  ip: string;
-}
-
-export interface SiteSettings {
-  siteName: string;
-  timezone: string;
-  syncWindowHours: number;
-  sosWindowMin: number;
-  heatmapSensitivity: number;
-  offlineGraceHours: number;
-}
-
-export interface NotificationTemplate {
-  id: string;
-  name: string;
-  kind: string;
-  subject: string;
-  body: string;
-  enabled: boolean;
-}
-
-export interface MasterData {
-  species: { id: string; name: string; category: string; status: "present" | "rare" | "introduced" | "threatened" }[];
-  categories: { id: string; name: string; mappedTo: string; active: boolean }[];
-  waterBodyTypes: { id: string; name: string; active: boolean }[];
-  patrolTypes: { id: string; name: string; active: boolean }[];
-  patrolObjectives: { id: string; name: string; active: boolean }[];
-  vehicleTypes: { id: string; name: string; active: boolean }[];
-  weaponTypes: { id: string; name: string; active: boolean }[];
 }
 
 export interface SearchResult {

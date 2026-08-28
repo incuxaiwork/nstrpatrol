@@ -176,6 +176,12 @@ export function markersToFeatures(markers: GisMarker[]): GeoFeatureCollection {
         code: m.label.match(/^([A-Z]+-\d+)/i)?.[1] ?? m.label,
         color: markerColor[m.kind],
         tone: m.tone ?? null,
+        category: m.category ?? null,
+        severity: m.severity ?? null,
+        status: m.status ?? null,
+        occurredAt: m.occurredAt ?? null,
+        reporter: m.reporter ?? null,
+        accuracyM: m.accuracyM ?? null,
       }),
       geometry: { type: "Point", coordinates: svgToLngLat(m.x, m.y) },
     })),
@@ -225,6 +231,13 @@ export function routesToFeatures(routes: GisRoute[]): GeoFeatureCollection {
         label: r.label,
         status: r.status,
         color: r.color,
+        patrolType: r.patrolType ?? null,
+        rangerName: r.rangerName ?? null,
+        startedAt: r.startedAt ?? null,
+        endedAt: r.endedAt ?? null,
+        durationMinutes: r.durationMinutes ?? null,
+        distanceKm: r.distanceKm ?? null,
+        pointCount: r.pointCount ?? null,
       }),
       geometry: { type: "LineString", coordinates: svgRingToLngLat(r.points) },
     })),
@@ -235,6 +248,93 @@ export interface TimedPoint {
   t: number;
   lon: number;
   lat: number;
+}
+
+/* ------------------------------------------------------------------ */
+/* LIVE patrol operations (GET /api/patrols/live)                      */
+/* ------------------------------------------------------------------ */
+
+/** One LIVE patrol path — the bounded recent window of an ACTIVE patrol.
+ *  `coordinates` are real [lng, lat] fixes straight from the backend feed
+ *  (chronological); they never pass through the mock SVG space. */
+export interface LivePathFeature {
+  id: string;
+  patrolId: string;
+  label: string | null;
+  rangerName: string;
+  coordinates: [number, number][];
+  startAt: string | null;
+  endAt: string | null;
+  durationMinutes: number | null;
+  distanceKm: number | null;
+  pointCount: number;
+  freshness: "current" | "stale";
+}
+
+/** One LIVE ranger position — the latest valid fix, one per ranger. */
+export interface LiveRangerFeature {
+  /** Feature select id = the patrol id (click → patrol detail). */
+  id: string;
+  patrolId: string;
+  rangerName: string;
+  patrolLabel: string | null;
+  lng: number;
+  lat: number;
+  fixAt: string | null;
+  accuracyM: number | null;
+  speedKmh: number | null;
+  pointCount: number | null;
+  freshness: "current" | "stale";
+  /** Actual feed path window (e.g. "15 min") for the hover card. */
+  pathWindow?: string | null;
+}
+
+export function livePathsToFeatures(paths: LivePathFeature[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: paths.map((p) => ({
+      type: "Feature",
+      id: p.id,
+      properties: flatProps({
+        id: p.id,
+        kind: "live-patrol",
+        patrolId: p.patrolId,
+        label: p.label,
+        rangerName: p.rangerName,
+        startedAt: p.startAt,
+        endAt: p.endAt,
+        durationMinutes: p.durationMinutes,
+        distanceKm: p.distanceKm,
+        pointCount: p.pointCount,
+        freshness: p.freshness,
+      }),
+      geometry: { type: "LineString", coordinates: p.coordinates },
+    })),
+  };
+}
+
+export function liveRangersToFeatures(rangers: LiveRangerFeature[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: rangers.map((r) => ({
+      type: "Feature",
+      id: r.id,
+      properties: flatProps({
+        id: r.id,
+        kind: "live-ranger",
+        patrolId: r.patrolId,
+        patrolLabel: r.patrolLabel,
+        rangerName: r.rangerName,
+        fixAt: r.fixAt,
+        accuracyM: r.accuracyM,
+        speedKmh: r.speedKmh,
+        pointCount: r.pointCount,
+        freshness: r.freshness,
+        pathWindow: r.pathWindow ?? null,
+      }),
+      geometry: { type: "Point", coordinates: [r.lng, r.lat] },
+    })),
+  };
 }
 
 export function routeToTimed(r: GisRoute): TimedPoint[] {

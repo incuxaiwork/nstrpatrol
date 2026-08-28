@@ -25,3 +25,19 @@ export const userSelect = {
   createdAt: true,
   updatedAt: true,
 } satisfies Prisma.UserSelect;
+
+/**
+ * Authoritative cader → portal role mapping. The role of an admin-created
+ * account is ALWAYS derived here on the server from the organizational
+ * cader — a client-supplied role is never trusted. DFO/DyDFO are the
+ * division command (ADMIN); every field cader is RANGER.
+ */
+export const ROLE_FOR_CADER: Record<string, 'ADMIN' | 'RANGER'> = {
+  DFO: 'ADMIN',
+  DyDFO: 'ADMIN',
+  FRO: 'RANGER',
+  DyRO: 'RANGER',
+  FSO: 'RANGER',
+  FBO: 'RANGER',
+  ABO: 'RANGER',
+};

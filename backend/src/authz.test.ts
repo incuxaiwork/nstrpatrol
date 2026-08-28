@@ -12,6 +12,7 @@ jest.mock('../src/lib/jwt', () => ({
 
 jest.mock('../src/db/prisma', () => ({
   prisma: {
+    $queryRaw: jest.fn().mockResolvedValue([]),
     user: {
       findUnique: jest.fn(),
       findMany: jest.fn(),
@@ -48,6 +49,7 @@ jest.mock('../src/db/prisma', () => ({
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { prisma } = require('../src/db/prisma') as {
   prisma: {
+    $queryRaw: jest.Mock;
     user: { findUnique: jest.Mock; findMany: jest.Mock };
     patrol: { findUnique: jest.Mock; findMany: jest.Mock };
     range: { findMany: jest.Mock; findUnique: jest.Mock };

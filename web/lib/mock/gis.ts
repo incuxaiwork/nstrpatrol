@@ -26,6 +26,16 @@ export interface GisMarker {
   x: number;
   y: number;
   tone?: string;
+  /**
+   * Optional REAL record fields for map popups — populated only when the
+   * backend provides them, never fabricated. Missing fields render as "—".
+   */
+  category?: string;
+  severity?: string;
+  status?: string;
+  occurredAt?: string;
+  reporter?: string | null;
+  accuracyM?: number | null;
 }
 
 export interface GisRoute {
@@ -36,13 +46,16 @@ export interface GisRoute {
   points: string; // SVG polyline points
   color: string;
   timedPoints?: { x: number; y: number; t: number }[];
+  /** Optional REAL patrol fields for map popups ("—" when absent). */
   patrolType?: string | null;
   rangerName?: string | null;
   startedAt?: string | null;
   endedAt?: string | null;
+  /** Derived ONLY from the recorded GPS trace (timestamps / haversine). */
   durationMinutes?: number | null;
   distanceKm?: number | null;
   pointCount?: number | null;
+  rangerId?: string | null;
 }
 
 export interface HeatBlock {

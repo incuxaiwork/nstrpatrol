@@ -18,7 +18,6 @@ import {
   rangerTrends,
 } from "@/lib/mock/people";
 import { categoryMeta } from "@/lib/mock/observations";
-import { defaultLayers } from "@/lib/mock/gis";
 import {
   beatCoverage,
   comparativeSeries,
@@ -26,13 +25,6 @@ import {
   monthlyTrend,
   scopeKpis,
 } from "@/lib/mock/analytics";
-import {
-  mockAudit,
-  mockMasterData,
-  mockNotificationTemplates,
-  mockRoles,
-  mockSettings,
-} from "@/lib/mock/admin";
 import { mapBeatsRaw, compartmentsMock, mockBoundary, gisRoutes } from "@/lib/mock/gis";
 import {
   api,
@@ -42,7 +34,6 @@ import {
   type ApiUser,
 } from "@/lib/api";
 import {
-  adminUserFromApi,
   alertFromApi,
   beatsFromGeoJson,
   boundariesFromGeoJson,
@@ -53,7 +44,6 @@ import {
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
-  registerRoleFromWeb,
   unionExtent,
   type BoundaryPolygon,
   type CompartmentPolygon,
@@ -63,17 +53,12 @@ import {
 } from "@/lib/backend-adapters";
 import type {
   AnalyticsDataset,
-  AdminUser,
-  AuditEntry,
   AuthorizationStatus,
   DashboardSummary,
   EquipmentItem,
   JurisdictionState,
   KpiSeries,
-  MapLayerDef,
-  MasterData,
   NotificationItem,
-  NotificationTemplate,
   Observation,
   ObservationSeverity,
   Patrol,
@@ -81,15 +66,12 @@ import type {
   PatrolReport,
   PatrolStatus,
   Ranger,
-  Role,
   SearchResult,
-  SiteSettings,
   Team,
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";
-import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg } from "@/lib/map-space";
 
 /* Mock paths resolve on the next microtask — no artificial latency. */
@@ -131,18 +113,55 @@ export const auth = {
 /* Patrols                                                            */
 /* ------------------------------------------------------------------ */
 
-export const patrols = {
-  list: async (): Promise<Patrol[]> =>
-    remoteOnly(async () => (await api.patrols.list()).map((p) => patrolFromApi(p))),
-  get: async (id: string): Promise<Patrol | undefined> =>
-    remoteOnly(async () => {
-      const [p, points, incidents] = await Promise.all([
-        api.patrols.get(id),
-        api.patrols.points(id).catch(() => [] as { lat: number; lng: number; t?: string | null }[]),
-        api.incidents.list().catch(() => []),
-      ]);
-      return patrolFromApi(p, points, incidents);
-    }),
+export const patrols = (() => {
+  const LIST_TTL_MS = 15_000;
+  let listCached: { data: Patrol[]; at: number } | null = null;
+  let listInflight: Promise<Patrol[]> | null = null;
+
+  let rawCached: { data: ApiPatrol[]; at: number } | null = null;
+  let rawInflight: Promise<ApiPatrol[]> | null = null;
+
+  async function fetchList(): Promise<Patrol[]> {
+    const rows = await api.patrols.list();
+    return rows.map((p) => patrolFromApi(p));
+  }
+
+  /** Expose raw API rows so rangers.list() can reuse the same network call.
+   *  Uses its own cache + inflight dedupe to prevent duplicate network calls
+   *  when multiple services call rawList() concurrently. */
+  async function rawList(): Promise<ApiPatrol[]> {
+    if (rawCached && Date.now() - rawCached.at < LIST_TTL_MS) return rawCached.data;
+    if (rawInflight) return rawInflight;
+    rawInflight = api.patrols.list().then(
+      (data) => { rawCached = { data, at: Date.now() }; rawInflight = null; return data; },
+      (err) => { rawInflight = null; throw err; },
+    );
+    return rawInflight;
+  }
+
+  return {
+    list: async (): Promise<Patrol[]> => {
+      if (listCached && Date.now() - listCached.at < LIST_TTL_MS) return listCached.data;
+      if (listInflight) return listInflight;
+      listInflight = fetchList().then(
+        (data) => { listCached = { data, at: Date.now() }; listInflight = null; return data; },
+        (err) => { listInflight = null; throw err; },
+      );
+      return listInflight;
+    },
+    rawList,
+    get: async (id: string): Promise<Patrol | undefined> =>
+      remoteOnly(async () => {
+        const [p, points, incidents, coverage] = await Promise.all([
+          api.patrols.get(id),
+          api.patrols.points(id).catch(() => [] as { lat: number; lng: number; t?: string | null }[]),
+          api.incidents.list({ patrolId: id }).catch(() => []),
+          // Real ForestGrid coverage — detail-only (never per list row).
+          api.patrols.coverageSummary(id).catch(() => null),
+        ]);
+        const patrol = patrolFromApi(p, points, incidents);
+        return coverage ? { ...patrol, coveragePct: coverage.coveragePercent } : patrol;
+      }),
   // API GAP: no status-filtered patrol endpoint beyond the shared list
   // (backend list supports ?status, but no page consumes this yet).
   byStatus: async (status: PatrolStatus): Promise<Patrol[]> => {
@@ -150,8 +169,7 @@ export const patrols = {
     return mockPatrols.filter((p) => p.status === status);
   },
   /** Patrol report documents composed from real patrol + incident records.
-   *  The backend has no report endpoint; list-level stats (distance/duration)
-   *  are not exposed by GET /api/patrols, so those read 0 (API GAP). */
+   *  Stats (distance/duration) come from the backend batched stats endpoint. */
   reports: async (): Promise<PatrolReport[]> =>
     remoteOnly(async () => {
       const [patrolRows, incidents] = await Promise.all([api.patrols.list(), api.incidents.list()]);
@@ -162,17 +180,14 @@ export const patrols = {
           patrolId: p.id,
           code: `PT-${p.id.slice(-6).toUpperCase()}`,
           title: p.name ?? `Patrol ${p.id.slice(0, 8)}`,
-          type: "general-duties",
-          division: "",
-          range: "",
-          beat: "",
+          division: p.geography?.division ?? "",
+          range: p.geography?.range ?? "",
+          beat: p.geography?.beat ?? "",
           leader: p.user?.fullName ?? "Unassigned",
           reportDate: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
           period: "—",
-          durationMin: 0,
-          distanceKm: 0,
-          coveragePct: 0,
-          checkpoints: 0,
+          durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
+          distanceKm: p.stats?.distanceKm ?? null,
           observations: mine.length,
           incidents: mine.length,
           photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
@@ -182,7 +197,8 @@ export const patrols = {
     }),
   typeLabels: patrolTypeLabels,
   methodLabels: patrolMethodLabels,
-};
+  };
+})();
 
 /* ------------------------------------------------------------------ */
 /* Patrol authorizations (special patrol permissions)                 */
@@ -340,7 +356,7 @@ const createdRangers: Ranger[] = [];
  */
 const livePatrolSet = async (): Promise<{ userId: string; status: string; startedAt: string | null; endedAt: string | null }[]> => {
   try {
-    return await api.patrols.list();
+    return await patrols.rawList();
   } catch {
     return [];
   }
@@ -486,13 +502,16 @@ async function dashboardRemote(): Promise<DashboardSummary> {
   ).length;
 
   // Coverage only when the beat layer actually carries coverage values.
+  // Otherwise null → the UI renders "—"; a data gap must never read as "0%".
   const withCoverage = beatList.filter((b) => b.coveragePct != null);
   const coveragePct =
     withCoverage.length > 0
       ? Math.round(withCoverage.reduce((a, b) => a + (b.coveragePct ?? 0), 0) / withCoverage.length)
-      : 0;
+      : null;
+  // No fabricated day counts — the beat layer flags low coverage, but no
+  // backend source states how long a beat has gone unpatrolled.
   const zeroPatrolList = withCoverage.length
-    ? withCoverage.filter((b) => b.isZeroPatrol).map((b) => ({ beat: b.name, days: 14 }))
+    ? withCoverage.filter((b) => b.isZeroPatrol).map((b) => ({ beat: b.name }))
     : [];
 
   // Jurisdiction requires region data + authorizations; backend patrols carry
@@ -524,6 +543,7 @@ async function dashboardRemote(): Promise<DashboardSummary> {
     .sort((a, b) => (b.severity > a.severity ? 1 : -1))
     .slice(0, 3)
     .map((i) => ({
+      id: i.id,
       title: i.title,
       severity: severityLabelFromApi[i.severity] ?? "medium",
       time: new Date(i.occurredAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
@@ -695,12 +715,7 @@ type SpatialResult = {
 };
 
 let cachedSpatialPromise: Promise<SpatialResult> | null = null;
-
 export const gis = {
-  layers: async (): Promise<MapLayerDef[]> => {
-    await delay();
-    return defaultLayers.map((l) => ({ ...l }));
-  },
   /**
    * Beats + compartments + forest boundary + reference grids from the backend
    * GIS API (GeoJSON → SVG polygons, viewBox 1000×700). All collections
@@ -760,11 +775,18 @@ export const gis = {
   extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => api.gis.assets(),
-  /** Incident markers projected into the shared SVG space — real records. */
+  /** Incident markers projected into the shared SVG space — real records.
+   *  Only geolocated records are plotted; (0,0) is treated as missing GPS,
+   *  never rendered. Popup fields are carried verbatim from the record. */
   markers: async (): Promise<GisMarker[]> => {
     const incidents = await api.incidents.list();
     return incidents
-      .filter((i) => i.latitude != null && i.longitude != null)
+      .filter(
+        (i) =>
+          i.latitude != null &&
+          i.longitude != null &&
+          !(i.latitude === 0 && i.longitude === 0)
+      )
       .map((i) => {
         const { x, y } = lngLatToSvg(i.longitude!, i.latitude!);
         const sos = isSosIncident(i);
@@ -774,10 +796,18 @@ export const gis = {
           label: `${i.title}${i.user?.fullName ? ` · ${i.user.fullName}` : ""}`,
           x,
           y,
+          category: i.type,
+          severity: i.severity,
+          status: i.status,
+          occurredAt: i.occurredAt ?? null,
+          reporter: i.user?.fullName ?? null,
+          accuracyM: i.accuracy ?? null,
         };
       });
   },
-  /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG. */
+  /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG.
+   *  Duration/distance are DERIVED FROM THE RECORDED TRACE ONLY (point
+   *  timestamps / haversine over recorded fixes) — never fabricated. */
   routes: async (): Promise<GisRoute[]> => {
     try {
       const patrols = await api.patrols.list();
@@ -822,6 +852,65 @@ export const gis = {
       console.warn("Backend patrol routes unavailable — using accurate patrol paths layout:", err);
     }
     return gisRoutes;
+  },
+  /**
+   * Live tracking feed (GET /api/patrols/live) — ACTIVE patrols with their
+   * latest VALID GPS fix plus a bounded recent path. Strict remote; scope is
+   * applied by the backend (applyPatrolWhere). Nothing is synthesized here:
+   * invalid fixes are dropped again client-side (belt-and-braces), distance
+   * and duration derive ONLY from recorded fixes (haversine / timestamps),
+   * and a patrol without a usable fix keeps latest: null — never a marker.
+   * One entry per RANGER: when a ranger holds several ACTIVE patrols the
+   * patrol with the newest lastPointAt wins (no duplicate/conflicting
+   * markers); the losing patrols stay in the feed untouched.
+   */
+  live: async (): Promise<GisLiveFeed> => {
+    const res = await remoteOnly(() => api.patrols.live());
+    const serverMs = new Date(res.serverTime).getTime();
+    // Client−server clock offset at fetch time — used to age real GPS
+    // timestamps against THIS browser's clock without trusting it blindly.
+    const skewMs = Number.isFinite(serverMs) ? Date.now() - serverMs : 0;
+
+    const byRanger = new Map<string, GisLivePatrol>();
+    const patrols: GisLivePatrol[] = [];
+    // Newest-first so the first sighting of a ranger wins the dedupe.
+    const ordered = [...res.patrols].sort(
+      (a, b) => liveSortKey(b.lastPointAt) - liveSortKey(a.lastPointAt)
+    );
+    for (const p of ordered) {
+      const path = p.path.filter(isUsableFix).map((f) => ({ lat: f.lat, lng: f.lng, t: f.t }));
+      const usableLatest =
+        p.latestPoint && isUsableFix(p.latestPoint)
+          ? {
+              lat: p.latestPoint.lat,
+              lng: p.latestPoint.lng,
+              t: p.latestPoint.t,
+              accuracy: p.latestPoint.accuracy,
+              speed: p.latestPoint.speed,
+            }
+          : null;
+      const view: GisLivePatrol = {
+        patrolId: p.id,
+        name: p.name,
+        patrolType: p.type,
+        beat: p.beat,
+        rangerId: p.ranger.id,
+        rangerName: p.ranger.fullName,
+        startedAt: p.startedAt,
+        lastPointAt: usableLatest ? usableLatest.t : null,
+        pointCount: typeof p.pointCount === "number" ? p.pointCount : 0,
+        latest: usableLatest,
+        path,
+        pathDistanceKm: haversineKm(path),
+        pathMinutes: traceDurationMinutes(path[0]?.t ?? null, path[path.length - 1]?.t ?? null),
+      };
+      patrols.push(view);
+      const prev = byRanger.get(view.rangerId);
+      if (!prev || liveSortKey(view.lastPointAt) > liveSortKey(prev.lastPointAt)) {
+        byRanger.set(view.rangerId, view);
+      }
+    }
+    return { serverTime: res.serverTime, skewMs, patrols, rangers: [...byRanger.values()] };
   },
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.
@@ -1082,122 +1171,11 @@ export const workAnalytics = {
 };
 
 /* ------------------------------------------------------------------ */
-/* Administration                                                     */
-/* ------------------------------------------------------------------ */
-
-const createdRoles: Role[] = [];
-const roleUpdates = new Map<string, Partial<Role>>();
-const removedRoleIds = new Set<string>();
-let settingsOverride: SiteSettings | undefined;
-const templateEnabledOverride = new Map<string, boolean>();
-const createdSpecies: { id: string; name: string; category: string; status: SpeciesStatus }[] = [];
-
-type SpeciesStatus = "present" | "rare" | "introduced" | "threatened";
-
-const roleRecord = (id: string): Role | undefined => {
-  if (removedRoleIds.has(id)) return undefined;
-  const created = createdRoles.find((r) => r.id === id);
-  if (created) return created;
-  const base = mockRoles.find((r) => r.id === id);
-  if (!base) return undefined;
-  return { ...base, ...roleUpdates.get(id) };
-};
-
-export const admin = {
-  users: async (): Promise<AdminUser[]> =>
-    remoteOnly(async () => (await api.users.list()).map(adminUserFromApi)),
-  // API GAP: roles/permissions have no backend endpoints — mock remains.
-  roles: async (): Promise<Role[]> => {
-    await delay();
-    return [...mockRoles.filter((r) => !removedRoleIds.has(r.id)).map((r) => ({ ...r, ...roleUpdates.get(r.id) })), ...createdRoles];
-  },
-  // API GAP: audit logs have no backend endpoints — mock remains.
-  audit: async (): Promise<AuditEntry[]> => {
-    await delay();
-    return mockAudit;
-  },
-  // API GAP: master data (species, water-body types, patrol types…) has no
-  // backend source — mock remains.
-  masterData: async (): Promise<MasterData> => {
-    await delay();
-    return { ...mockMasterData, species: [...mockMasterData.species, ...createdSpecies] };
-  },
-  createSpecies: async (input: { name: string; category: string; status: SpeciesStatus }): Promise<void> => {
-    await delay();
-    createdSpecies.unshift({ id: `sp-created-${createdSpecies.length + 1}`, ...input });
-  },
-  // API GAP: site settings have no backend endpoints (options API exists but
-  // is not wired for these keys) — mock remains.
-  settings: async (): Promise<SiteSettings> => {
-    await delay();
-    return settingsOverride ?? mockSettings;
-  },
-  saveSettings: async (patch: Partial<SiteSettings>): Promise<SiteSettings> => {
-    await delay();
-    settingsOverride = { ...(settingsOverride ?? mockSettings), ...patch };
-    return settingsOverride;
-  },
-  // API GAP: notification templates have no backend endpoints — mock remains.
-  notificationTemplates: async (): Promise<NotificationTemplate[]> => {
-    await delay();
-    return mockNotificationTemplates.map((t) => ({ ...t, enabled: templateEnabledOverride.get(t.id) ?? t.enabled }));
-  },
-  setTemplateEnabled: async (id: string, enabled: boolean): Promise<void> => {
-    await delay();
-    templateEnabledOverride.set(id, enabled);
-  },
-  /**
-   * Onboarding: backend has no "invite" concept — the user is created as an
-   * active account via the admin-gated register endpoint (temporary password).
-   */
-  createUser: async (input: { name: string; email: string; roleId: string; division?: string }): Promise<AdminUser> =>
-    remoteOnly(async () => {
-      const created = await api.auth.register({
-        email: input.email,
-        password: `Nstr@${Date.now().toString(36)}`,
-        fullName: input.name,
-        role: registerRoleFromWeb(input.roleId),
-      });
-      return adminUserFromApi(created);
-    }),
-  setUserStatus: async (id: string, status: AdminUser["status"]): Promise<AdminUser | undefined> => {
-    // "invited" has no backend transition (no invite endpoint) — API GAP.
-    if (status === "invited") return undefined;
-    const updated =
-      status === "active" ? await api.users.activate(id) : await api.users.deactivate(id);
-    return adminUserFromApi(updated);
-  },
-  removeUser: async (id: string): Promise<boolean> =>
-    remoteOnly(async () => {
-      await api.users.deactivate(id);
-      return true;
-    }),
-  createRole: async (input: { name: string; description: string; permissions: Role["permissions"] }): Promise<Role> => {
-    await delay();
-    const id = `role-${input.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
-    const record: Role = { id, name: input.name, description: input.description, userCount: 0, system: false, permissions: input.permissions };
-    createdRoles.unshift(record);
-    return record;
-  },
-  updateRole: async (id: string, patch: Partial<Role>): Promise<Role | undefined> => {
-    await delay();
-    if (!roleRecord(id)) return undefined;
-    roleUpdates.set(id, { ...roleUpdates.get(id), ...patch });
-    return roleRecord(id);
-  },
-  removeRole: async (id: string): Promise<boolean> => {
-    await delay();
-    if (!roleRecord(id) || roleRecord(id)?.system) return false;
-    removedRoleIds.add(id);
-    return true;
-  },
-};
-
-/* ------------------------------------------------------------------ */
 /* Forest hierarchy                                                    */
 /* ------------------------------------------------------------------ */
 
 let hierarchyCache: HierarchyTree | null = null;
+let hierarchyInflight: Promise<HierarchyTree> | null = null;
 
 export const hierarchy = {
 /** Division → range → beat tree + compartment register, derived from the
@@ -1205,12 +1183,15 @@ export const hierarchy = {
  *  Strict: no mock fallback — failures surface as error states. */
   units: async (): Promise<HierarchyTree> => {
     if (hierarchyCache) return hierarchyCache;
-    const tree = await remoteOnly(async () => {
+    if (hierarchyInflight) return hierarchyInflight;
+    hierarchyInflight = remoteOnly(async () => {
       const [beatFc, compFc] = await Promise.all([api.gis.beats(), api.gis.compartments()]);
       return hierarchyFromGeoJson(beatFc, compFc);
-    });
-    hierarchyCache = tree;
-    return tree;
+    }).then(
+      (tree) => { hierarchyCache = tree; hierarchyInflight = null; return tree; },
+      (err) => { hierarchyInflight = null; throw err; },
+    );
+    return hierarchyInflight;
   },
   compartments: async (): Promise<HierarchyTree["compartments"]> => (await hierarchy.units()).compartments,
 };
@@ -1243,7 +1224,7 @@ export const global = {
             id: u.id,
             title: u.fullName,
             subtitle: u.email ?? "",
-            href: u.role === "ADMIN" ? "/admin/users" : `/rangers/${u.id}`,
+            href: `/rangers/${u.id}`,
           });
         }
         for (const p of patrols) {

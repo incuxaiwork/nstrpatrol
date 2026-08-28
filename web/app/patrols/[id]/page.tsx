@@ -24,7 +24,7 @@ import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
-import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
+import { formatDateTime, formatMinutes, formatKm, geoLabel } from "@/lib/utils";
 import type { PatrolEvent } from "@/lib/types";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { PatrolReportDialog } from "@/components/reports/dialogs";
@@ -33,8 +33,8 @@ export default function PatrolDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const auths = useAsyncData(() => authorizations.list());
-  const spatial = useAsyncData(() => gis.spatial());
+  const auths = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
+  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
   const [reportOpen, setReportOpen] = useState(false);
 
   const jurisdiction = useMemo(
@@ -42,9 +42,13 @@ export default function PatrolDetailPage() {
     [patrol, auths.data]
   );
 
-  if (loading || auths.loading || !auths.data || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
+  if (loading || !patrol || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
-  if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the mock records")} />;
+  if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the records")} />;
+
+  // Geography is only shown where the backend actually resolved it.
+  const areaText = [patrol.division, patrol.range, patrol.beat].filter(Boolean).join(" / ") || "Unknown";
+  const typeText = patrol.type ? patrolTypeLabels[patrol.type] : "Field";
 
   const eventTone = (k: PatrolEvent["kind"]): BadgeTone =>
     k === "incident" ? "danger" : k === "sos" ? "danger" : k === "observation" ? "warning" : k === "checkpoint" ? "info" : "forest";
@@ -58,7 +62,7 @@ export default function PatrolDetailPage() {
     <div>
       <PageHeader
         title={patrol.title}
-        subtitle={`${patrol.code} · ${patrolTypeLabels[patrol.type]} patrol · started ${formatDateTime(patrol.startScheduled)}`}
+        subtitle={`${patrol.code} · ${typeText} patrol · started ${formatDateTime(patrol.startScheduled)}`}
         actions={
           <>
             <Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>
@@ -77,17 +81,17 @@ export default function PatrolDetailPage() {
         <JurisdictionBanner
           state={jurisdiction.state}
           authorization={auth}
-          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => unitName(id ?? "")).join(" / ") : undefined}
-          patrolArea={`${unitName(patrol.division)} / ${unitName(patrol.range)} / ${unitName(patrol.beat)}`}
+          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => geoLabel(id ?? "")).join(" / ") : undefined}
+          patrolArea={areaText}
         />
       </div>
 
       <div className="mt-4">
         <StatRow
           items={[
-            { label: "Distance", value: patrol.distanceKm > 0 ? formatKm(patrol.distanceKm) : "—" },
+            { label: "Distance", value: patrol.distanceKm != null ? formatKm(patrol.distanceKm) : "—" },
             { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
-            { label: "Checkpoints", value: patrol.checkpoints },
+            { label: "Checkpoints", value: patrol.checkpoints ?? "Not available" },
             { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },
             { label: "Observations", value: patrol.observations },
             { label: "Photos", value: patrol.photos },
@@ -100,17 +104,23 @@ export default function PatrolDetailPage() {
           <Card>
             <CardHeader title="Route & live position" icon="map" subtitle="Press play to replay the patrol trace" />
             <div className="p-3">
-              <MapWorkspace
-                mode="overview"
-                heightClass="h-[300px]"
-                replayPatrolId={patrol.id}
-                replayPoints={patrol.route}
-                liveBeats={spatial.data.beats}
-                compartments={spatial.data.compartments}
-                boundary={spatial.data.boundary}
-                grids={spatial.data.grids}
-                onSelect={() => undefined}
-              />
+              {spatial.data ? (
+                <MapWorkspace
+                  mode="overview"
+                  heightClass="h-[300px]"
+                  replayPatrolId={patrol.id}
+                  replayPoints={patrol.route}
+                  liveBeats={spatial.data.beats}
+                  compartments={spatial.data.compartments}
+                  boundary={spatial.data.boundary}
+                  grids={spatial.data.grids}
+                  onSelect={() => undefined}
+                />
+              ) : (
+                <div className="flex h-[300px] items-center justify-center text-xs text-ink-soft">
+                  {spatial.loading ? "Loading map layers…" : "Map unavailable"}
+                </div>
+              )}
             </div>
           </Card>
 
@@ -138,11 +148,11 @@ export default function PatrolDetailPage() {
           <Card>
             <CardHeader title="Details" icon="info" />
             <dl className="space-y-2.5 p-4 text-sm">
-              <DetailRow label="Division" value={unitName(patrol.division)} />
-              <DetailRow label="Range" value={unitName(patrol.range)} />
-              <DetailRow label="Beat" value={unitName(patrol.beat)} />
-              <DetailRow label="Team" value={unitName(patrol.teamId)} />
-              <DetailRow label="Objective" value={patrol.objective} />
+              <DetailRow label="Division" value={patrol.division || "Unknown"} />
+              <DetailRow label="Range" value={patrol.range || "Unknown"} />
+              <DetailRow label="Beat" value={patrol.beat || "Unassigned"} />
+              <DetailRow label="Team" value={patrol.teamId || "—"} />
+              <DetailRow label="Objective" value={patrol.objective || "—"} />
               <DetailRow label="Scheduled" value={formatDateTime(patrol.startScheduled)} />
               {patrol.startActual && <DetailRow label="Started" value={formatDateTime(patrol.startActual)} />}
               {patrol.endScheduled && <DetailRow label="Due by" value={formatDateTime(patrol.endScheduled)} />}
@@ -189,18 +199,30 @@ export default function PatrolDetailPage() {
           )}
 
           <Card>
-            <CardHeader title="Coverage" icon="target" />
+            <CardHeader
+              title="Coverage"
+              icon="target"
+              subtitle="ForestGrid cells touched by this patrol (live from the backend)"
+            />
             <div className="p-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-soft">Beat coverage</span>
-                <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
-              </div>
-              <div className="mt-2">
-                <Progress
-                  value={patrol.coveragePct}
-                  tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
-                />
-              </div>
+              {patrol.coveragePct == null ? (
+                <p className="text-sm text-ink-soft">
+                  Coverage unavailable — the backend could not compute it for this patrol.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink-soft">Patrolled cells</span>
+                    <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
+                  </div>
+                  <div className="mt-2">
+                    <Progress
+                      value={patrol.coveragePct}
+                      tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </Card>
         </div>

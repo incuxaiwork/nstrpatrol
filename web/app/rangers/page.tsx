@@ -16,14 +16,13 @@ import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
-import { mockDivisions, unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { DutyStatus } from "@/lib/types";
 
 export default function RangersPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.list());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
 
   const [status, setStatus] = useState("");
   const [division, setDivision] = useState("");
@@ -46,7 +45,11 @@ export default function RangersPage() {
 
   const inField = data.filter((r) => r.dutyStatus === "field").length;
   const onDuty = data.filter((r) => r.dutyStatus === "on-duty").length;
-  const avgCoverage = Math.round(data.reduce((a, r) => a + r.stats.coveragePct, 0) / data.length);
+  // Per-ranger coverage has no backend aggregate — average only what exists.
+  const coverageValues = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
+  const avgCoverage = coverageValues.length
+    ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
+    : null;
 
   const dutySeg = data.reduce<Record<string, number>>((acc, r) => {
     acc[r.dutyStatus] = (acc[r.dutyStatus] ?? 0) + 1;
@@ -59,9 +62,9 @@ export default function RangersPage() {
       name: r.name,
       designation: r.designation,
       dutyStatus: dutyStatusLabel[r.dutyStatus],
-      division: unitName(r.division),
-      range: unitName(r.range),
-      beat: unitName(r.beat),
+      division: r.division || "",
+      range: r.range || "",
+      beat: r.beat || "",
       team: r.teamId,
       phone: r.phone ?? "",
       bloodGroup: r.bloodGroup ?? "",
@@ -99,7 +102,7 @@ export default function RangersPage() {
         <KpiCard label="On duty" value={onDuty} icon="check" tone="info" onClick={() => setStatus("on-duty")} />
         <KpiCard label="Off duty" value={data.filter((r) => r.dutyStatus === "off-duty").length} icon="clock" tone="neutral" onClick={() => setStatus("off-duty")} />
         <KpiCard label="Offline" value={data.filter((r) => r.dutyStatus === "offline").length} icon="wifi" tone="danger" onClick={() => setStatus("offline")} />
-        <KpiCard label="Avg coverage" value={avgCoverage} unit="%" icon="target" tone="khaki" />
+        <KpiCard label="Avg coverage" value={avgCoverage ?? "—"} unit={avgCoverage != null ? "%" : undefined} icon="target" tone="khaki" />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -118,7 +121,7 @@ export default function RangersPage() {
             <FilterSelect label="Duty status" value={status} onChange={setStatus}
               options={Object.entries(dutyStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
             <FilterSelect label="Division" value={division} onChange={setDivision}
-              options={mockDivisions.map((d) => ({ value: d.id, label: d.name }))} />
+              options={[...new Set(data.map((r) => r.division).filter(Boolean))].map((d) => ({ value: d, label: d }))} />
           </FilterBar>
           {view === "table" && (
             <DataTable
@@ -140,11 +143,11 @@ export default function RangersPage() {
                 },
                 {
                   key: "unit", header: "Unit", sortValue: (r) => r.range,
-                  render: (r) => <span className="text-ink-soft">{unitName(r.range)}</span>,
+                  render: (r) => <span className="text-ink-soft">{r.range || "—"}</span>,
                 },
                 {
-                  key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct,
-                  render: (r) => <span className="text-ink-soft">{r.stats.coveragePct}%</span>,
+                  key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct ?? -1,
+                  render: (r) => <span className="text-ink-soft">{r.stats.coveragePct != null ? `${r.stats.coveragePct}%` : "—"}</span>,
                 },
                 {
                   key: "patrols", header: "Patrols", sortValue: (r) => r.stats.patrols,
@@ -199,7 +202,8 @@ export default function RangersPage() {
             <CardHeader title="Top performers" icon="star" subtitle="By field coverage this quarter" />
             <div className="divide-y divide-line">
               {[...data]
-                .sort((a, b) => b.stats.coveragePct - a.stats.coveragePct)
+                .filter((r) => r.stats.coveragePct != null)
+                .sort((a, b) => (b.stats.coveragePct ?? 0) - (a.stats.coveragePct ?? 0))
                 .slice(0, 5)
                 .map((r, i) => (
                   <Link key={r.id} href={`/rangers/${r.id}`} className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-forest-50/40">
@@ -207,11 +211,14 @@ export default function RangersPage() {
                     <Avatar name={r.name} size={26} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-ink">{r.name}</p>
-                      <p className="text-xs text-ink-soft">{unitName(r.range)}</p>
+                      <p className="text-xs text-ink-soft">{r.range || "—"}</p>
                     </div>
                     <span className="text-sm font-semibold text-forest-800">{r.stats.coveragePct}%</span>
                   </Link>
                 ))}
+              {data.every((r) => r.stats.coveragePct == null) && (
+                <p className="px-4 py-4 text-xs text-ink-soft">No coverage data available yet.</p>
+              )}
             </div>
           </Card>
         </div>
@@ -246,7 +253,7 @@ interface RangerLike {
   designation: string;
   dutyStatus: DutyStatus;
   range: string;
-  stats: { patrols: number; distanceKm: number; fieldHours: number; coveragePct: number };
+  stats: { patrols: number; distanceKm: number; fieldHours: number; coveragePct?: number };
 }
 
 function RangerCards({ rangers: rs, onOpen }: { rangers: RangerLike[]; onOpen(r: RangerLike): void }) {

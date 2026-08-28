@@ -17,13 +17,12 @@ import { JurisdictionBadge } from "@/components/jurisdiction";
 import { resolveJurisdiction } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
-import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo, formatMinutes, formatKm } from "@/lib/utils";
 import type { JurisdictionState } from "@/lib/types";
 
 export default function PatrolHistoryPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.list());
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
   const auths = useAsyncData(() => authorizations.list());
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");
@@ -113,9 +112,9 @@ export default function PatrolHistoryPage() {
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-sm font-medium text-ink">{patrol.title}</span>
                       <span className="block text-xs text-ink-soft">
-                        {patrol.leader} · {unitName(patrol.beat)} · {timeAgo(patrol.startScheduled)}
+                        {patrol.leader} · {patrol.beat || "Unknown beat"} · {timeAgo(patrol.startScheduled)}
                         {patrol.durationMin > 0 && ` · ${formatMinutes(patrol.durationMin)}`}
-                        {patrol.distanceKm > 0 && ` · ${formatKm(patrol.distanceKm)}`}
+                        {patrol.distanceKm != null && patrol.distanceKm > 0 && ` · ${formatKm(patrol.distanceKm)}`}
                       </span>
                     </span>
                     <Badge tone={patrolStatusTone[patrol.status]}>{patrolStatusLabel[patrol.status]}</Badge>

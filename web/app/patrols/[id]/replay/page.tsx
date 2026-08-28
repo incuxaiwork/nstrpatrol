@@ -29,7 +29,7 @@ export default function PatrolReplayPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const spatial = useAsyncData(() => gis.spatial());
+  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
 
   const [playback, setPlayback] = useState(0);
   const [seek, setSeek] = useState<{ key: number; value: number } | null>(null);
@@ -69,9 +69,8 @@ export default function PatrolReplayPage() {
     setPlayback(f);
   };
 
-  if (loading || !patrol || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
+  if (loading || !patrol) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
-  if (spatial.error) return <ErrorState message={spatial.error.message} onRetry={spatial.reload} />;
 
   return (
     <div>
@@ -93,7 +92,7 @@ export default function PatrolReplayPage() {
 
       <StatRow
         items={[
-          { label: "Distance", value: patrol.distanceKm > 0 ? `${patrol.distanceKm} km` : "—" },
+          { label: "Distance", value: patrol.distanceKm != null ? `${patrol.distanceKm} km` : "—" },
           { label: "Duration", value: patrol.durationMin > 0 ? `${patrol.durationMin} min` : "—" },
           { label: "Checkpoints", value: patrol.checkpoints },
           { label: "Events", value: events.length },
@@ -109,19 +108,25 @@ export default function PatrolReplayPage() {
               subtitle="Press play on the map to replay the patrol sequence"
             />
             <div className="p-3">
-              <MapWorkspace
-                mode="overview"
-                heightClass="h-[420px]"
-                replayPatrolId={patrol.id}
-                replayPoints={patrol.route}
-                liveBeats={spatial.data.beats}
-                compartments={spatial.data.compartments}
-                boundary={spatial.data.boundary}
-                grids={spatial.data.grids}
-                onProgress={(p) => setPlayback(p)}
-                seekSignal={seek}
-                onSelect={() => undefined}
-              />
+              {spatial.data ? (
+                <MapWorkspace
+                  mode="overview"
+                  heightClass="h-[420px]"
+                  replayPatrolId={patrol.id}
+                  replayPoints={patrol.route}
+                  liveBeats={spatial.data.beats}
+                  compartments={spatial.data.compartments}
+                  boundary={spatial.data.boundary}
+                  grids={spatial.data.grids}
+                  onProgress={(p) => setPlayback(p)}
+                  seekSignal={seek}
+                  onSelect={() => undefined}
+                />
+              ) : (
+                <div className="flex h-[420px] items-center justify-center text-xs text-ink-soft">
+                  {spatial.loading ? "Loading map layers…" : "Map unavailable"}
+                </div>
+              )}
             </div>
           </Card>
 
@@ -178,26 +183,34 @@ export default function PatrolReplayPage() {
           <Card>
             <CardHeader title="Patrol context" icon="info" />
             <dl className="space-y-2.5 p-4 text-sm">
-              <ReplayRow label="Type" value={patrolTypeLabels[patrol.type]} />
-              <ReplayRow label="Area" value={`${unitName(patrol.range)} · ${unitName(patrol.beat)}`} />
+              <ReplayRow label="Type" value={patrol.type ? patrolTypeLabels[patrol.type] : "—"} />
+              <ReplayRow label="Area" value={[patrol.range, patrol.beat].filter(Boolean).map((id) => unitName(id)).join(" · ") || "Unknown"} />
               <ReplayRow label="Leader" value={patrol.leader} />
               <ReplayRow label="Objective" value={patrol.objective} />
             </dl>
           </Card>
 
           <Card>
-            <CardHeader title="Coverage" icon="target" />
+            <CardHeader title="Coverage" icon="target" subtitle="ForestGrid cells touched by this patrol (live from the backend)" />
             <div className="p-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-ink-soft">Beat coverage</span>
-                <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
-              </div>
-              <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100">
-                <div
-                  className={patrol.coveragePct >= 80 ? "h-full rounded-full bg-forest-600" : patrol.coveragePct >= 40 ? "h-full rounded-full bg-warning" : "h-full rounded-full bg-danger"}
-                  style={{ width: `${patrol.coveragePct}%` }}
-                />
-              </div>
+              {patrol.coveragePct == null ? (
+                <p className="text-sm text-ink-soft">
+                  Coverage unavailable — the backend could not compute it for this patrol.
+                </p>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-ink-soft">Patrolled cells</span>
+                    <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className={patrol.coveragePct >= 80 ? "h-full rounded-full bg-forest-600" : patrol.coveragePct >= 40 ? "h-full rounded-full bg-warning" : "h-full rounded-full bg-danger"}
+                      style={{ width: `${patrol.coveragePct}%` }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
           </Card>
 

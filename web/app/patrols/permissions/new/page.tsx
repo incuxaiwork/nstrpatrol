@@ -44,7 +44,7 @@ function CreateAuthorizationWizard() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const { pushToast } = useApp();
-  const roster = useAsyncData(() => rangers.list());
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
   const editing = useAsyncData(() => (editId ? authorizations.get(editId) : Promise.resolve(undefined)));
 
   const draft = editId ? editing.data : undefined;

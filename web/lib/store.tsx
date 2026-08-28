@@ -98,7 +98,9 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
-  const [user, setUserState] = useState<ApiUser | null>(readStoredUser);
+  // Start with null to match server render. Sync from localStorage after
+  // hydration to avoid mismatch (server can't read localStorage).
+  const [user, setUserState] = useState<ApiUser | null>(null);
   const [scope, setScopeState] = useState<Scope>({
     forest: "Markapur Division",
     division: "d-markapur",
@@ -116,6 +118,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
   const toastId = useRef(0);
+
+  // Sync user from localStorage after hydration (server can't read it).
+  useEffect(() => {
+    setUserState(readStoredUser());
+  }, []);
 
   const setScope = useCallback((s: Scope) => setScopeState(s), []);
 

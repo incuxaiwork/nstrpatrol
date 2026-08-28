@@ -34,8 +34,8 @@ const PAGE_SIZE = 10;
 export default function PatrolPermissionsPage() {
   const router = useRouter();
   const { pushToast } = useApp();
-  const { data, error, loading, reload } = useAsyncData(() => authorizations.list());
-  const roster = useAsyncData(() => rangers.list());
+  const { data, error, loading, reload } = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);

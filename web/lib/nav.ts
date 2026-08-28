@@ -11,7 +11,7 @@ export interface NavItem {
 }
 
 export const navModules: NavItem[] = [
-  { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard" },
+  // { key: "dashboard", label: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { key: "sos", label: "SOS & Alerts", href: "/sos", icon: "sos" },
   {
     key: "patrols",
@@ -19,10 +19,7 @@ export const navModules: NavItem[] = [
     href: "/patrols",
     icon: "route",
     children: [
-      { label: "Patrol Dashboard", href: "/patrols" },
-      { label: "All Patrols", href: "/patrols/all" },
-      { label: "Ongoing Patrols", href: "/patrols/all?status=ongoing" },
-      { label: "Completed Patrols", href: "/patrols/all?status=completed" },
+      { label: "All Patrols", href: "/patrols" },
       { label: "Patrol History", href: "/patrols/history" },
       { label: "Patrol Reports", href: "/patrols/reports" },
       { label: "Patrol Permissions", href: "/patrols/permissions" },
@@ -67,21 +64,7 @@ export const navModules: NavItem[] = [
       { label: "Work Analytics", href: "/work-analytics" },
     ],
   },
-  {
-    key: "admin",
-    label: "Administration",
-    href: "/admin",
-    icon: "settings",
-    children: [
-      { label: "Administration Dashboard", href: "/admin" },
-      { label: "Users", href: "/admin/users" },
-      { label: "App Releases", href: "/admin/app-releases" },
-      { label: "Roles & Permissions", href: "/admin/roles" },
-      { label: "Master Data", href: "/admin/master-data" },
-      { label: "Audit Logs", href: "/admin/audit-logs" },
-      { label: "System Settings", href: "/admin/settings" },
-    ],
-  },
+
 ];
 
 export const patrolStatusTone: Record<PatrolStatus, BadgeTone> = {
@@ -166,7 +149,6 @@ export function breadcrumbsFor(pathname: string): { label: string; href?: string
   if (segs.length > 1) {
     const child = mod?.children?.find((c) => c.href.split("/")[1] === segs[0] && c.href.split("/")[2] === segs[1]);
     if (child) crumbs.push({ label: child.label, href: child.href });
-    else if (segs[1] === "all") crumbs.push({ label: "All Patrols", href: "/patrols/all" });
     else if (segs[1] === "history") crumbs.push({ label: "Patrol History", href: "/patrols/history" });
     else if (segs[1] === "permissions") crumbs.push({ label: "Patrol Permissions", href: "/patrols/permissions" });
     else if (segs[1] === "new") crumbs.push({ label: "Create" });

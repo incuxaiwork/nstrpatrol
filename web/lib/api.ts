@@ -118,6 +118,20 @@ interface RequestOpts {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined>;
   auth?: boolean;
+  /**
+   * Per-request GET cache TTL override (ms). `0` = the shared TTL cache never
+   * serves a hit for this endpoint (live feeds must observe fresh fixes every
+   * poll), while single-flight dedupe of concurrent identical requests still
+   * applies. Omitted → the shared 30 s default; global behavior unchanged.
+   */
+  ttlMs?: number;
+  /**
+   * Background requests should NOT trigger token clearing on 401. Only
+   * explicit logout or critical auth flows should wipe tokens. This prevents
+   * a background notification feed fetch from destroying the user's session
+   * when the access token has expired but the refresh token is still valid.
+   */
+  background?: boolean;
 }
 
 async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
@@ -136,8 +150,8 @@ async function rawRequest(path: string, opts: RequestOpts): Promise<Response> {
     headers,
     body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
     // GETs may be served from the HTTP cache (GIS layers declare max-age);
-    // mutations stay no-store.
-    cache: (opts.method ?? "GET") === "GET" ? "default" : "no-store",
+    // mutations and ttl-0 live feeds stay no-store.
+    cache: (opts.method ?? "GET") === "GET" && opts.ttlMs !== 0 ? "default" : "no-store",
   });
 }
 
@@ -216,11 +230,11 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
           const data = (await parseBody(refreshed)) as { accessToken: string; refreshToken?: string };
           setTokens(data.accessToken, data.refreshToken);
           res = await rawRequest(path, opts);
-        } else {
+        } else if (!opts.background) {
           clearTokens();
         }
       } catch {
-        clearTokens();
+        if (!opts.background) clearTokens();
       }
     }
 
@@ -246,8 +260,9 @@ export async function request<T>(path: string, opts: RequestOpts = {}): Promise<
     return value;
   }
 
-  // GETs are cached (TTL) and deduped while in flight.
-  return cachedGet<T>(method, url.toString(), DEFAULT_TTL_MS, run);
+  // GETs are cached (TTL) and deduped while in flight. A per-request ttlMs
+  // of 0 keeps the dedupe but can never return a cached value.
+  return cachedGet<T>(method, url.toString(), opts.ttlMs ?? DEFAULT_TTL_MS, run);
 }
 
 /* ------------------------------------------------------------------ */
@@ -263,6 +278,11 @@ export interface ApiUser {
   phone: string | null;
   isActive: boolean;
   isAdmin: boolean;
+  /** Organizational assignment ids (nullable until officially finalized). */
+  divisionId?: string | null;
+  subDivisionId?: string | null;
+  rangeId?: string | null;
+  beatId?: string | null;
 }
 
 export interface ApiLoginResponse {
@@ -286,12 +306,70 @@ export interface ApiPatrol {
   userId: string;
   user?: { id: string; fullName: string; email: string; phone?: string | null; cader?: string | null; role?: string };
   forest?: { id: string; name: string; code: string };
+  /** Authoritative organizational geography resolved server-side from
+   *  Patrol.beat → Beat → Range → SubDivision (null when unresolved). */
+  geography?: {
+    beatId: string | null;
+    beat: string | null;
+    range: string | null;
+    rangeId: string | null;
+    subDivision: string | null;
+    subDivisionId: string | null;
+    division: string | null;
+  } | null;
+  /** Aggregated patrol stats (distanceKm, durationSeconds). Provided by both
+   *  the list and detail endpoints. */
+  stats?: ApiPatrolStats;
 }
 
 export interface ApiPatrolStats {
-  points: number;
-  distanceKm: number;
+  points?: number;
+  /** null when no GPS points exist (no GROUP BY row); 0 is genuine zero distance. */
+  distanceKm: number | null;
   durationSeconds: number;
+}
+
+/** One GPS fix of GET /api/patrols/live (backend `toFix` — real device data). */
+export interface ApiLiveFix {
+  lat: number;
+  lng: number;
+  altitude: number | null;
+  /** Meters/second as recorded by the device GPS (Android location.speed). */
+  speed: number | null;
+  bearing: number | null;
+  accuracy: number | null;
+  /** GPS-recorded timestamp (ISO) — never the fetch/request time. */
+  t: string;
+}
+
+/** One ACTIVE patrol of GET /api/patrols/live. */
+export interface ApiLivePatrol {
+  id: string;
+  name: string | null;
+  type: "WALK" | "BICYCLE" | "VEHICLE" | "STATIONARY";
+  status: "ACTIVE";
+  startedAt: string | null;
+  beat: string | null;
+  ranger: { id: string; fullName: string };
+  lastPointAt: string | null;
+  pointCount: number;
+  latestPoint: ApiLiveFix | null;
+  path: ApiLiveFix[];
+}
+
+export interface ApiLiveFeed {
+  serverTime: string;
+  patrols: ApiLivePatrol[];
+}
+
+/** Response of GET /api/patrols/:id/coverage/summary (ForestGrid coverage). */
+export interface ApiPatrolCoverageSummary {
+  patrolId: string;
+  totalCells: number;
+  patrolledCells: number;
+  /** null when PostGIS is unavailable; server-rounded to one decimal otherwise. */
+  coveragePercent: number | null;
+  pointCount: number;
 }
 
 export interface ApiIncident {
@@ -538,8 +616,13 @@ export interface ApiGridCoverage {
 export const auth = {
   login: (email: string, password: string) =>
     request<ApiLoginResponse>("/api/auth/login", { method: "POST", body: { email, password }, auth: false }),
-  register: (input: { email: string; password: string; fullName: string; role?: string; cader?: string; phone?: string }) =>
-    request<ApiUser>("/api/auth/register", { method: "POST", body: input, auth: false }),
+  // Admin-created users MUST go through the authenticated path: the backend
+  // only allows unauthenticated registration for the first-run bootstrap
+  // account. Sending auth:false here produced 403 for every post-bootstrap
+  // invite. With a token attached the backend enforces its own ADMIN check.
+  // The role is derived server-side from the cader — never sent by clients.
+  register: (input: { email: string; password: string; fullName: string; cader?: string; phone?: string }) =>
+    request<ApiUser>("/api/auth/register", { method: "POST", body: input }),
   refresh: () =>
     request<{ accessToken: string; refreshToken: string }>("/api/auth/refresh", {
       method: "POST",
@@ -559,7 +642,6 @@ export const users = {
   get: (id: string) => request<ApiUser>(`/api/users/${id}`),
   update: (id: string, patch: Partial<Pick<ApiUser, "fullName" | "role" | "cader" | "phone">> & { password?: string }) =>
     request<ApiUser>(`/api/users/${id}`, { method: "PATCH", body: patch }),
-  activate: (id: string) => request<ApiUser>(`/api/users/${id}/activate`, { method: "POST" }),
   deactivate: (id: string) => request<ApiUser>(`/api/users/${id}/deactivate`, { method: "POST" }),
 };
 
@@ -567,15 +649,25 @@ export const patrols = {
   list: (query: { mine?: boolean; status?: string; forestId?: string } = {}) =>
     request<ApiPatrol[]>("/api/patrols", { query: { ...query, mine: query.mine ? "true" : undefined } }),
   get: (id: string) => request<ApiPatrol & { stats: ApiPatrolStats }>(`/api/patrols/${id}`),
+  // Coverage summary — DISTINCT from the CoverageEvent feed at
+  // /api/patrols/:id/coverage, which is the Android SyncManager contract
+  // (JSON array) and must never change shape. Detail-only: lists must not
+  // call this per row (N+1).
+  coverageSummary: (id: string) =>
+    request<ApiPatrolCoverageSummary>(`/api/patrols/${id}/coverage/summary`),
   points: (id: string) =>
     request<{ lat: number; lng: number; altitude?: number | null; speed?: number | null; t: string }[]>(`/api/patrols/${id}/points`),
   start: (id: string, startedAt?: string) => request<{ status: string; startedAt: string }>(`/api/patrols/${id}/start`, { method: "POST", body: { startedAt } }),
   complete: (id: string, endedAt?: string) =>
     request<{ status: string; endedAt: string }>(`/api/patrols/${id}/complete`, { method: "POST", body: { endedAt } }),
+  /** Live tracking feed — ACTIVE patrols with latest valid fix + bounded
+   *  recent path (backend applies patrol scoping). ttlMs 0: a poll must never
+   *  read the shared 30 s GET cache; concurrent polls still share one flight. */
+  live: () => request<ApiLiveFeed>("/api/patrols/live", { ttlMs: 0 }),
 };
 
 export const incidents = {
-  list: (query: { mine?: boolean; status?: string; type?: string; from?: string; to?: string } = {}) =>
+  list: (query: { mine?: boolean; status?: string; type?: string; from?: string; to?: string; patrolId?: string } = {}) =>
     request<ApiIncident[]>("/api/incidents", {
       query: { ...query, mine: query.mine ? "true" : undefined },
     }),
@@ -635,7 +727,7 @@ export const sos = {
 
 export const alerts = {
   list: (query: { since?: string; limit?: number } = {}) =>
-    request<ApiAlert[]>("/api/alerts", { query: { ...query, limit: query.limit } }),
+    request<ApiAlert[]>("/api/alerts", { query: { ...query, limit: query.limit }, background: true }),
 };
 
 export const devices = {
@@ -675,38 +767,10 @@ async function requestForm<T>(path: string, file: File, fieldName = "file"): Pro
   return (await res.json()) as T;
 }
 
-export interface ApiAppRelease {
-  id: string;
-  versionCode: number;
-  versionName: string;
-  apkKey: string;
-  sha256: string;
-  sizeBytes: number;
-  notes: string | null;
-  isLatest: boolean;
-  createdAt: string;
-}
-
-export const appReleases = {
-  /** Public — mirrors what the mobile updater polls. */
-  latest: () => request<ApiAppRelease>("/api/app/latest", { auth: false }),
-  list: () => request<ApiAppRelease[]>("/api/app"),
-  uploadApk: (file: File) =>
-    requestForm<{ key: string; size: number; sha256: string; contentType: string }>("/api/uploads", file),
-  register: (body: {
-    versionCode: number;
-    versionName: string;
-    apkKey: string;
-    sha256: string;
-    sizeBytes: number;
-    notes?: string;
-  }) => request<ApiAppRelease>("/api/app", { method: "POST", body }),
-};
-
 export const health = {
   check: () => request<ApiHealth>("/api/health", { auth: false }),
 };
 
 /** Aggregate client mirroring the backend router tree (for discoverability + tooling). */
-export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, appReleases, health };
+export const api = { auth, users, patrols, incidents, gis, map, options, telemetry, sync, sos, alerts, devices, forests, coverage, analytics, uploads, health };
 export default api;

@@ -16,7 +16,7 @@ import { SegmentedControl, type BadgeTone } from "@/components/ui";
 
 export interface Column<T> {
   key: string;
-  header: string;
+  header: ReactNode;
   render?(row: T): ReactNode;
   sortValue?(row: T): string | number;
   className?: string;

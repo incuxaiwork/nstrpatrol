@@ -25,15 +25,15 @@ export default function AnalyticsPage() {
   const router = useRouter();
   const [level, setLevel] = useState<"forest" | "division" | "range" | "beat">("forest");
 
-  const weekly = useAsyncData(() => analytics.weeklyTrend());
-  const durations = useAsyncData(() => analytics.monthly());
-  const wildlife = useAsyncData(() => analytics.wildlife());
-  const humanImpact = useAsyncData(() => analytics.humanImpact());
-  const waterBodies = useAsyncData(() => analytics.waterBodies());
-  const mortality = useAsyncData(() => analytics.mortality());
-  const coverage = useAsyncData(() => analytics.beatCoverage());
-  const heatmap = useAsyncData(() => analytics.heatmap());
-  const jurisdiction = useAsyncData(() => analytics.jurisdiction());
+  const weekly = useAsyncData(() => analytics.weeklyTrend(), [], { cacheKey: "analytics:weekly" });
+  const durations = useAsyncData(() => analytics.monthly(), [], { cacheKey: "analytics:monthly" });
+  const wildlife = useAsyncData(() => analytics.wildlife(), [], { cacheKey: "analytics:wildlife" });
+  const humanImpact = useAsyncData(() => analytics.humanImpact(), [], { cacheKey: "analytics:humanImpact" });
+  const waterBodies = useAsyncData(() => analytics.waterBodies(), [], { cacheKey: "analytics:waterBodies" });
+  const mortality = useAsyncData(() => analytics.mortality(), [], { cacheKey: "analytics:mortality" });
+  const coverage = useAsyncData(() => analytics.beatCoverage(), [], { cacheKey: "analytics:beatCoverage" });
+  const heatmap = useAsyncData(() => analytics.heatmap(), [], { cacheKey: "analytics:heatmap" });
+  const jurisdiction = useAsyncData(() => analytics.jurisdiction(), [], { cacheKey: "analytics:jurisdiction" });
 
   const loading = weekly.loading || wildlife.loading;
   if (loading) return <SkeletonRows rows={7} />;

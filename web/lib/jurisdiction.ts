@@ -5,7 +5,6 @@
  */
 
 import type { BadgeTone } from "@/components/ui";
-import { mockRangers } from "@/lib/mock/people";
 import type {
   AuthorizationStatus,
   BeatJurisdiction,
@@ -14,6 +13,9 @@ import type {
   PatrolAuthorization,
   Ranger,
 } from "@/lib/types";
+
+/** Minimal roster entry needed to resolve a ranger's home jurisdiction. */
+export type RangerHomeRef = Pick<Ranger, "id" | "name" | "division" | "range" | "beat">;
 
 export interface JurisdictionResolution {
   state: JurisdictionState;
@@ -28,6 +30,7 @@ export const jurisdictionLabel: Record<JurisdictionState, string> = {
   "authorized-exception": "Outside normal jurisdiction · Authorized",
   "pending-review": "Outside normal jurisdiction · Pending review",
   "requires-review": "Outside normal jurisdiction · Requires review",
+  unknown: "Jurisdiction unknown · Ranger home not on record",
 };
 
 export const jurisdictionTone: Record<JurisdictionState, BadgeTone> = {
@@ -35,6 +38,8 @@ export const jurisdictionTone: Record<JurisdictionState, BadgeTone> = {
   "authorized-exception": "info",
   "pending-review": "warning",
   "requires-review": "danger",
+  // A data gap is NOT a violation — neutral presentation only.
+  unknown: "neutral",
 };
 
 export const authStatusLabel: Record<AuthorizationStatus, string> = {
@@ -57,12 +62,20 @@ export const authStatusTone: Record<AuthorizationStatus, BadgeTone> = {
   rejected: "danger",
 };
 
-/** Home jurisdiction of a ranger, resolved from the ranger record. */
+/**
+ * Home jurisdiction of a ranger, resolved from a REAL roster passed in by the
+ * caller (users API records). Mock rosters must never drive jurisdiction
+ * evaluation — when no roster is provided or no entry matches, the home is
+ * simply unresolved (undefined), never guessed.
+ */
 export function rangerHome(
-  patrol: Patrol
+  patrol: Patrol,
+  roster: RangerHomeRef[] = []
 ): { division: string; range: string; beat: string } | undefined {
-  const ranger = mockRangers.find((r) => r.id === patrol.rangerId || r.name === patrol.leader);
+  const ranger = roster.find((r) => r.id === patrol.rangerId || r.name === patrol.leader);
   if (!ranger) return undefined;
+  // A home only counts when the roster actually carries geography.
+  if (!ranger.division && !ranger.range && !ranger.beat) return undefined;
   return { division: ranger.division, range: ranger.range, beat: ranger.beat };
 }
 
@@ -109,34 +122,39 @@ export function authorizationCovers(
  * pending-review    — outside home area with a matching authorization still in
  *                     draft/pending state (flagged for confirmation).
  * requires-review   — outside home area with no effective authorization.
+ * unknown           — the ranger's home could not be resolved from real
+ *                     roster data (no match / no geography). A neutral data
+ *                     gap — never reported as a cross-jurisdiction violation.
  */
 export function resolveJurisdiction(
   patrol: Patrol,
-  authorizations: PatrolAuthorization[]
+  authorizations: PatrolAuthorization[],
+  roster: RangerHomeRef[] = []
 ): JurisdictionResolution {
-  const home = rangerHome(patrol);
+  const home = rangerHome(patrol, roster);
+
+  // Without a resolvable home there is nothing to validate against — report
+  // the data gap honestly instead of alleging a violation.
+  if (!home) return { state: "unknown" };
+
   const inHome =
-    !!home &&
     home.division === patrol.division &&
     home.range === patrol.range &&
     home.beat === patrol.beat;
-  if (inHome) return { state: "normal", ...(home ? { ...home } : {}) };
+  if (inHome) return { state: "normal", ...home };
 
   const auth = authorizations.find((a) => a.id === patrol.authorizationId);
   if (!auth) {
-    return {
-      state: "requires-review",
-      ...(home ? { homeDivision: home.division, homeRange: home.range, homeBeat: home.beat } : {}),
-    };
+    return { state: "requires-review", homeDivision: home.division, homeRange: home.range, homeBeat: home.beat };
   }
   const covers = authorizationCovers(auth, patrol.division, patrol.range, patrol.beat);
   if (covers && auth.status === "active") {
-    return { state: "authorized-exception", authorization: auth, ...(home ? { ...home } : {}) };
+    return { state: "authorized-exception", authorization: auth, ...home };
   }
   if (covers && (auth.status === "draft" || auth.status === "pending")) {
-    return { state: "pending-review", authorization: auth, ...(home ? { ...home } : {}) };
+    return { state: "pending-review", authorization: auth, ...home };
   }
-  return { state: "requires-review", authorization: auth, ...(home ? { ...home } : {}) };
+  return { state: "requires-review", authorization: auth, ...home };
 }
 
 /** Patrols recorded under a given authorization (PRD §18 — Related Patrols). */

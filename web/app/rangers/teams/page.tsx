@@ -13,8 +13,8 @@ import type { Ranger } from "@/lib/types";
 
 export default function TeamsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.teams());
-  const crew = useAsyncData(() => rangers.list());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.teams(), [], { cacheKey: "rangers:teams" });
+  const crew = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
 
   if (loading || !data) return <SkeletonRows rows={5} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
