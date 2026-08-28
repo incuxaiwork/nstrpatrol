@@ -36,10 +36,16 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.nstrpatrol.app.data.IndiaTime
 import com.nstrpatrol.app.data.SyncManager
+import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.PatrolSessionEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.BackendApiClient
 import com.nstrpatrol.app.ui.components.NstrScaffold
+import kotlin.math.atan2
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
+import kotlin.math.sqrt
 import com.nstrpatrol.app.ui.navigation.BottomTab
 import com.nstrpatrol.app.ui.theme.ChipCompleted
 import com.nstrpatrol.app.ui.theme.ChipInProgress
@@ -221,6 +227,7 @@ fun AllPatrolsScreen(
         filtered.forEach { session ->
             SessionPatrolCard(
                 session = session,
+                dao = dao,
                 onClick = { onOpenPatrol(session.patrolId) },
                 modifier = Modifier.padding(bottom = 12.dp)
             )
@@ -231,6 +238,7 @@ fun AllPatrolsScreen(
 @Composable
 private fun SessionPatrolCard(
     session: PatrolSessionEntity,
+    dao: TelemetryDao,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -239,9 +247,23 @@ private fun SessionPatrolCard(
         "COMPLETED" -> StatusCompleted to ChipCompleted
         else -> StatusScheduled to ChipScheduled
     }
-    val distText = if (session.totalDistanceMeters >= 1000)
-        stringResource(R.string.patrol_km_covered, session.totalDistanceMeters / 1000) else
-        stringResource(R.string.patrol_m_covered, session.totalDistanceMeters)
+    var displayDistance by remember(session.patrolId, session.totalDistanceMeters, session.pointCount) {
+        mutableStateOf(session.totalDistanceMeters)
+    }
+    LaunchedEffect(session.patrolId, session.totalDistanceMeters, session.pointCount) {
+        // Live fallback: stored totalDistanceMeters is 0 for ACTIVE patrols and for
+        // stale finalized sessions (pointCount only). Compute from actual GPS points
+        // so the card never shows 0 m when a track exists.
+        val needsLive = session.status == "ACTIVE" || session.totalDistanceMeters == 0.0
+        if (needsLive) {
+            val points = withContext(Dispatchers.IO) { dao.patrolPointsOrdered(session.patrolId) }
+            val live = haversineDistance(points)
+            if (live > 0) displayDistance = maxOf(displayDistance, live)
+        }
+    }
+    val distText = if (displayDistance >= 1000)
+        stringResource(R.string.patrol_km_covered, displayDistance / 1000) else
+        stringResource(R.string.patrol_m_covered, displayDistance)
 
     Column(
         modifier = modifier
@@ -301,7 +323,7 @@ private fun SessionPatrolCard(
                 modifier = Modifier.weight(1f)
             )
             val steps = if (session.totalSteps > 0) session.totalSteps
-            else if (session.totalDistanceMeters > 0) (session.totalDistanceMeters / 0.75).toInt()
+            else if (displayDistance > 0) (displayDistance / 0.75).toInt()
             else 0
             if (steps > 0) {
                 Text(text = stringResource(R.string.patrol_steps, steps), color = TextSecondary, fontSize = 12.sp)
@@ -330,4 +352,25 @@ private fun FilterChip(label: String, count: String, selected: Boolean, onClick:
             Text(text = count, color = if (selected) ForestGreen else TextSecondary, fontSize = 11.sp, fontWeight = FontWeight.Bold)
         }
     }
+}
+
+private const val EARTH_RADIUS_M = 6_371_000.0
+
+private fun haversineDistance(points: List<PatrolPointEntity>): Double {
+    if (points.size < 2) return 0.0
+    var total = 0.0
+    for (i in 1 until points.size) {
+        val p1 = points[i - 1]
+        val p2 = points[i]
+        total += singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+    }
+    return total
+}
+
+private fun singleHaversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = sin(dLat / 2).pow(2) + cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) * sin(dLon / 2).pow(2)
+    val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return EARTH_RADIUS_M * c
 }

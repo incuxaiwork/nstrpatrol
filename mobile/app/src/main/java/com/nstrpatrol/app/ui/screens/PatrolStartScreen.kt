@@ -104,7 +104,16 @@ fun PatrolStartScreen(
         }
 
         locationChecking = true
-        val loc = lastKnownLocation(context)
+        // Debug GPS override — set via ADB broadcast
+        val debugLoc = com.nstrpatrol.app.debug.DebugLocation.get(context)
+        val loc = if (debugLoc != null) {
+            android.location.Location("debug").apply {
+                latitude = debugLoc.first
+                longitude = debugLoc.second
+            }
+        } else {
+            lastKnownLocation(context)
+        }
         if (loc == null) {
             locationMessage = "Unable to get GPS location. Ensure GPS is enabled and you are outdoors."
             locationValid = false
@@ -112,7 +121,8 @@ fun PatrolStartScreen(
             return@LaunchedEffect
         }
         try {
-            val result = api.validateLocation(loc.latitude, loc.longitude, assignedBeat, assignedSection, assignedRange)
+            gisRepo.loadGisDataBlocking()
+            val result = gisRepo.validateLocationOffline(loc.latitude, loc.longitude, assignedBeat, assignedSection, assignedRange)
             val valid = result.optBoolean("valid", false)
             val reason = result.optString("reason", "")
             val msg = result.optString("message", "")
@@ -128,34 +138,12 @@ fun PatrolStartScreen(
                 !valid && reason == "beat_not_found" -> msg.ifEmpty { "Assigned beat not found in GIS data." }
                 !valid && reason == "section_not_found" -> msg.ifEmpty { "Assigned section not found in GIS data." }
                 !valid && reason == "range_not_found" -> msg.ifEmpty { "Assigned range not found in GIS data." }
+                !valid && reason == "no_gis_data" -> "GIS data unavailable: $msg"
                 else -> msg.ifEmpty { "Location validation failed." }
             }
         } catch (e: Exception) {
-            // Network failed — fall back to offline validation using bundled GIS data
-            try {
-                val localResult = gisRepo.validateLocationOffline(loc.latitude, loc.longitude, assignedBeat, assignedSection, assignedRange)
-                val valid = localResult.optBoolean("valid", false)
-                val reason = localResult.optString("reason", "")
-                val msg = localResult.optString("message", "")
-                locationValid = valid
-                locationMessage = when {
-                    valid && reason == "inside_beat" -> "Location verified (offline): You are inside your assigned beat ($assignedBeat)"
-                    valid && reason == "inside_section" -> "Location verified (offline): You are inside your section ($assignedSection)"
-                    valid && reason == "inside_range" -> "Location verified (offline): You are inside your range ($assignedRange)"
-                    valid && reason == "no_assignment" -> "No beat/section/range assignment to validate."
-                    !valid && reason == "outside_beat" -> "You are OUTSIDE your assigned beat ($assignedBeat). Move to your beat area to start patrol."
-                    !valid && reason == "outside_section" -> "You are OUTSIDE your section ($assignedSection). Move to your section area to start patrol."
-                    !valid && reason == "outside_range" -> "You are OUTSIDE your assigned range ($assignedRange). Move to your range area to start patrol."
-                    !valid && reason == "beat_not_found" -> msg.ifEmpty { "Assigned beat not found in GIS data." }
-                    !valid && reason == "section_not_found" -> msg.ifEmpty { "Assigned section not found in GIS data." }
-                    !valid && reason == "range_not_found" -> msg.ifEmpty { "Assigned range not found in GIS data." }
-                    !valid && reason == "no_gis_data" -> "Offline validation unavailable: $msg"
-                    else -> msg.ifEmpty { "Location validation failed." }
-                }
-            } catch (e2: Exception) {
-                locationMessage = "Location check failed: ${e.message}. Ensure you have network."
-                locationValid = false
-            }
+            locationMessage = "Location check failed: ${e.message}"
+            locationValid = false
         } finally {
             locationChecking = false
         }

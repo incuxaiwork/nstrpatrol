@@ -48,6 +48,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".debug.DebugLocationReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.nstrpatrol.app.DEBUG_SET_LOCATION" />
+                <action android:name="com.nstrpatrol.app.DEBUG_CLEAR_LOCATION" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".time.PatrolForegroundService"
             android:exported="false"
