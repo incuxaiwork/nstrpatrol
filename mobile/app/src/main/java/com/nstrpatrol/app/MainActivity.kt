@@ -274,6 +274,7 @@ fun NstrApp() {
     // runtime-granted first, so a patrol start requires it before we fire the
     // service — otherwise a fresh install would crash the app at patrol start.
     var pendingPatrolAfterLocationGrant by rememberSaveable { mutableStateOf(false) }
+    var pendingPatrolAfterBackgroundGrant by rememberSaveable { mutableStateOf(false) }
 
     /** Kicks off the actual patrol once location permission is available. */
     fun beginPatrol() {
@@ -285,6 +286,19 @@ fun NstrApp() {
             Toast.makeText(
                 context,
                 "Battery saver is ON — GPS tracking may fail. Charge the phone or disable battery saver.",
+                Toast.LENGTH_LONG
+            ).show()
+        }
+        // Warn if background location was denied — telemetry may stop if app is killed.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Toast.makeText(
+                context,
+                "Background location not granted — GPS may stop if the app is closed. Grant \"Allow all the time\" in Settings for continuous tracking.",
                 Toast.LENGTH_LONG
             ).show()
         }
@@ -300,12 +314,34 @@ fun NstrApp() {
         }
     }
 
+    val backgroundLocationLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (pendingPatrolAfterBackgroundGrant) {
+            pendingPatrolAfterBackgroundGrant = false
+            beginPatrol()
+        }
+    }
+
     val locationLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (pendingPatrolAfterLocationGrant) {
             pendingPatrolAfterLocationGrant = false
-            if (granted) beginPatrol()
+            if (granted) {
+                // Foreground location granted — now request background if needed.
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                    ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                    ) != PackageManager.PERMISSION_GRANTED
+                ) {
+                    pendingPatrolAfterBackgroundGrant = true
+                    backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                } else {
+                    beginPatrol()
+                }
+            }
         }
     }
     LaunchedEffect(patrolTimer.running.value) {
@@ -328,6 +364,17 @@ fun NstrApp() {
         ) {
             pendingPatrolAfterLocationGrant = true
             locationLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
+            return
+        }
+        // Foreground location already granted — check background.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_BACKGROUND_LOCATION
+            ) != PackageManager.PERMISSION_GRANTED
+        ) {
+            pendingPatrolAfterBackgroundGrant = true
+            backgroundLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
             return
         }
         beginPatrol()
