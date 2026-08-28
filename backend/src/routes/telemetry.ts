@@ -153,8 +153,8 @@ const modelMap: DataMap = {
 for (const key of Object.keys(schemas) as EndpointKey[]) {
   const schema = schemas[key];
   telemetryRouter.post(`/${key}`, validateBody(schema.max(MAX_BATCH)), async (req, res) => {
-    const created = await ingestEntity(key, req.body, req.user!);
-    res.status(201).json({ inserted: created.length, records: created });
+    const inserted = await ingestEntity(key, req.body, req.user!);
+    res.status(201).json({ inserted });
   });
 }
 
@@ -166,16 +166,17 @@ export async function ingestEntity(
   key: EndpointKey,
   input: unknown,
   user: { id: string; role: string; isAdmin: boolean },
-): Promise<{ id: string }[]> {
+): Promise<number> {
   const schema = schemas[key] as z.ZodArray<z.ZodType<Record<string, unknown>>>;
   const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string }[];
   await authorizePatrols(user, records);
 
   const data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
-  const model = (prisma as unknown as Record<string, { createManyAndReturn: (args: { data: unknown[] }) => Promise<{ id: string }[]> }>)[
+  const model = (prisma as unknown as Record<string, { createMany: (args: { data: unknown[] }) => Promise<{ count: number }> }>)[
     modelMap[key].model
   ];
-  return model.createManyAndReturn({ data });
+  const result = await model.createMany({ data });
+  return result.count;
 }
 
 telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {

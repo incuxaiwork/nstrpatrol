@@ -73,9 +73,9 @@ syncRouter.post('/upload', validateBody(uploadSchema), async (req, res) => {
         results.push({ entity: 'incidents', inserted: created.length });
         total += created.length;
       } else {
-        const created = await ingestEntity(batch.entity, batch.records, req.user!);
-        results.push({ entity: batch.entity, inserted: created.length });
-        total += created.length;
+        const inserted = await ingestEntity(batch.entity, batch.records, req.user!);
+        results.push({ entity: batch.entity, inserted });
+        total += inserted;
       }
       await prisma.syncLog.create({
         data: {
