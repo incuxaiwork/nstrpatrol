@@ -22,6 +22,9 @@ import java.util.UUID
  */
 class PatrolTimer {
 
+    @Volatile
+    private var appContext: Context? = null
+
     private val _running = MutableStateFlow(false)
     val running: StateFlow<Boolean> = _running.asStateFlow()
 
@@ -32,19 +35,78 @@ class PatrolTimer {
     var patrolId: String? = null
         private set
 
+    /** Inject app context for SharedPreferences persistence. */
+    fun initContext(context: Context) {
+        appContext = context.applicationContext
+    }
+
     fun start(trustedUtcNow: Long, wallClockNow: Long) {
         patrolId = UUID.randomUUID().toString()
         startElapsedRealtime = SystemClock.elapsedRealtime()
         startTrustedMillis = trustedUtcNow
         startWallClockMillis = wallClockNow
         _running.value = true
+        persist()
     }
 
     fun stop() {
         _running.value = false
+        clearPersisted()
     }
 
     fun isRunning(): Boolean = _running.value
+
+    // ── Persistence: survives process death on swipe-up ──────────────────
+
+    private fun prefs() = appContext?.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+
+    /** Write current timer state to SharedPreferences. */
+    fun persist() {
+        val p = prefs() ?: return
+        if (!_running.value || patrolId == null) {
+            p.edit().clear().apply()
+            return
+        }
+        p.edit()
+            .putString("patrol_id", patrolId)
+            .putLong("start_elapsed", startElapsedRealtime)
+            .putLong("start_trusted", startTrustedMillis)
+            .putLong("start_wallclock", startWallClockMillis)
+            .apply()
+    }
+
+    /**
+     * Restore timer state from SharedPreferences after process death.
+     * Returns true if a live patrol was restored.  Returns false (and clears
+     * prefs) if no saved state exists or the device was rebooted since start
+     * (monotonic clock no longer valid).
+     */
+    fun restore(): Boolean {
+        val p = prefs() ?: return false
+        val id = p.getString("patrol_id", null) ?: return false
+        val elapsed = p.getLong("start_elapsed", 0)
+        // After a reboot elapsedRealtime resets to ~0; the saved value would
+        // be larger → negative elapsed → stale patrol.
+        if (SystemClock.elapsedRealtime() < elapsed) {
+            p.edit().clear().apply()
+            return false
+        }
+        patrolId = id
+        startElapsedRealtime = elapsed
+        startTrustedMillis = p.getLong("start_trusted", 0)
+        startWallClockMillis = p.getLong("start_wallclock", 0)
+        _running.value = true
+        return true
+    }
+
+    /** Remove persisted state (called on explicit stop). */
+    fun clearPersisted() {
+        prefs()?.edit()?.clear()?.apply()
+    }
+
+    companion object {
+        private const val PREFS_NAME = "patrol_timer_state"
+    }
 
     /** Elapsed millis since start, from the monotonic clock. */
     fun elapsedMillis(): Long {
@@ -99,6 +161,11 @@ object PatrolState {
         graph ?: synchronized(this) {
             graph ?: PatrolTelemetryGraph(context.applicationContext).also { graph = it }
         }
+
+    /** Inject app context into the timer so persistence works. Called once. */
+    fun initContext(context: Context) {
+        timer.initContext(context.applicationContext)
+    }
 }
 
 /**

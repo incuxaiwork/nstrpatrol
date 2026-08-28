@@ -185,17 +185,32 @@ fun NstrApp() {
     LaunchedEffect(Unit) {
         NetworkStatus.attach(context.applicationContext)
         SyncScheduler.schedule(context.applicationContext)
+        // Restore patrol timer from SharedPreferences FIRST (survives process
+        // death on swipe-up). Must complete before orphan recovery so the
+        // guard can match active sessions to the restored timer.
+        PatrolState.initContext(context)
+        val restored = patrolTimer.restore()
         // Recover orphaned ACTIVE sessions: the in-memory patrol timer is lost
         // when the process is killed (force-stop, crash, reboot), so any session
         // still ACTIVE in Room at startup can no longer be "in progress" — stop it
         // showing as a live patrol and let its recorded points sync as completed.
+        // However, if the timer was restored from SharedPreferences (process died
+        // but patrol was still active), the guard below will match and skip it.
         withContext(Dispatchers.IO) {
             val dao = database.telemetryDao()
             dao.patrolSessionsByStatus("ACTIVE").first().forEach { s ->
                 // Skip the session a live timer is actually tracking (process
-                // survived, Activity was recreated) — finalizing it would kill
-                // an in-progress patrol.
-                if (patrolTimer.patrolId == s.patrolId && patrolTimer.isRunning()) return@forEach
+                // survived or timer restored from disk) — finalizing it would
+                // kill an in-progress patrol.
+                if (patrolTimer.patrolId == s.patrolId && patrolTimer.isRunning()) {
+                    // Defense: clear any stale endTime that may have been written
+                    // by a sync race or orphan recovery before the timer was
+                    // restored. An ACTIVE patrol should never have an endTime.
+                    if (s.endTime != null) {
+                        dao.clearActiveEndTime(s.patrolId)
+                    }
+                    return@forEach
+                }
                 val lastTs = dao.patrolPointsOrdered(s.patrolId).lastOrNull()?.timestamp
                 dao.finalizeStaleActivePatrol(s.patrolId, lastTs ?: s.startTime)
                 TelemetryRegistry.markFinalized(s.patrolId)
@@ -203,7 +218,13 @@ fun NstrApp() {
             // If nothing is being tracked but the keep-alive service is up,
             // stop it so the process can die like any normal app's.
             val tracked = patrolTimer.patrolId != null && patrolTimer.isRunning()
-            if (!tracked) PatrolForegroundService.stop(context)
+            if (!tracked) {
+                PatrolForegroundService.stop(context)
+            } else {
+                // Timer was restored from disk after process death — restart
+                // the foreground service so location tracking resumes.
+                PatrolForegroundService.start(context)
+            }
         }
     }
 
