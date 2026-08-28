@@ -121,22 +121,6 @@ class MainActivity : FragmentActivity() {
     }
 }
 
-/** Persists the current route so a recreated/killed app resumes where it was. */
-private class SessionStore(context: Context) {
-    private val prefs = context.getSharedPreferences("nstr_session", Context.MODE_PRIVATE)
-
-    fun lastRoute(): String? = prefs.getString("route", null)
-
-    fun saveRoute(key: String) {
-        val target = if (key == "face_setup") Route.Dashboard.key else key
-        prefs.edit().putString("route", target).apply()
-    }
-
-    fun clear() {
-        prefs.edit().remove("route").apply()
-    }
-}
-
 /** Save/restore of the navigation back stack across configuration changes. */
 private val NavStateSaver = Saver<NstrNavState, java.util.ArrayList<String>>(
     save = { nav -> java.util.ArrayList(nav.backStackKeys) },
@@ -146,24 +130,11 @@ private val NavStateSaver = Saver<NstrNavState, java.util.ArrayList<String>>(
 @Composable
 fun NstrApp() {
     val context = LocalContext.current
-    val sessionStore = remember { SessionStore(context) }
     val auth = remember { AuthSession(context) }
     val restoredSession = remember { auth.restore() }
-    val savedRoute = remember { sessionStore.lastRoute()?.let(Route::fromKey) }
-    val initialRoute = if (restoredSession) {
-        if (savedRoute != null && savedRoute != Route.Login && savedRoute != Route.FaceSetup) {
-            savedRoute
-        } else {
-            Route.Dashboard
-        }
-    } else {
-        Route.Login
-    }
+    val initialRoute = if (restoredSession) Route.Dashboard else Route.Login
     val nav = rememberSaveable(saver = NavStateSaver) {
         NstrNavState(initial = initialRoute)
-    }
-    LaunchedEffect(nav.current) {
-        sessionStore.saveRoute(nav.current.key)
     }
     // Process-scoped telemetry + timer: survives Activity recreation so a
     // patrol keeps sampling (and stop flows / orphan recovery always see the
@@ -516,7 +487,6 @@ fun NstrApp() {
                     try {
                         auth.login(email, password, database)
                         // DISABLED FOR BETA: needsSetup = auth.needsFaceSetup()
-                        sessionStore.saveRoute(Route.Dashboard.key)
                         null
                     } catch (e: Exception) {
                         e.message ?: "Login failed"
@@ -591,7 +561,6 @@ fun NstrApp() {
             settings = settings,
             onLogout = {
                 auth.logout()
-                sessionStore.clear()
                 nav.resetTo(Route.Login)
             },
             onOpenGpsDiagnostics = { nav.navigateTo(Route.GpsDiagnostics) },
