@@ -80,6 +80,7 @@ fun PatrolStartScreen(
 
     val context = LocalContext.current
     val user = remember { auth?.currentUser }
+    val gisRepo = remember { com.nstrpatrol.app.data.map.ForestGisRepository(context) }
 
     // Beat is auto-assigned from the user's profile — no dropdown selection.
     val assignedBeat = user?.beatName
@@ -102,14 +103,14 @@ fun PatrolStartScreen(
         }
 
         locationChecking = true
+        val loc = lastKnownLocation(context)
+        if (loc == null) {
+            locationMessage = "Unable to get GPS location. Ensure GPS is enabled and you are outdoors."
+            locationValid = false
+            locationChecking = false
+            return@LaunchedEffect
+        }
         try {
-            val loc = lastKnownLocation(context)
-            if (loc == null) {
-                locationMessage = "Unable to get GPS location. Ensure GPS is enabled and you are outdoors."
-                locationValid = false
-                locationChecking = false
-                return@LaunchedEffect
-            }
             val result = api.validateLocation(loc.latitude, loc.longitude, assignedBeat, assignedRange)
             val valid = result.optBoolean("valid", false)
             val reason = result.optString("reason", "")
@@ -126,8 +127,28 @@ fun PatrolStartScreen(
                 else -> msg.ifEmpty { "Location validation failed." }
             }
         } catch (e: Exception) {
-            locationMessage = "Location check failed: ${e.message}. Ensure you have network."
-            locationValid = false
+            // Network failed — fall back to offline validation using bundled GIS data
+            try {
+                val localResult = gisRepo.validateLocationOffline(loc.latitude, loc.longitude, assignedBeat, assignedRange)
+                val valid = localResult.optBoolean("valid", false)
+                val reason = localResult.optString("reason", "")
+                val msg = localResult.optString("message", "")
+                locationValid = valid
+                locationMessage = when {
+                    valid && reason == "inside_beat" -> "Location verified (offline): You are inside your assigned beat ($assignedBeat)"
+                    valid && reason == "inside_range" -> "Location verified (offline): You are inside your assigned range ($assignedRange)"
+                    valid && reason == "no_assignment" -> "No beat/range assignment to validate."
+                    !valid && reason == "outside_beat" -> "You are OUTSIDE your assigned beat ($assignedBeat). Move to your beat area to start patrol."
+                    !valid && reason == "outside_range" -> "You are OUTSIDE your assigned range ($assignedRange). Move to your range area to start patrol."
+                    !valid && reason == "beat_not_found" -> msg.ifEmpty { "Assigned beat not found in GIS data." }
+                    !valid && reason == "range_not_found" -> msg.ifEmpty { "Assigned range not found in GIS data." }
+                    !valid && reason == "no_gis_data" -> "Offline validation unavailable: $msg"
+                    else -> msg.ifEmpty { "Location validation failed." }
+                }
+            } catch (e2: Exception) {
+                locationMessage = "Location check failed: ${e.message}. Ensure you have network."
+                locationValid = false
+            }
         } finally {
             locationChecking = false
         }

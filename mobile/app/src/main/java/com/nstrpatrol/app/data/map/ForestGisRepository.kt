@@ -281,6 +281,123 @@ class ForestGisRepository(private val context: Context) {
         return compartmentsList.find { it.id == id }
     }
 
+    /**
+     * Offline location validation — mirrors the server's POST /api/gis/validate-location
+     * using the bundled mark_beat.json GeoJSON data. Returns a JSONObject with the same
+     * shape as the API response so the UI can consume it identically.
+     */
+    fun validateLocationOffline(lat: Double, lng: Double, beatName: String?, rangeName: String?): JSONObject {
+        val geoJson = beatGeoJsonString
+        if (geoJson.isBlank()) {
+            return JSONObject().apply {
+                put("valid", false)
+                put("reason", "no_gis_data")
+                put("message", "Beat geometry data not available")
+            }
+        }
+
+        val features = try {
+            val root = JSONObject(geoJson)
+            val arr = root.optJSONArray("features") ?: return JSONObject().apply {
+                put("valid", false); put("reason", "no_gis_data"); put("message", "No GIS features loaded")
+            }
+            (0 until arr.length()).map { arr.getJSONObject(it) }
+        } catch (_: Exception) {
+            return JSONObject().apply {
+                put("valid", false); put("reason", "no_gis_data"); put("message", "Failed to parse GIS data")
+            }
+        }
+
+        if (features.isEmpty()) {
+            return JSONObject().apply {
+                put("valid", false); put("reason", "no_gis_data"); put("message", "No beat geometry available")
+            }
+        }
+
+        // Beat-level check
+        if (beatName != null) {
+            val normalised = beatName.uppercase()
+            val match = features.find {
+                (it.optJSONObject("properties")?.optString("Beat") ?: "").uppercase() == normalised
+            }
+            if (match == null) {
+                return JSONObject().apply {
+                    put("valid", false); put("reason", "beat_not_found")
+                    put("message", "Beat \"$beatName\" not found in GIS data")
+                }
+            }
+            val inside = pointInGeometry(lng, lat, match.optJSONObject("geometry"))
+            return JSONObject().apply {
+                put("valid", inside)
+                put("reason", if (inside) "inside_beat" else "outside_beat")
+                put("beat", match.optJSONObject("properties")?.optString("Beat"))
+                put("range", match.optJSONObject("properties")?.optString("Range"))
+            }
+        }
+
+        // Range-level check
+        if (rangeName != null) {
+            val normalised = rangeName.uppercase()
+            val rangeBeats = features.filter {
+                (it.optJSONObject("properties")?.optString("Range") ?: "").uppercase() == normalised
+            }
+            if (rangeBeats.isEmpty()) {
+                return JSONObject().apply {
+                    put("valid", false); put("reason", "range_not_found")
+                    put("message", "Range \"$rangeName\" not found in GIS data")
+                }
+            }
+            val insideBeat = rangeBeats.find { pointInGeometry(lng, lat, it.optJSONObject("geometry")) }
+            return JSONObject().apply {
+                put("valid", insideBeat != null)
+                put("reason", if (insideBeat != null) "inside_range" else "outside_range")
+                put("beat", insideBeat?.optJSONObject("properties")?.optString("Beat"))
+                put("range", rangeName)
+            }
+        }
+
+        // No assignment — admin / unassigned
+        return JSONObject().apply {
+            put("valid", true); put("reason", "no_assignment")
+            put("message", "No beat or range assignment to validate against")
+        }
+    }
+
+    /** Ray-casting point-in-polygon. Coordinates are [lng, lat] (GeoJSON order). */
+    private fun pointInPolygon(lng: Double, lat: Double, ring: org.json.JSONArray): Boolean {
+        var inside = false
+        val n = ring.length()
+        var i = 0
+        var j = n - 1
+        while (i < n) {
+            val xi = ring.getJSONArray(i).getDouble(0)
+            val yi = ring.getJSONArray(i).getDouble(1)
+            val xj = ring.getJSONArray(j).getDouble(0)
+            val yj = ring.getJSONArray(j).getDouble(1)
+            if ((yi > lat) != (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+                inside = !inside
+            }
+            j = i++
+        }
+        return inside
+    }
+
+    /** Check if a point is inside a GeoJSON geometry (Polygon or MultiPolygon). */
+    private fun pointInGeometry(lng: Double, lat: Double, geom: org.json.JSONObject?): Boolean {
+        if (geom == null) return false
+        val type = geom.optString("type")
+        val coords = geom.optJSONArray("coordinates") ?: return false
+        if (type == "Polygon") {
+            return pointInPolygon(lng, lat, coords.getJSONArray(0))
+        }
+        if (type == "MultiPolygon") {
+            for (i in 0 until coords.length()) {
+                if (pointInPolygon(lng, lat, coords.getJSONArray(i).getJSONArray(0))) return true
+            }
+        }
+        return false
+    }
+
     private fun parseBeats(geoJson: String) {
         val root = JSONObject(geoJson)
         val features = root.optJSONArray("features") ?: return
