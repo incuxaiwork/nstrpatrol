@@ -1052,10 +1052,15 @@ private fun GpsStatusChecklistCard(telemetry: GpsTelemetry, timeState: TimeInteg
                 if (telemetry.permissionGranted) "Granted" else "Not Granted",
                 if (telemetry.permissionGranted) CheckStatus.Pass else CheckStatus.Fail
             )
+            val bgPermStatus = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                ContextCompat.checkSelfPermission(
+                    LocalContext.current, Manifest.permission.ACCESS_BACKGROUND_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+            } else true
             ChecklistItem(
                 "Background Permission",
-                "While In Use",
-                CheckStatus.Warning
+                if (bgPermStatus) "Granted (All the Time)" else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) "While In Use (Not Granted)" else "N/A (< Android 10)",
+                if (bgPermStatus) CheckStatus.Pass else CheckStatus.Warning
             )
             ChecklistItem(
                 "Mock Location Detection",
