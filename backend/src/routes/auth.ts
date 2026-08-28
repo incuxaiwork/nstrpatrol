@@ -85,6 +85,10 @@ authRouter.post('/login', validateBody(loginSchema), async (req, res) => {
     beatName = beat?.name ?? null;
     section = beat?.section ?? null;
   }
+  // Range-level officers (FSO/FRO/DyRO) have section on User, not Beat
+  if (!section && (user as any).section) {
+    section = (user as any).section;
+  }
 
   res.json({
     accessToken: signAccessToken(user.id, user.role),
@@ -140,6 +144,10 @@ authRouter.get('/me', requireAuth, async (req, res) => {
     const beat = await prisma.beat.findUnique({ where: { id: user.beatId }, select: { name: true, section: true } });
     beatName = beat?.name ?? null;
     section = beat?.section ?? null;
+  }
+  // Range-level officers (FSO/FRO/DyRO) have section on User, not Beat
+  if (!section && (user as any).section) {
+    section = (user as any).section;
   }
 
   res.json({ ...user, rangeName, beatName, section });

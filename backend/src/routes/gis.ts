@@ -310,17 +310,20 @@ const validateLocationSchema = z.object({
   lat: z.number().min(-90).max(90),
   lng: z.number().min(-180).max(180),
   beatName: z.string().trim().max(160).optional(),
+  sectionName: z.string().trim().max(160).optional(),
   rangeName: z.string().trim().max(160).optional(),
 });
 
 /**
  * POST /api/gis/validate-location
- * Checks if a GPS coordinate falls within the assigned beat or range polygon.
+ * Checks if a GPS coordinate falls within the assigned beat, section, or range polygon.
  * Used by the mobile app to verify the officer is in their designated area
  * before starting a patrol.
+ *
+ * Hierarchy: beat → section → range → no assignment
  */
 gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationSchema), (req, res) => {
-  const { lat, lng, beatName, rangeName } = req.body;
+  const { lat, lng, beatName, sectionName, rangeName } = req.body;
   const features = loadBeatFeatures();
 
   if (features.length === 0) {
@@ -348,7 +351,34 @@ gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationS
     return;
   }
 
-  // If a range is assigned (FRO/DyRO/FSO), check containment in any beat of that range
+  // If a section is assigned (FSO/DyRO with section), check containment in any beat of that section
+  if (sectionName) {
+    const normalised = sectionName.toUpperCase();
+    const sectionBeats = features.filter((f: any) =>
+      (f.properties?.Section ?? '').toUpperCase() === normalised
+    );
+    if (sectionBeats.length === 0) {
+      // Section not found in GIS — fall through to range check if available
+      if (rangeName) {
+        // fall through to range check below
+      } else {
+        res.json({ valid: false, reason: 'section_not_found', message: `Section "${sectionName}" not found in GIS data` });
+        return;
+      }
+    } else {
+      const insideBeat = sectionBeats.find((f: any) => pointInGeometry(lng, lat, f.geometry));
+      res.json({
+        valid: !!insideBeat,
+        reason: insideBeat ? 'inside_section' : 'outside_section',
+        beat: insideBeat?.properties?.Beat ?? null,
+        range: rangeName ?? sectionBeats[0]?.properties?.Range ?? null,
+        section: sectionName,
+      });
+      return;
+    }
+  }
+
+  // If a range is assigned (FRO/DyRO/FSO without section), check containment in any beat of that range
   if (rangeName) {
     const normalised = rangeName.toUpperCase();
     const rangeBeats = features.filter((f: any) =>

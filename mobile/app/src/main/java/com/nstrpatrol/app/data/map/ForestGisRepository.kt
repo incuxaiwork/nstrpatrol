@@ -286,7 +286,7 @@ class ForestGisRepository(private val context: Context) {
      * using the bundled mark_beat.json GeoJSON data. Returns a JSONObject with the same
      * shape as the API response so the UI can consume it identically.
      */
-    fun validateLocationOffline(lat: Double, lng: Double, beatName: String?, rangeName: String?): JSONObject {
+    fun validateLocationOffline(lat: Double, lng: Double, beatName: String?, sectionName: String?, rangeName: String?): JSONObject {
         val geoJson = beatGeoJsonString
         if (geoJson.isBlank()) {
             return JSONObject().apply {
@@ -314,7 +314,7 @@ class ForestGisRepository(private val context: Context) {
             }
         }
 
-        // Beat-level check
+        // 1. Beat-level check
         if (beatName != null) {
             val normalised = beatName.uppercase()
             val match = features.find {
@@ -335,7 +335,33 @@ class ForestGisRepository(private val context: Context) {
             }
         }
 
-        // Range-level check
+        // 2. Section-level check (FSO/DyRO with section but no beat)
+        if (sectionName != null) {
+            val normalised = sectionName.uppercase()
+            val sectionBeats = features.filter {
+                (it.optJSONObject("properties")?.optString("Section") ?: "").uppercase() == normalised
+            }
+            if (sectionBeats.isEmpty()) {
+                // Section not found — fall through to range check if available
+                if (rangeName == null) {
+                    return JSONObject().apply {
+                        put("valid", false); put("reason", "section_not_found")
+                        put("message", "Section \"$sectionName\" not found in GIS data")
+                    }
+                }
+            } else {
+                val insideBeat = sectionBeats.find { pointInGeometry(lng, lat, it.optJSONObject("geometry")) }
+                return JSONObject().apply {
+                    put("valid", insideBeat != null)
+                    put("reason", if (insideBeat != null) "inside_section" else "outside_section")
+                    put("beat", insideBeat?.optJSONObject("properties")?.optString("Beat"))
+                    put("range", rangeName ?: insideBeat?.optJSONObject("properties")?.optString("Range"))
+                    put("section", sectionName)
+                }
+            }
+        }
+
+        // 3. Range-level check
         if (rangeName != null) {
             val normalised = rangeName.uppercase()
             val rangeBeats = features.filter {
@@ -356,7 +382,7 @@ class ForestGisRepository(private val context: Context) {
             }
         }
 
-        // No assignment — admin / unassigned
+        // 4. No assignment — admin / unassigned
         return JSONObject().apply {
             put("valid", true); put("reason", "no_assignment")
             put("message", "No beat or range assignment to validate against")

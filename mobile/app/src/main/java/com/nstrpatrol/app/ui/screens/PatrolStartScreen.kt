@@ -84,6 +84,7 @@ fun PatrolStartScreen(
 
     // Beat is auto-assigned from the user's profile — no dropdown selection.
     val assignedBeat = user?.beatName
+    val assignedSection = user?.section
     val assignedRange = user?.rangeName
     val beat = assignedBeat  // FBO/ABO: their specific beat; FRO/DyRO/FSO: null (range-level)
 
@@ -111,36 +112,42 @@ fun PatrolStartScreen(
             return@LaunchedEffect
         }
         try {
-            val result = api.validateLocation(loc.latitude, loc.longitude, assignedBeat, assignedRange)
+            val result = api.validateLocation(loc.latitude, loc.longitude, assignedBeat, assignedSection, assignedRange)
             val valid = result.optBoolean("valid", false)
             val reason = result.optString("reason", "")
             val msg = result.optString("message", "")
             locationValid = valid
             locationMessage = when {
                 valid && reason == "inside_beat" -> "Location verified: You are inside your assigned beat ($assignedBeat)"
-                valid && reason == "inside_range" -> "Location verified: You are inside your assigned range ($assignedRange)"
-                valid && reason == "no_assignment" -> "No beat/range assignment to validate."
+                valid && reason == "inside_section" -> "Location verified: You are inside your section ($assignedSection)"
+                valid && reason == "inside_range" -> "Location verified: You are inside your range ($assignedRange)"
+                valid && reason == "no_assignment" -> "No beat/section/range assignment to validate."
                 !valid && reason == "outside_beat" -> "You are OUTSIDE your assigned beat ($assignedBeat). Move to your beat area to start patrol."
+                !valid && reason == "outside_section" -> "You are OUTSIDE your section ($assignedSection). Move to your section area to start patrol."
                 !valid && reason == "outside_range" -> "You are OUTSIDE your assigned range ($assignedRange). Move to your range area to start patrol."
                 !valid && reason == "beat_not_found" -> msg.ifEmpty { "Assigned beat not found in GIS data." }
+                !valid && reason == "section_not_found" -> msg.ifEmpty { "Assigned section not found in GIS data." }
                 !valid && reason == "range_not_found" -> msg.ifEmpty { "Assigned range not found in GIS data." }
                 else -> msg.ifEmpty { "Location validation failed." }
             }
         } catch (e: Exception) {
             // Network failed — fall back to offline validation using bundled GIS data
             try {
-                val localResult = gisRepo.validateLocationOffline(loc.latitude, loc.longitude, assignedBeat, assignedRange)
+                val localResult = gisRepo.validateLocationOffline(loc.latitude, loc.longitude, assignedBeat, assignedSection, assignedRange)
                 val valid = localResult.optBoolean("valid", false)
                 val reason = localResult.optString("reason", "")
                 val msg = localResult.optString("message", "")
                 locationValid = valid
                 locationMessage = when {
                     valid && reason == "inside_beat" -> "Location verified (offline): You are inside your assigned beat ($assignedBeat)"
-                    valid && reason == "inside_range" -> "Location verified (offline): You are inside your assigned range ($assignedRange)"
-                    valid && reason == "no_assignment" -> "No beat/range assignment to validate."
+                    valid && reason == "inside_section" -> "Location verified (offline): You are inside your section ($assignedSection)"
+                    valid && reason == "inside_range" -> "Location verified (offline): You are inside your range ($assignedRange)"
+                    valid && reason == "no_assignment" -> "No beat/section/range assignment to validate."
                     !valid && reason == "outside_beat" -> "You are OUTSIDE your assigned beat ($assignedBeat). Move to your beat area to start patrol."
+                    !valid && reason == "outside_section" -> "You are OUTSIDE your section ($assignedSection). Move to your section area to start patrol."
                     !valid && reason == "outside_range" -> "You are OUTSIDE your assigned range ($assignedRange). Move to your range area to start patrol."
                     !valid && reason == "beat_not_found" -> msg.ifEmpty { "Assigned beat not found in GIS data." }
+                    !valid && reason == "section_not_found" -> msg.ifEmpty { "Assigned section not found in GIS data." }
                     !valid && reason == "range_not_found" -> msg.ifEmpty { "Assigned range not found in GIS data." }
                     !valid && reason == "no_gis_data" -> "Offline validation unavailable: $msg"
                     else -> msg.ifEmpty { "Location validation failed." }
@@ -225,12 +232,21 @@ fun PatrolStartScreen(
                         .border(1.dp, ForestGreen.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
                         .padding(horizontal = 14.dp, vertical = 12.dp)
                 ) {
-                    Text(
-                        text = assignedRange,
-                        color = ForestGreen,
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Column {
+                        Text(
+                            text = assignedRange,
+                            color = ForestGreen,
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        if (assignedSection != null) {
+                            Text(
+                                text = "Section: $assignedSection",
+                                color = TextSecondary,
+                                fontSize = 12.sp
+                            )
+                        }
+                    }
                 }
             } else {
                 // Admin / unassigned
