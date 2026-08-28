@@ -66,9 +66,9 @@ data class AuthUser(
                 isAdmin = o.optBoolean("isAdmin", false),
                 rangeId = o.optString("rangeId").ifEmpty { null },
                 beatId = o.optString("beatId").ifEmpty { null },
-                rangeName = o.optString("rangeName").ifEmpty { null },
-                beatName = o.optString("beatName").ifEmpty { null },
-                section = o.optString("section").ifEmpty { null }
+                rangeName = o.optString("rangeName").ifEmpty { null }.let { if (it == "null") null else it },
+                beatName = o.optString("beatName").ifEmpty { null }.let { if (it == "null") null else it },
+                section = o.optString("section").ifEmpty { null }.let { if (it == "null") null else it }
             )
         }
     }
