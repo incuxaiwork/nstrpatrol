@@ -64,6 +64,8 @@ export interface OverlayRow {
   key: keyof Omit<ForestLayerState, "basemap">;
   title: string;
   subtitle: string;
+  color?: string;
+  dashed?: boolean;
 }
 
 /** Panel sections: administrative boundaries, grids, then operational feeds. */
@@ -81,29 +83,29 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
     {
       label: "Forest & administrative",
       rows: [
-        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid deep-green reserve outline & label" },
-        { key: "ranges", title: "Range Boundaries", subtitle: "Burnt-sienna dashed range hulls & labels" },
-        { key: "beats", title: "Beat Boundaries", subtitle: "Teal beat outlines & labels — no fill" },
-        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin amber internal lines (zoom in) & labels" },
+        { key: "boundary", title: "Forest Boundary", subtitle: "Solid deep-green reserve division outline & label", color: "#064E3B" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Royal-violet dashed range hulls & labels", color: "#7C3AED", dashed: true },
+        { key: "beats", title: "Beat Boundaries", subtitle: "Electric-blue beat outlines & labels", color: "#0284C7" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Fine amber-gold internal lines & labels", color: "#D97706", dashed: true },
       ],
     },
     {
       label: "Grid",
       rows: [
-        { key: "analysisGrid", title: `Analysis Grid — ${gridSizeLabelStr}`, subtitle: "Configurable cells over the forest area" },
-        { key: "grids", title: "Reference ForestGrid", subtitle: "Backend survey cells (~3.3 km) — authoritative coverage grid" },
+        { key: "analysisGrid", title: `Analysis Grid — ${gridSizeLabelStr}`, subtitle: "Configurable cells over the forest area", color: "#8a8f98" },
+        { key: "grids", title: "Reference ForestGrid", subtitle: "Backend survey cells (~3.3 km) — authoritative coverage grid", color: "#8a8f98" },
       ],
     },
     {
       label: "Operations",
       rows: [
-        { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
-        { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
-        { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
-        { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
-        { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled grid cells + per-beat coverage tint" },
-        { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
+        { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces, replay track & the LIVE window of active patrols", color: "#2E7D32" },
+        { key: "rangers", title: "Ranger Positions", subtitle: "Latest GPS fix per ranger on an ACTIVE patrol (GET /api/patrols/live)", color: "#FF8F00" },
+        { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points", color: "#B3261E" },
+        { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)", color: "#B3261E" },
+        { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)", color: "#B3261E", dashed: true },
+        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled grid cells + per-beat coverage tint", color: "#2E7D32" },
+        { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks", color: "#B3261E" },
       ],
     },
   ];

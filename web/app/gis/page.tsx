@@ -171,8 +171,9 @@ export default function GisPage() {
 function GisWorkspace() {
   const searchParams = useSearchParams();
   const sosParam = searchParams.get("sos");
-  // Beats come from the backend GIS API (GeoJSON → GL layers).
-  const beatsData = useAsyncData(() => gis.beats());
+  // Spatial layers (beats, compartments, boundary, grids, extent) from the backend GIS API.
+  // Fetched in ONE unified call and cached across page reloads.
+  const spatialData = useAsyncData(() => gis.spatial());
   const assetsData = useAsyncData(() => gis.assets());
   const [rawSelected, setSelected] = useState<string | null>(null);
   // No patrol preselected — play/pause appears only after the admin picks one.
@@ -193,36 +194,35 @@ function GisWorkspace() {
   const heatData = useAsyncData(() => gis.heat());
   const rangersData = useAsyncData(() => servicesRangers.list());
   const observationsData = useAsyncData(() => servicesObservations.list());
-  const compartmentsData = useAsyncData(() => gis.compartments());
-  const boundaryData = useAsyncData(() => gis.boundary());
-  const gridsData = useAsyncData(() => gis.grids());
-  const extentData = useAsyncData(() => gis.extent());
-  // Authoritative coverage (GET /api/coverage/grids). Backend computes the
-  // scope; the frontend only joins + displays. Non-blocking: the map and the
-  // analysis grid stay usable while this loads.
   // Real hierarchy register for the region filters (independent of the map).
   const unitsData = useAsyncData(() => hierarchyService.units());
+
+  const beatsData = spatialData.data?.beats ?? [];
+  const compartmentsData = spatialData.data?.compartments ?? [];
+  const boundaryData = spatialData.data?.boundary ?? [];
+  const gridsData = spatialData.data?.grids ?? [];
+  const extentData = spatialData.data?.extent ?? null;
 
   // Region attribution of beats → compartments → grids over the real
   // polygons (shared projection space — exact within it). Division is
   // implicitly FOREST_CONTEXT.divisionId everywhere. Computed unconditionally
   // (before loading guards) to satisfy the rules of hooks.
-  const taggedBeats = useMemo(() => tagBeats(beatsData.data ?? []), [beatsData.data]);
+  const taggedBeats = useMemo(() => tagBeats(beatsData), [beatsData]);
   const taggedCompartments = useMemo(
-    () => tagCompartments(compartmentsData.data ?? [], taggedBeats),
-    [compartmentsData.data, taggedBeats]
+    () => tagCompartments(compartmentsData, taggedBeats),
+    [compartmentsData, taggedBeats]
   );
   const taggedGrids = useMemo(
-    () => tagGrids(gridsData.data ?? [], taggedBeats, taggedCompartments),
-    [gridsData.data, taggedBeats, taggedCompartments]
+    () => tagGrids(gridsData, taggedBeats, taggedCompartments),
+    [gridsData, taggedBeats, taggedCompartments]
   );
 
   // Analysis grid — generated from the REAL beat/boundary geometry at the
   // selected metric size (see lib/gis/grid.ts). Re-generated only when its
   // true inputs change (size / beats / boundary), never on pan/zoom/hover.
   const analysisCells = useMemo(
-    () => buildAnalysisGrid({ beats: taggedBeats, boundary: boundaryData.data ?? [], extent: extentData.data ?? null, sizeKey: analysisGridSize }),
-    [taggedBeats, boundaryData.data, extentData.data, analysisGridSize]
+    () => buildAnalysisGrid({ beats: taggedBeats, boundary: boundaryData, extent: extentData, sizeKey: analysisGridSize }),
+    [taggedBeats, boundaryData, extentData, analysisGridSize]
   );
   const taggedAnalysisGrids = useMemo<TaggedGrid[]>(
     () => tagGrids(analysisCells.cells, taggedBeats, taggedCompartments),
@@ -312,18 +312,15 @@ function GisWorkspace() {
     };
   }, [unitsData.data]);
 
-  if (beatsData.loading || !beatsData.data || compartmentsData.loading || !compartmentsData.data || boundaryData.loading || !boundaryData.data || gridsData.loading || !gridsData.data || extentData.loading || !extentData.data)
+  if (spatialData.loading || !spatialData.data)
     return <SkeletonRows rows={8} />;
-  if (beatsData.error) return <ErrorState message={beatsData.error.message} onRetry={beatsData.reload} />;
-  if (compartmentsData.error) return <ErrorState message={compartmentsData.error.message} onRetry={compartmentsData.reload} />;
-  if (boundaryData.error) return <ErrorState message={boundaryData.error.message} onRetry={boundaryData.reload} />;
-  if (gridsData.error) return <ErrorState message={gridsData.error.message} onRetry={gridsData.reload} />;
-  if (extentData.error) return <ErrorState message={extentData.error.message} onRetry={extentData.reload} />;
+  if (spatialData.error)
+    return <ErrorState message={spatialData.error.message} onRetry={spatialData.reload} />;
 
-  const beats = beatsData.data;
-  const compartments = compartmentsData.data;
-  const boundary = boundaryData.data;
-  const grids = gridsData.data;
+  const beats = spatialData.data.beats;
+  const compartments = spatialData.data.compartments;
+  const boundary = spatialData.data.boundary;
+  const grids = spatialData.data.grids;
   const markers = markersData.data ?? [];
   const routes = routesData.data ?? [];
   const heat = heatData.data ?? [];

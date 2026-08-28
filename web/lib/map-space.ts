@@ -380,6 +380,24 @@ export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
   });
 }
 
+/** Compute the overall forest boundary hull enclosing all beats. */
+export function forestBoundaryFromBeats(beats: BeatPolygon[]): BoundaryPolygon[] {
+  if (!beats || beats.length === 0) return [];
+  const pts: [number, number][] = [];
+  for (const b of beats) pts.push(...parsePoly(b.points));
+  const hull = convexHull(pts);
+  if (hull.length < 3) return [];
+  const pointsStr = hull.map((p) => `${p[0]},${p[1]}`).join(" ") + ` ${hull[0][0]},${hull[0][1]}`;
+  return [
+    {
+      id: "b-nstr-reserve-division",
+      name: "NSTR Markapur Division Forest Boundary",
+      forestCode: "NSTR_MARKAPUR",
+      parts: [pointsStr],
+    },
+  ];
+}
+
 function ringCentroid(points: string): [number, number] {
   const ring = parsePoly(points);
   const n = ring.length || 1;

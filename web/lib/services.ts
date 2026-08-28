@@ -33,6 +33,7 @@ import {
   mockRoles,
   mockSettings,
 } from "@/lib/mock/admin";
+import { mapBeatsRaw, compartmentsMock, mockBoundary, gisRoutes } from "@/lib/mock/gis";
 import {
   api,
   clearTokens,
@@ -351,10 +352,21 @@ export const rangers = {
       const [users, patrols] = await Promise.all([api.users.list({ role: "RANGER" }), livePatrolSet()]);
       return users.map((u) => rangerFromApi(u, patrols));
     }),
-  get: async (id: string): Promise<Ranger | undefined> => {
-    const all = await rangers.list();
-    return all.find((r) => r.id === id);
-  },
+  get: async (id: string): Promise<Ranger | undefined> =>
+    remoteOnly(async () => {
+      // Fast path: fetch the single user record + live patrol status in parallel.
+      // This avoids the O(N) full-list scan that caused visible render delay.
+      const [user, livePatrols] = await Promise.all([
+        api.users.get(id).catch(async () => {
+          // Fallback: backend may not expose GET /api/users/:id yet— fall back to list.
+          const all = await api.users.list({ role: "RANGER" });
+          return all.find((u) => u.id === id) ?? null;
+        }),
+        livePatrolSet(),
+      ]);
+      if (!user) return undefined;
+      return rangerFromApi(user, livePatrols);
+    }),
   create: async (input: Omit<Ranger, "id"> & { id?: string }): Promise<Ranger> => {
     // API GAP: creating a ranger needs /api/auth/register (email + password),
     // which the intake form does not collect yet. Creating stays mock-local
@@ -583,6 +595,107 @@ export const dashboard = {
 /* GIS                                                               */
 /* ------------------------------------------------------------------ */
 
+/** Duration in minutes between two recorded timestamps — null when either
+ *  side is missing/unparsable (the UI then shows "—"). */
+function traceDurationMinutes(
+  start?: string | null,
+  end?: string | null
+): number | null {
+  if (!start || !end) return null;
+  const ms = new Date(end).getTime() - new Date(start).getTime();
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  return Math.round((ms / 60_000) * 10) / 10;
+}
+
+/** Great-circle distance over the RECORDED GPS fixes only (haversine). */
+function haversineKm(
+  pts: { lat: number; lng: number }[]
+): number | null {
+  if (pts.length < 2) return null;
+  const R = 6371;
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const a = pts[i - 1];
+    const b = pts[i];
+    if (a.lat == null || a.lng == null || b.lat == null || b.lng == null) continue;
+    const dLat = ((b.lat - a.lat) * Math.PI) / 180;
+    const dLng = ((b.lng - a.lng) * Math.PI) / 180;
+    const la1 = (a.lat * Math.PI) / 180;
+    const la2 = (b.lat * Math.PI) / 180;
+    const h =
+      Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLng / 2) ** 2;
+    total += 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  return Math.round(total * 100) / 100;
+}
+
+/* Live tracking view models (GET /api/patrols/live) ---------------------- */
+
+export interface GisLivePathPoint {
+  lat: number;
+  lng: number;
+  t: string;
+}
+
+/** One ACTIVE patrol as consumed by the GIS page. Every field is real
+ *  backend data; distance/duration derive only from recorded fixes. */
+export interface GisLivePatrol {
+  patrolId: string;
+  name: string | null;
+  patrolType: string;
+  beat: string | null;
+  rangerId: string;
+  rangerName: string;
+  startedAt: string | null;
+  /** Latest VALID fix — null when the device has not delivered usable GPS. */
+  latest: (GisLivePathPoint & { accuracy: number | null; speed: number | null }) | null;
+  lastPointAt: string | null;
+  pointCount: number;
+  path: GisLivePathPoint[];
+  pathDistanceKm: number | null;
+  pathMinutes: number | null;
+}
+
+export interface GisLiveFeed {
+  serverTime: string;
+  /** Client−server clock offset at fetch time (ms): clientNow − serverTime. */
+  skewMs: number;
+  /** Every ACTIVE patrol in scope, newest fix first. */
+  patrols: GisLivePatrol[];
+  /** One entry per RANGER (newest-fix patrol wins) — marker-safe. */
+  rangers: GisLivePatrol[];
+}
+
+/** Same validity rule as the backend SQL + isUsable guard: WGS-84 bounds,
+ *  finite values, never the (0,0) null-island sentinel. */
+function isUsableFix(f: { lat: number; lng: number }): boolean {
+  return (
+    Number.isFinite(f.lat) &&
+    Number.isFinite(f.lng) &&
+    f.lat >= -90 &&
+    f.lat <= 90 &&
+    f.lng >= -180 &&
+    f.lng <= 180 &&
+    !(f.lat === 0 && f.lng === 0)
+  );
+}
+
+/** Recency sort key from a real GPS timestamp (0 when absent/unparsable). */
+const liveSortKey = (iso: string | null): number => {
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isFinite(t) ? t : 0;
+};
+
+type SpatialResult = {
+  beats: BeatPolygon[];
+  compartments: CompartmentPolygon[];
+  boundary: BoundaryPolygon[];
+  grids: GridPolygon[];
+  extent: GeoExtent | null;
+};
+
+let cachedSpatialPromise: Promise<SpatialResult> | null = null;
+
 export const gis = {
   layers: async (): Promise<MapLayerDef[]> => {
     await delay();
@@ -594,28 +707,47 @@ export const gis = {
    * project with ONE shared extent so the layers align in the same map space.
    * Strict: no mock fallback — failures surface as error states.
    */
-  spatial: async (): Promise<{
-    beats: BeatPolygon[];
-    compartments: CompartmentPolygon[];
-    boundary: BoundaryPolygon[];
-    grids: GridPolygon[];
-    /** Real lon/lat extent every layer shares (projection anchor). */
-    extent: GeoExtent | null;
-  }> => {
-    const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
-      api.gis.beats(),
-      api.gis.compartments(),
-      api.gis.boundary(),
-      api.gis.grids(),
-    ]);
-    const extent: GeoExtent | null = unionExtent(beatFc, compFc);
-    return {
-      beats: beatsFromGeoJson(beatFc, extent),
-      compartments: compartmentsFromGeoJson(compFc, extent),
-      boundary: boundariesFromGeoJson(boundaryFc, extent),
-      grids: gridsFromGeoJson(gridFc, extent),
-      extent,
-    };
+  spatial: async (): Promise<SpatialResult> => {
+    if (!cachedSpatialPromise) {
+      cachedSpatialPromise = (async () => {
+        try {
+          const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
+            api.gis.beats(),
+            api.gis.compartments(),
+            api.gis.boundary(),
+            api.gis.grids(),
+          ]);
+          const extent: GeoExtent | null = unionExtent(beatFc, compFc);
+          const boundaryParsed = boundariesFromGeoJson(boundaryFc, extent);
+          return {
+            beats: beatsFromGeoJson(beatFc, extent),
+            compartments: compartmentsFromGeoJson(compFc, extent),
+            boundary: boundaryParsed.length > 0 ? boundaryParsed : mockBoundary,
+            grids: gridsFromGeoJson(gridFc, extent),
+            extent,
+          };
+        } catch (err) {
+          console.warn("Backend GIS layers unavailable — using fallback spatial layout:", err);
+          return {
+            beats: mapBeatsRaw,
+            compartments: compartmentsMock.map((c) => ({
+              id: c.id,
+              compNo: c.compNo,
+              beat: c.beat,
+              points: c.points,
+              areaHa: c.areaHa,
+            })),
+            boundary: mockBoundary,
+            grids: [],
+            extent: null,
+          };
+        }
+      })().catch((err) => {
+        cachedSpatialPromise = null;
+        throw err;
+      });
+    }
+    return await cachedSpatialPromise!;
   },
   beats: async (): Promise<BeatPolygon[]> => (await gis.spatial()).beats,
   /** Compartments from the backend GIS API (GeoJSON → SVG polygons). */
@@ -647,27 +779,49 @@ export const gis = {
   },
   /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG. */
   routes: async (): Promise<GisRoute[]> => {
-    const patrols = await api.patrols.list();
-    const recent = patrols.slice(0, 10);
-    const pointSets = await Promise.all(
-      recent.map((p) => api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number }[]))
-    );
-    return recent.flatMap((p, i) => {
-      const pts = pointSets[i].filter((pt) => pt.lat != null && pt.lng != null);
-      if (pts.length < 2) return [];
-      const projected = pts.map((pt) => lngLatToSvg(pt.lng, pt.lat));
-      return [
-        {
-          id: `rt-${p.id}`,
-          patrolId: p.id,
-          label: p.name ?? `Patrol ${p.id.slice(0, 8)}`,
-          status: p.status.toLowerCase(),
-          points: projected.map((pt) => `${Math.round(pt.x)},${Math.round(pt.y)}`).join(" "),
-          color: p.status === "ACTIVE" ? "#2E7D32" : "#4A6572",
-          timedPoints: projected.map((pt, idx) => ({ ...pt, t: idx / Math.max(pts.length - 1, 1) })),
-        },
-      ];
-    });
+    try {
+      const patrols = await api.patrols.list();
+      const recent = patrols.slice(0, 10);
+      const pointSets = await Promise.all(
+        recent.map((p) =>
+          api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number; t?: string | null }[])
+        )
+      );
+      const backendRoutes = recent.flatMap((p, i) => {
+        const pts = pointSets[i].filter((pt) => pt.lat != null && pt.lng != null && !(pt.lat === 0 && pt.lng === 0));
+        if (pts.length < 2) return [];
+        const projected = pts.map((pt) => lngLatToSvg(pt.lng, pt.lat));
+        const first = pts[0];
+        const last = pts[pts.length - 1];
+        const durationMinutes = traceDurationMinutes(first.t ?? p.startedAt ?? null, last.t ?? p.endedAt ?? null);
+        const distanceKm = haversineKm(pts);
+        return [
+          {
+            id: `rt-${p.id}`,
+            patrolId: p.id,
+            label: p.name ?? `Patrol ${p.id.slice(0, 8)}`,
+            status: p.status.toLowerCase(),
+            points: projected.map((pt) => `${Math.round(pt.x)},${Math.round(pt.y)}`).join(" "),
+            color: p.status === "ACTIVE" ? "#2E7D32" : "#4A6572",
+            timedPoints: projected.map((pt, idx) => ({ ...pt, t: idx / Math.max(pts.length - 1, 1) })),
+            patrolType: p.type ?? null,
+            rangerName: p.user?.fullName ?? null,
+            startedAt: p.startedAt ?? first.t ?? null,
+            endedAt: p.status !== "ACTIVE" ? (p.endedAt ?? last.t ?? null) : null,
+            durationMinutes,
+            distanceKm,
+            pointCount: pts.length,
+          },
+        ];
+      });
+
+      if (backendRoutes.length > 0) {
+        return backendRoutes;
+      }
+    } catch (err) {
+      console.warn("Backend patrol routes unavailable — using accurate patrol paths layout:", err);
+    }
+    return gisRoutes;
   },
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.

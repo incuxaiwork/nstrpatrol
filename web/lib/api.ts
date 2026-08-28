@@ -555,6 +555,8 @@ export const auth = {
 export const users = {
   list: (query: { role?: string; q?: string } = {}) =>
     request<ApiUser[]>("/api/users", { query }),
+  /** Fetch a single user by id — fast path for detail pages (no full list scan). */
+  get: (id: string) => request<ApiUser>(`/api/users/${id}`),
   update: (id: string, patch: Partial<Pick<ApiUser, "fullName" | "role" | "cader" | "phone">> & { password?: string }) =>
     request<ApiUser>(`/api/users/${id}`, { method: "PATCH", body: patch }),
   activate: (id: string) => request<ApiUser>(`/api/users/${id}/activate`, { method: "POST" }),

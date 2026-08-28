@@ -99,7 +99,15 @@ function PasswordDialog({ open, onClose }: { open: boolean; onClose(): void }) {
 /* ------------------------------------------------------------------ */
 
 function NotificationsMenu() {
-  const { notifications, unreadCount, markAllRead, notificationsError, reloadNotifications } = useApp();
+  const {
+    notifications,
+    unreadCount,
+    markAllRead,
+    toggleNotificationRead,
+    markNotificationRead,
+    notificationsError,
+    reloadNotifications,
+  } = useApp();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const toneFor = (kind: string) =>
@@ -110,7 +118,7 @@ function NotificationsMenu() {
       open={open}
       onToggle={setOpen}
       label="Notifications"
-      width={340}
+      width={360}
       trigger={
         <button
           className="relative flex size-9 items-center justify-center rounded-md text-ink-soft hover:bg-forest-50 hover:text-forest-900"
@@ -150,25 +158,50 @@ function NotificationsMenu() {
           <p className="p-6 text-center text-sm text-ink-soft">No notifications yet.</p>
         )}
         {notifications.map((n) => {
+          const toggleBtn = (
+            <button
+              type="button"
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                toggleNotificationRead(n.id);
+              }}
+              title={n.read ? "Unmark message (mark as unread)" : "Mark message as read"}
+              className="ml-auto shrink-0 self-start rounded p-1 text-ink-faint hover:bg-forest-100 hover:text-forest-900"
+            >
+              <Icon name={n.read ? "mail" : "check"} size={14} />
+            </button>
+          );
           const row = (
             <>
               <Badge tone={toneFor(n.kind)} dot>
                 {n.kind === "critical" ? "SOS" : n.kind}
               </Badge>
-              <div className="min-w-0">
-                <p className="text-sm font-medium text-ink">{n.title}</p>
+              <div className="min-w-0 flex-1">
+                <p className={`text-sm ${!n.read ? "font-semibold text-ink" : "font-medium text-ink-soft"}`}>
+                  {n.title}
+                </p>
                 <p className="truncate text-xs text-ink-soft">{n.body}</p>
                 <p className="mt-0.5 text-[11px] text-ink-faint">{n.module}</p>
               </div>
+              {toggleBtn}
             </>
           );
           const rowClass = cn(
-            "flex w-full gap-3 border-b border-line px-3 py-2.5 text-left",
-            !n.read && "bg-forest-50/40",
+            "flex w-full items-start gap-2.5 border-b border-line px-3 py-2.5 text-left transition",
+            !n.read ? "bg-forest-50/40" : "",
             n.href && "cursor-pointer hover:bg-surface"
           );
           return n.href ? (
-            <Link key={n.id} href={n.href} onClick={() => setOpen(false)} className={rowClass}>
+            <Link
+              key={n.id}
+              href={n.href}
+              onClick={() => {
+                if (!n.read) markNotificationRead(n.id);
+                setOpen(false);
+              }}
+              className={rowClass}
+            >
               {row}
             </Link>
           ) : (

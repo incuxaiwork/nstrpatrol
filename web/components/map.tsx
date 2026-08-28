@@ -58,6 +58,7 @@ import {
   compartmentLabelsToFeatures,
   compartmentsToFeatures,
   emptyFc,
+  forestBoundaryFromBeats,
   gridsToFeatures,
   heatToFeatures,
   markersToFeatures,
@@ -216,6 +217,9 @@ const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]
   grids: ["gl-grids-fill", "gl-grids-line"],
   routes: [
     "gl-routes",
+    "gl-routes-label",
+    "gl-live-path-case",
+    "gl-live-path",
     "gl-replay-case",
     "gl-replay-trail",
     "gl-replay-dots",
@@ -320,20 +324,30 @@ function buildLayers(m: MapLibreMap) {
   // 1. Basemaps — single-choice radio (lib/map-layers.ts). All four raster
   //    layers exist in the style; exactly one is visible at a time and
   //    switching never moves the camera.
-  m.addLayer({ id: "gl-basemap-atlas", type: "raster", source: "tiles", paint: { "raster-opacity": 0.9 } });
+  m.addLayer({
+    id: "gl-basemap-atlas",
+    type: "raster",
+    source: "tiles",
+    paint: { "raster-opacity": 0.9, "raster-fade-duration": 0 },
+  });
   m.addLayer({
     id: "gl-basemap-street",
     type: "raster",
     source: "street",
-    paint: { "raster-opacity": 1 },
+    paint: { "raster-opacity": 1, "raster-fade-duration": 0 },
     layout: { visibility: "none" },
   });
-  m.addLayer({ id: "gl-basemap-satellite", type: "raster", source: "satellite", paint: { "raster-opacity": 0.92 } });
+  m.addLayer({
+    id: "gl-basemap-satellite",
+    type: "raster",
+    source: "satellite",
+    paint: { "raster-opacity": 0.92, "raster-fade-duration": 0 },
+  });
   m.addLayer({
     id: "gl-basemap-terrain",
     type: "raster",
     source: "terrain",
-    paint: { "raster-opacity": 1 },
+    paint: { "raster-opacity": 1, "raster-fade-duration": 0 },
     layout: { visibility: "none" },
   });
 
@@ -399,22 +413,22 @@ function buildLayers(m: MapLibreMap) {
   });
 
   // 3. Reserve boundary — the STRONGEST administrative line: solid deep
-  //    forest green, heaviest width. Outline only — never a fill.
+  //    forest emerald green, heaviest width. Outline only — never a fill.
   m.addLayer({
     id: "gl-boundary-line",
     type: "line",
     source: "boundary",
     paint: {
-      "line-color": "#1B4332",
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3.2, 14, 5.5],
-      "line-opacity": 0.95,
+      "line-color": "#064E3B",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 4, 3.5, 14, 7],
+      "line-opacity": 1.0,
     },
   });
   m.addLayer({
     id: "gl-boundary-label",
     type: "symbol",
     source: "boundary",
-    minzoom: 7,
+    minzoom: 4,
     layout: {
       "text-field": ["get", "name"],
       "text-size": 13,
@@ -423,9 +437,9 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#143d2b",
+      "text-color": "#022C22",
       "text-halo-color": "#ffffff",
-      "text-halo-width": 2,
+      "text-halo-width": 2.5,
     },
   });
 
@@ -459,16 +473,14 @@ function buildLayers(m: MapLibreMap) {
     paint: { "fill-color": "#B3261E", "fill-opacity": ["*", ["get", "intensity"], 0.32] },
   });
 
-  // 6. Beat polygons — boundary-focused: the fill exists ONLY for click
-  //    hit-testing (fill-opacity ≈ 0), outlines are a distinct teal so beats
-  //    never read as a green bucket and never blend with the deep-green
-  //    reserve boundary. Zero-patrol beats keep their red dashed outline;
-  //    authorized-patrol highlight is gold (matches the Jurisdiction module).
+  // 6. Beat polygons — boundary-focused: outlines are a crisp electric blue (#0284C7)
+  //    so beat boundaries stand out distinctly from the deep emerald forest boundary
+  //    and the purple range hulls. Zero-patrol beats keep their red dashed outline.
   m.addLayer({
     id: "gl-beats-fill",
     type: "fill",
     source: "beats",
-    paint: { "fill-color": "#1E4620", "fill-opacity": 0.02 },
+    paint: { "fill-color": "#0284C7", "fill-opacity": 0.02 },
   });
   m.addLayer({
     id: "gl-auth-fill",
@@ -497,9 +509,9 @@ function buildLayers(m: MapLibreMap) {
         "case",
         ["boolean", ["get", "isZero"], false],
         "#B3261E",
-        ["case", ["boolean", ["get", "selected"], false], "#0B4F49", "#0F766E"],
+        ["case", ["boolean", ["get", "selected"], false], "#0369A1", "#0284C7"],
       ],
-      "line-width": ["case", ["boolean", ["get", "selected"], false], 3, 2.2],
+      "line-width": ["case", ["boolean", ["get", "selected"], false], 3.2, 2.2],
       "line-opacity": 0.9,
     },
   });
@@ -526,27 +538,31 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#0C5A52"],
+      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#0369A1"],
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
   });
 
-  // 7. Compartments — the LIGHTEST administrative line: thin amber, low
-  //    opacity, zoom-gated so dense internal boundaries only appear when the
-  //    admin has zoomed in. Fill is hit-test only.
+  // 7. Compartments — fine amber-gold (#D97706) dotted lines, zoom-gated so
+  //    dense internal compartment boundaries appear when zoomed in.
   m.addLayer({
     id: "gl-compartments-fill",
     type: "fill",
     source: "compartments",
-    paint: { "fill-color": "#E65100", "fill-opacity": 0.02 },
+    paint: { "fill-color": "#D97706", "fill-opacity": 0.02 },
   });
   m.addLayer({
     id: "gl-compartments-line",
     type: "line",
     source: "compartments",
-    minzoom: 9.5,
-    paint: { "line-color": "#E65100", "line-width": 1, "line-opacity": 0.6 },
+    minzoom: 10.5,
+    paint: {
+      "line-color": "#D97706",
+      "line-width": 1.4,
+      "line-dasharray": [4, 3],
+      "line-opacity": 0.85,
+    },
   });
   m.addLayer({
     id: "gl-compartments-label",
@@ -559,25 +575,24 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#B34700",
+      "text-color": "#B45309",
       "text-halo-color": "#ffffff",
       "text-halo-width": 1.5,
     },
   });
 
-  // 8. Ranges (derived hulls of each range's beats) — one consistent warm
-  //    secondary color (burnt sienna), dashed, between the heavy forest
-  //    boundary and the thin teal beats. A rainbow of per-range colors read
-  //    as random violet/orange noise; hierarchy needs ONE range color.
+  // 8. Ranges (derived hulls of each range's beats) — bold royal violet (#7C3AED)
+  //    dashed line, creating a clear administrative distinction between the
+  //    deep-green forest boundary, purple ranges, electric-blue beats, and amber compartments.
   m.addLayer({
     id: "gl-ranges-outline",
     type: "line",
     source: "ranges",
     paint: {
-      "line-color": "#92500E",
-      "line-width": 2.5,
-      "line-dasharray": [9, 5],
-      "line-opacity": 0.9,
+      "line-color": "#7C3AED",
+      "line-width": 3.0,
+      "line-dasharray": [8, 4],
+      "line-opacity": 0.95,
     },
   });
   m.addLayer({
@@ -591,7 +606,7 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#92500E",
+      "text-color": "#6D28D9",
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
@@ -651,6 +666,24 @@ function buildLayers(m: MapLibreMap) {
       "line-color": ["get", "color"],
       "line-width": 4,
       "line-opacity": 0.85,
+    },
+  });
+  m.addLayer({
+    id: "gl-routes-label",
+    type: "symbol",
+    source: "routes",
+    minzoom: 8.5,
+    layout: {
+      "text-field": ["get", "label"],
+      "text-size": 10,
+      "text-anchor": "center",
+      "symbol-placement": "line",
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": "#ffffff",
+      "text-halo-color": ["get", "color"],
+      "text-halo-width": 2.5,
     },
   });
   m.addLayer({
@@ -906,6 +939,9 @@ export function MapWorkspace({
       },
       center: DIVISION_CENTER,
       zoom: 11.8,
+      fadeDuration: 0,
+      maxTileCacheSize: 100,
+      trackResize: true,
       // Free viewport — pan/zoom is NOT clamped to the forest bounds.
       attributionControl: { compact: true },
     });
@@ -954,7 +990,10 @@ export function MapWorkspace({
   const rangeLabelsFc = useMemo(() => rangeLabelsToFeatures(ranges), [ranges]);
   const compartmentsFc = useMemo(() => compartmentsToFeatures(comps), [comps]);
   const compartmentLabelsFc = useMemo(() => compartmentLabelsToFeatures(comps), [comps]);
-  const boundaryFc = useMemo(() => boundariesToFeatures(boundary ?? []), [boundary]);
+  const boundaryFc = useMemo(() => {
+    const list = boundary && boundary.length > 0 ? boundary : forestBoundaryFromBeats(liveBeats ?? []);
+    return boundariesToFeatures(list);
+  }, [boundary, liveBeats]);
   const gridsFc = useMemo(() => gridsToFeatures(grids ?? [], coverageById), [grids, coverageById]);
   const analysisGridsFc = useMemo(
     () => analysisGridsToFeatures(analysisGrids ?? [], selectedGridIds),
@@ -1330,10 +1369,10 @@ const BASEMAP_LABELS: Record<BasemapKey, string> = {
  *  the GL paint exactly, so the legend never describes a hidden layer. */
 function activeLegendRows(s: ForestLayerState): { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] {
   const rows: { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] = [];
-  if (s.boundary) rows.push({ color: "#1B4332", label: "Forest boundary" });
-  if (s.ranges) rows.push({ color: "#92500E", label: "Range boundary", dashed: true });
-  if (s.beats) rows.push({ color: "#0F766E", label: "Beat boundary" });
-  if (s.compartments) rows.push({ color: "#E65100", label: "Compartment boundary" });
+  if (s.boundary) rows.push({ color: "#064E3B", label: "Forest boundary" });
+  if (s.ranges) rows.push({ color: "#7C3AED", label: "Range boundary", dashed: true });
+  if (s.beats) rows.push({ color: "#0284C7", label: "Beat boundary" });
+  if (s.compartments) rows.push({ color: "#D97706", label: "Compartment boundary", dashed: true });
   if (s.routes) {
     rows.push({ color: "#2E7D32", label: "Patrol route" });
     rows.push({ color: "#2E7BF6", label: "Replay track", isPoint: false });

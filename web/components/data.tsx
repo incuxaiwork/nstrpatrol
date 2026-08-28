@@ -178,8 +178,8 @@ export function FilterSelect({
         className="h-8 rounded-field border border-line-strong bg-white px-2 text-xs focus:border-forest-600 focus:outline-none"
       >
         <option value="">All</option>
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>
+        {options.map((o, idx) => (
+          <option key={`${o.value}-${idx}`} value={o.value}>
             {o.label}
           </option>
         ))}

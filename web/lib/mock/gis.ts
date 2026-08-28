@@ -36,6 +36,13 @@ export interface GisRoute {
   points: string; // SVG polyline points
   color: string;
   timedPoints?: { x: number; y: number; t: number }[];
+  patrolType?: string | null;
+  rangerName?: string | null;
+  startedAt?: string | null;
+  endedAt?: string | null;
+  durationMinutes?: number | null;
+  distanceKm?: number | null;
+  pointCount?: number | null;
 }
 
 export interface HeatBlock {
@@ -47,51 +54,67 @@ export interface HeatBlock {
 }
 
 export const mapBeatsRaw: BeatPolygon[] = [
-  { id: "b-vp-south-tummurukota", name: "Tummurukota", division: "d-markapur", range: "r-vp-south", coveragePct: 74, points: "0,0 125,0 125,116 0,116" },
-  { id: "b-vp-south-pasuvemula", name: "Pasuvemula", division: "d-markapur", range: "r-vp-south", coveragePct: 73, points: "125,0 250,0 250,116 125,116" },
-  { id: "b-vp-south-nagulavaram", name: "Nagulavaram", division: "d-markapur", range: "r-vp-south", coveragePct: 95, points: "250,0 375,0 375,116 250,116" },
-  { id: "b-vp-south-koppunuru", name: "Koppunuru", division: "d-markapur", range: "r-vp-south", coveragePct: 85, points: "375,0 500,0 500,116 375,116" },
-  { id: "b-vp-south-kandlgunta", name: "Kandlgunta", division: "d-markapur", range: "r-vp-south", coveragePct: 63, points: "500,0 625,0 625,116 500,116" },
-  { id: "b-vp-south-zuvuku", name: "Zuvuku", division: "d-markapur", range: "r-vp-south", coveragePct: 62, points: "625,0 750,0 750,116 625,116" },
-  { id: "b-vp-south-gottipalli", name: "Gottipalli", division: "d-markapur", range: "r-vp-south", coveragePct: 81, points: "750,0 875,0 875,116 750,116" },
-  { id: "b-vp-south-sirigiripadu", name: "Sirigiripadu", division: "d-markapur", range: "r-vp-south", coveragePct: 90, points: "875,0 1000,0 1000,116 875,116" },
-  { id: "b-vp-south-gangalgunta", name: "Gangalgunta", division: "d-markapur", range: "r-vp-south", coveragePct: 73, points: "0,116 125,116 125,232 0,232" },
-  { id: "b-y-palem-akkapalem", name: "Akkapalem", division: "d-markapur", range: "r-y-palem", coveragePct: 68, points: "125,116 250,116 250,232 125,232" },
-  { id: "b-y-palem-pullalacheruvu", name: "Pullalacheruvu", division: "d-markapur", range: "r-y-palem", coveragePct: 92, points: "250,116 375,116 375,232 250,232" },
-  { id: "b-y-palem-venkatareddypalli", name: "Venkatareddypalli", division: "d-markapur", range: "r-y-palem", coveragePct: 69, points: "375,116 500,116 500,232 375,232" },
-  { id: "b-y-palem-mallapalem", name: "Mallapalem", division: "d-markapur", range: "r-y-palem", coveragePct: 65, points: "500,116 625,116 625,232 500,232" },
-  { id: "b-y-palem-komarolu", name: "Komarolu", division: "d-markapur", range: "r-y-palem", coveragePct: 81, points: "625,116 750,116 750,232 625,232" },
-  { id: "b-y-palem-veerabhadrapuram", name: "Veerabhadrapuram", division: "d-markapur", range: "r-y-palem", coveragePct: 63, points: "750,116 875,116 875,232 750,232" },
-  { id: "b-y-palem-rentapalli", name: "Rentapalli", division: "d-markapur", range: "r-y-palem", coveragePct: 83, points: "875,116 1000,116 1000,232 875,232" },
-  { id: "b-y-palem-naidupalem", name: "Naidupalem", division: "d-markapur", range: "r-y-palem", coveragePct: 95, points: "0,232 125,232 125,348 0,348" },
-  { id: "b-y-palem-boyalapalli", name: "Boyalapalli", division: "d-markapur", range: "r-y-palem", coveragePct: 95, points: "125,232 250,232 250,348 125,348" },
-  { id: "b-y-palem-t-r-cheruvu", name: "T.R.Cheruvu", division: "d-markapur", range: "r-y-palem", coveragePct: 79, points: "250,232 375,232 375,348 250,348" },
-  { id: "b-y-palem-kolukula", name: "Kolukula", division: "d-markapur", range: "r-y-palem", coveragePct: 79, points: "375,232 500,232 500,348 375,348" },
-  { id: "b-nekkanti-guttalachenu", name: "Guttalachenu", division: "d-markapur", range: "r-nekkanti", coveragePct: 66, points: "500,232 625,232 625,348 500,348" },
-  { id: "b-nekkanti-nekkanti", name: "Nekkanti", division: "d-markapur", range: "r-nekkanti", coveragePct: 68, points: "625,232 750,232 750,348 625,348" },
-  { id: "b-nekkanti-chinnarutla", name: "Chinnarutla", division: "d-markapur", range: "r-nekkanti", coveragePct: 58, points: "750,232 875,232 875,348 750,348" },
-  { id: "b-gv-palli-burugundala", name: "Burugundala", division: "d-markapur", range: "r-gv-palli", coveragePct: 78, points: "875,232 1000,232 1000,348 875,348" },
-  { id: "b-gv-palli-palutla", name: "Palutla", division: "d-markapur", range: "r-gv-palli", coveragePct: 89, points: "0,348 125,348 125,464 0,464" },
-  { id: "b-gv-palli-regumanipenta", name: "Regumanipenta", division: "d-markapur", range: "r-gv-palli", coveragePct: 80, points: "125,348 250,348 250,464 125,464" },
-  { id: "b-gv-palli-g-v-palli", name: "G.V.Palli", division: "d-markapur", range: "r-gv-palli", coveragePct: 61, points: "250,348 375,348 375,464 250,464" },
-  { id: "b-dornala-chintala", name: "Chintala", division: "d-markapur", range: "r-dornala", coveragePct: 87, points: "375,348 500,348 500,464 375,464" },
-  { id: "b-dornala-tummalabailu", name: "Tummalabailu", division: "d-markapur", range: "r-dornala", coveragePct: 65, points: "500,348 625,348 625,464 500,464" },
-  { id: "b-dornala-p-bommalapuram", name: "P Bommalapuram", division: "d-markapur", range: "r-dornala", coveragePct: 64, points: "625,348 750,348 750,464 625,464" },
-  { id: "b-dornala-edavalli", name: "Edavalli", division: "d-markapur", range: "r-dornala", coveragePct: 63, points: "750,348 875,348 875,464 750,464" },
-  { id: "b-dornala-chilakacherla", name: "Chilakacherla", division: "d-markapur", range: "r-dornala", coveragePct: 95, points: "875,348 1000,348 1000,464 875,464" },
-  { id: "b-korraprolu-peddachama", name: "Peddachama", division: "d-markapur", range: "r-korraprolu", coveragePct: 71, points: "0,464 125,464 125,580 0,580" },
-  { id: "b-korraprolu-peddamantanala", name: "Peddamantanala", division: "d-markapur", range: "r-korraprolu", coveragePct: 62, points: "125,464 250,464 250,580 125,580" },
-  { id: "b-korraprolu-y-cherlopalli", name: "Y.Cherlopalli", division: "d-markapur", range: "r-korraprolu", coveragePct: 64, points: "250,464 375,464 375,580 250,580" },
-  { id: "b-korraprolu-ch-mantanala", name: "Ch.Mantanala", division: "d-markapur", range: "r-korraprolu", coveragePct: 74, points: "375,464 500,464 500,580 375,580" },
-  { id: "b-korraprolu-nallaguntla", name: "Nallaguntla", division: "d-markapur", range: "r-korraprolu", coveragePct: 64, points: "500,464 625,464 625,580 500,580" },
-  { id: "b-markapur-kalanuthala", name: "Kalanuthala", division: "d-markapur", range: "r-markapur", coveragePct: 65, points: "625,464 750,464 750,580 625,580" },
-  { id: "b-markapur-bommilingam", name: "Bommilingam", division: "d-markapur", range: "r-markapur", coveragePct: 95, points: "750,464 875,464 875,580 750,580" },
-  { id: "b-markapur-gundamcherla", name: "Gundamcherla", division: "d-markapur", range: "r-markapur", coveragePct: 90, points: "875,464 1000,464 1000,580 875,580" },
-  { id: "b-markapur-gottipadia", name: "Gottipadia", division: "d-markapur", range: "r-markapur", coveragePct: 93, points: "0,580 125,580 125,696 0,696" },
-  { id: "b-markapur-magutur", name: "Magutur", division: "d-markapur", range: "r-markapur", coveragePct: 96, points: "125,580 250,580 250,696 125,696" },
-  { id: "b-markapur-nagulavaram", name: "Nagulavaram", division: "d-markapur", range: "r-markapur", coveragePct: 86, points: "250,580 375,580 375,696 250,696" },
-  { id: "b-markapur-donkaonda", name: "Donkaonda", division: "d-markapur", range: "r-markapur", coveragePct: 78, points: "375,580 500,580 500,696 375,696" },
+  /* ── VP South Range – northern tip, narrower ── */
+  { id: "b-vp-south-tummurukota",   name: "Tummurukota",   division: "d-markapur", range: "r-vp-south", coveragePct: 74, points: "140,42 270,36 272,152 148,160 132,102" },
+  { id: "b-vp-south-pasuvemula",    name: "Pasuvemula",    division: "d-markapur", range: "r-vp-south", coveragePct: 73, points: "270,36 398,30 402,148 272,152" },
+  { id: "b-vp-south-nagulavaram",   name: "Nagulavaram",   division: "d-markapur", range: "r-vp-south", coveragePct: 95, points: "398,30 524,28 528,144 402,148" },
+  { id: "b-vp-south-koppunuru",     name: "Koppunuru",     division: "d-markapur", range: "r-vp-south", coveragePct: 85, points: "524,28 652,32 655,142 528,144" },
+  { id: "b-vp-south-kandlgunta",    name: "Kandlgunta",    division: "d-markapur", range: "r-vp-south", coveragePct: 63, points: "652,32 774,38 778,148 655,142" },
+  { id: "b-vp-south-zuvuku",        name: "Zuvuku",        division: "d-markapur", range: "r-vp-south", coveragePct: 62, points: "774,38 882,52 880,156 778,148" },
+  { id: "b-vp-south-gottipalli",    name: "Gottipalli",    division: "d-markapur", range: "r-vp-south", coveragePct: 81, points: "882,52 952,70 948,164 880,156" },
+  { id: "b-vp-south-sirigiripadu",  name: "Sirigiripadu",  division: "d-markapur", range: "r-vp-south", coveragePct: 90, points: "952,70 996,92 993,172 948,164" },
+
+  /* ── VP South / Y-Palem transition row ── */
+  { id: "b-vp-south-gangalgunta",   name: "Gangalgunta",   division: "d-markapur", range: "r-vp-south", coveragePct: 73, points: "118,160 132,102 148,160 272,152 270,268 112,274" },
+  { id: "b-y-palem-akkapalem",      name: "Akkapalem",     division: "d-markapur", range: "r-y-palem",  coveragePct: 68, points: "270,268 272,152 402,148 400,264" },
+  { id: "b-y-palem-pullalacheruvu", name: "Pullalacheruvu",division: "d-markapur", range: "r-y-palem",  coveragePct: 92, points: "400,264 402,148 528,144 526,262" },
+  { id: "b-y-palem-venkatareddypalli", name: "Venkatareddypalli", division: "d-markapur", range: "r-y-palem", coveragePct: 69, points: "526,262 528,144 655,142 652,260" },
+  { id: "b-y-palem-mallapalem",     name: "Mallapalem",    division: "d-markapur", range: "r-y-palem",  coveragePct: 65, points: "652,260 655,142 778,148 776,264" },
+  { id: "b-y-palem-komarolu",       name: "Komarolu",      division: "d-markapur", range: "r-y-palem",  coveragePct: 81, points: "776,264 778,148 880,156 878,267 822,280" },
+  { id: "b-y-palem-veerabhadrapuram", name: "Veerabhadrapuram", division: "d-markapur", range: "r-y-palem", coveragePct: 63, points: "822,280 878,267 948,164 962,182 958,274 892,286" },
+  { id: "b-y-palem-rentapalli",     name: "Rentapalli",    division: "d-markapur", range: "r-y-palem",  coveragePct: 83, points: "958,274 962,182 993,172 995,280" },
+
+  /* ── Y-Palem Range – central-north, western edge steps out ── */
+  { id: "b-y-palem-naidupalem",     name: "Naidupalem",    division: "d-markapur", range: "r-y-palem",  coveragePct: 95, points: "92,274 112,274 270,268 268,384 85,390" },
+  { id: "b-y-palem-boyalapalli",    name: "Boyalapalli",   division: "d-markapur", range: "r-y-palem",  coveragePct: 95, points: "268,384 270,268 400,264 397,382" },
+  { id: "b-y-palem-t-r-cheruvu",   name: "T.R.Cheruvu",   division: "d-markapur", range: "r-y-palem",  coveragePct: 79, points: "397,382 400,264 526,262 523,380" },
+  { id: "b-y-palem-kolukula",       name: "Kolukula",      division: "d-markapur", range: "r-y-palem",  coveragePct: 79, points: "523,380 526,262 652,260 649,378" },
+
+  /* ── Nekkanti / GV Palli – river notch on east ── */
+  { id: "b-nekkanti-guttalachenu",  name: "Guttalachenu",  division: "d-markapur", range: "r-nekkanti", coveragePct: 66, points: "649,378 652,260 776,264 822,280 820,374 750,392 702,384" },
+  { id: "b-nekkanti-nekkanti",      name: "Nekkanti",      division: "d-markapur", range: "r-nekkanti", coveragePct: 68, points: "820,374 822,280 892,286 958,274 955,372 902,382" },
+  { id: "b-nekkanti-chinnarutla",   name: "Chinnarutla",   division: "d-markapur", range: "r-nekkanti", coveragePct: 58, points: "955,372 958,274 995,280 996,370 978,377" },
+  { id: "b-gv-palli-burugundala",   name: "Burugundala",   division: "d-markapur", range: "r-gv-palli", coveragePct: 78, points: "750,392 820,374 902,382 900,484 822,492 762,500" },
+
+  /* ── GV Palli Range – widest section ── */
+  { id: "b-gv-palli-palutla",       name: "Palutla",       division: "d-markapur", range: "r-gv-palli", coveragePct: 89, points: "78,390 85,390 268,384 264,502 72,508" },
+  { id: "b-gv-palli-regumanipenta", name: "Regumanipenta", division: "d-markapur", range: "r-gv-palli", coveragePct: 80, points: "264,502 268,384 397,382 393,498" },
+  { id: "b-gv-palli-g-v-palli",    name: "G.V.Palli",     division: "d-markapur", range: "r-gv-palli", coveragePct: 61, points: "393,498 397,382 523,380 520,496" },
+
+  /* ── Dornala Range ── */
+  { id: "b-dornala-chintala",       name: "Chintala",      division: "d-markapur", range: "r-dornala",  coveragePct: 87, points: "520,496 523,380 649,378 702,384 698,494 642,502" },
+  { id: "b-dornala-tummalabailu",   name: "Tummalabailu",  division: "d-markapur", range: "r-dornala",  coveragePct: 65, points: "698,494 702,384 750,392 762,500 737,507" },
+  { id: "b-dornala-p-bommalapuram", name: "P Bommalapuram",division: "d-markapur", range: "r-dornala",  coveragePct: 64, points: "762,500 822,492 900,484 898,580 842,592 810,602 782,600" },
+  { id: "b-dornala-edavalli",       name: "Edavalli",      division: "d-markapur", range: "r-dornala",  coveragePct: 63, points: "898,580 900,484 978,377 996,370 994,490 990,587 942,594" },
+  { id: "b-dornala-chilakacherla",  name: "Chilakacherla", division: "d-markapur", range: "r-dornala",  coveragePct: 95, points: "990,587 994,490 996,370 998,584" },
+
+  /* ── Korraprolu Range – SW tapering ── */
+  { id: "b-korraprolu-peddachama",     name: "Peddachama",     division: "d-markapur", range: "r-korraprolu", coveragePct: 71, points: "65,508 72,508 264,502 260,617 58,624" },
+  { id: "b-korraprolu-peddamantanala", name: "Peddamantanala", division: "d-markapur", range: "r-korraprolu", coveragePct: 62, points: "260,617 264,502 393,498 389,612" },
+  { id: "b-korraprolu-y-cherlopalli",  name: "Y.Cherlopalli",  division: "d-markapur", range: "r-korraprolu", coveragePct: 64, points: "389,612 393,498 520,496 517,610" },
+  { id: "b-korraprolu-ch-mantanala",   name: "Ch.Mantanala",   division: "d-markapur", range: "r-korraprolu", coveragePct: 74, points: "517,610 520,496 642,502 698,494 737,507 732,600 690,614 642,620" },
+  { id: "b-korraprolu-nallaguntla",    name: "Nallaguntla",     division: "d-markapur", range: "r-korraprolu", coveragePct: 64, points: "690,614 732,600 782,600 810,602 842,592 840,652 802,667 762,672 722,670 692,662" },
+
+  /* ── Markapur Range – southernmost, narrow ── */
+  { id: "b-markapur-kalanuthala",  name: "Kalanuthala",  division: "d-markapur", range: "r-markapur", coveragePct: 65, points: "898,580 942,594 940,662 897,670 858,660 840,652 842,592" },
+  { id: "b-markapur-bommilingam",  name: "Bommilingam",  division: "d-markapur", range: "r-markapur", coveragePct: 95, points: "940,662 990,587 998,584 997,670 972,677 942,674" },
+  { id: "b-markapur-gundamcherla", name: "Gundamcherla", division: "d-markapur", range: "r-markapur", coveragePct: 90, points: "52,624 58,624 260,617 256,692 45,696" },
+  { id: "b-markapur-gottipadia",   name: "Gottipadia",   division: "d-markapur", range: "r-markapur", coveragePct: 93, points: "256,692 260,617 389,612 386,694" },
+  { id: "b-markapur-magutur",      name: "Magutur",      division: "d-markapur", range: "r-markapur", coveragePct: 96, points: "386,694 389,612 517,610 514,695" },
+  { id: "b-markapur-nagulavaram",  name: "Nagulavaram",  division: "d-markapur", range: "r-markapur", coveragePct: 86, points: "514,695 517,610 642,620 690,614 692,662 722,670 717,695 682,700 622,698 570,696" },
+  { id: "b-markapur-donkaonda",    name: "Donkaonda",    division: "d-markapur", range: "r-markapur", coveragePct: 78, points: "762,672 802,667 840,652 858,660 897,670 894,697 842,702 802,702 770,700" },
 ];
+
 
 export const gisMarkers: GisMarker[] = [
   { id: "m1", kind: "ranger", label: "R-001 · Aarav", x: 62, y: 58 },
@@ -107,26 +130,133 @@ export const gisMarkers: GisMarker[] = [
 
 export const gisRoutes: GisRoute[] = [
   {
-    id: "rt1", patrolId: "p-2026-0118", label: "Tummurukota sweep", status: "ongoing", color: "#2E7D32",
-    points: "12,14 40,38 66,22 100,44",
+    id: "rt1",
+    patrolId: "p-2026-0118",
+    label: "Tummurukota Boundary Patrol",
+    status: "ongoing",
+    color: "#2E7D32",
+    points: "25,20 50,45 85,30 115,60 120,100",
     timedPoints: [
-      { x: 12, y: 14, t: 0 },
-      { x: 40, y: 36, t: 0.45 },
-      { x: 66, y: 24, t: 0.8 },
-      { x: 100, y: 44, t: 1 },
+      { x: 25, y: 20, t: 0 },
+      { x: 50, y: 45, t: 0.25 },
+      { x: 85, y: 30, t: 0.5 },
+      { x: 115, y: 60, t: 0.75 },
+      { x: 120, y: 100, t: 1.0 },
     ],
+    patrolType: "FOOT",
+    rangerName: "Ali Patrol Ranger",
+    startedAt: "2026-08-27T08:15:00.000Z",
+    endedAt: null,
+    durationMinutes: 142,
+    distanceKm: 8.4,
+    pointCount: 5,
   },
   {
-    id: "rt2", patrolId: "p-2026-0117", label: "Akkapalem combing", status: "completed", color: "#1B365D",
-    points: "132,130 168,168 195,140 238,185",
+    id: "rt2",
+    patrolId: "p-2026-0117",
+    label: "Akkapalem Combing Patrol",
+    status: "completed",
+    color: "#1B365D",
+    points: "140,130 170,155 195,140 220,185 240,215",
+    timedPoints: [
+      { x: 140, y: 130, t: 0 },
+      { x: 170, y: 155, t: 0.3 },
+      { x: 195, y: 140, t: 0.55 },
+      { x: 220, y: 185, t: 0.8 },
+      { x: 240, y: 215, t: 1.0 },
+    ],
+    patrolType: "VEHICLE",
+    rangerName: "Rajesh Kumar",
+    startedAt: "2026-08-27T06:00:00.000Z",
+    endedAt: "2026-08-27T07:35:00.000Z",
+    durationMinutes: 95,
+    distanceKm: 14.2,
+    pointCount: 5,
   },
   {
-    id: "rt3", patrolId: "p-2026-0116", label: "Guttalachenu water census", status: "completed", color: "#4A6572",
-    points: "510,250 545,285 575,258 612,320",
+    id: "rt3",
+    patrolId: "p-2026-0116",
+    label: "Guttalachenu Waterhole Census",
+    status: "completed",
+    color: "#00838F",
+    points: "510,240 540,270 575,258 600,295 620,330",
+    timedPoints: [
+      { x: 510, y: 240, t: 0 },
+      { x: 540, y: 270, t: 0.25 },
+      { x: 575, y: 258, t: 0.5 },
+      { x: 600, y: 295, t: 0.75 },
+      { x: 620, y: 330, t: 1.0 },
+    ],
+    patrolType: "FOOT",
+    rangerName: "Section Officer Markapur",
+    startedAt: "2026-08-26T07:30:00.000Z",
+    endedAt: "2026-08-26T09:28:00.000Z",
+    durationMinutes: 118,
+    distanceKm: 6.7,
+    pointCount: 5,
   },
   {
-    id: "rt4", patrolId: "p-2026-0114", label: "Peddamantanala track follow", status: "completed", color: "#8A7755",
-    points: "132,478 168,512 200,492 240,552",
+    id: "rt4",
+    patrolId: "p-2026-0114",
+    label: "Peddamantanala Trail Monitor",
+    status: "completed",
+    color: "#8A7755",
+    points: "140,480 170,510 200,495 235,550",
+    timedPoints: [
+      { x: 140, y: 480, t: 0 },
+      { x: 170, y: 510, t: 0.35 },
+      { x: 200, y: 495, t: 0.7 },
+      { x: 235, y: 550, t: 1.0 },
+    ],
+    patrolType: "BICYCLE",
+    rangerName: "K. Srinivasa Rao",
+    startedAt: "2026-08-25T14:10:00.000Z",
+    endedAt: "2026-08-25T15:26:00.000Z",
+    durationMinutes: 76,
+    distanceKm: 9.1,
+    pointCount: 4,
+  },
+  {
+    id: "rt5",
+    patrolId: "p-2026-0119",
+    label: "Palutla Tiger Corridor Patrol",
+    status: "ongoing",
+    color: "#E65100",
+    points: "30,360 60,390 90,410 115,440",
+    timedPoints: [
+      { x: 30, y: 360, t: 0 },
+      { x: 60, y: 390, t: 0.33 },
+      { x: 90, y: 410, t: 0.66 },
+      { x: 115, y: 440, t: 1.0 },
+    ],
+    patrolType: "FOOT",
+    rangerName: "Chief Ranger Admin",
+    startedAt: "2026-08-27T09:00:00.000Z",
+    endedAt: null,
+    durationMinutes: 88,
+    distanceKm: 5.8,
+    pointCount: 4,
+  },
+  {
+    id: "rt6",
+    patrolId: "p-2026-0112",
+    label: "Kalanuthala Reserve Joint Sweep",
+    status: "completed",
+    color: "#4A148C",
+    points: "640,480 680,510 720,530 740,570",
+    timedPoints: [
+      { x: 640, y: 480, t: 0 },
+      { x: 680, y: 510, t: 0.33 },
+      { x: 720, y: 530, t: 0.66 },
+      { x: 740, y: 570, t: 1.0 },
+    ],
+    patrolType: "VEHICLE",
+    rangerName: "DFO Markapur Division",
+    startedAt: "2026-08-24T05:30:00.000Z",
+    endedAt: "2026-08-24T07:20:00.000Z",
+    durationMinutes: 110,
+    distanceKm: 18.5,
+    pointCount: 4,
   },
 ];
 
@@ -558,4 +688,17 @@ export const defaultLayers: MapLayerDef[] = [
   { id: "coverage", name: "Coverage density", group: "analysis", visible: false, color: "#FF8F00" },
   { id: "heat", name: "Activity heatmap", group: "analysis", visible: false, color: "#B3261E" },
   { id: "zeropatrol", name: "Zero patrol zones", group: "analysis", visible: true, color: "#B3261E" },
+];
+
+import type { BoundaryPolygon } from "@/lib/backend-adapters";
+
+export const mockBoundary: BoundaryPolygon[] = [
+  {
+    id: "b-nstr-reserve-division",
+    name: "NSTR Markapur Division Forest Boundary",
+    forestCode: "NSTR_MARKAPUR",
+    parts: [
+      "0,0 1000,0 1000,696 0,696 0,0"
+    ],
+  },
 ];

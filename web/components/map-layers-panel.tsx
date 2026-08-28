@@ -124,6 +124,12 @@ export function MapLayersPanel({
                         checked={layerState[r.key]}
                         onChange={(e) => onChange({ ...layerState, [r.key]: e.target.checked })}
                       />
+                      {r.color && (
+                        <span
+                          className={`h-2.5 w-3.5 shrink-0 rounded-sm ${r.dashed ? "border border-dashed border-white/60" : ""}`}
+                          style={{ backgroundColor: r.color }}
+                        />
+                      )}
                       {r.title}
                     </span>
                     <span

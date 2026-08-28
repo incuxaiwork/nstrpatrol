@@ -265,17 +265,22 @@ async function main(): Promise<void> {
 
     if (!apply) continue;
 
+    const passwordToUse = password ?? generatePassword();
+    const passwordHashToUse = await hashPassword(passwordToUse);
     const data = {
       role: Role.RANGER,
       isAdmin: false,
       cader,
       fullName,
       isActive: true,
-      ...(password ? { passwordHash: await hashPassword(password) } : {}),
       ...scope,
     };
 
-    await prisma.user.upsert({ where: { email }, update: data, create: { email, ...data } });
+    await prisma.user.upsert({
+      where: { email },
+      update: password ? { ...data, passwordHash: passwordHashToUse } : data,
+      create: { email, ...data, passwordHash: passwordHashToUse },
+    });
     if (existing) updated++;
     else created++;
   }

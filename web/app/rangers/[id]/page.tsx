@@ -28,10 +28,16 @@ export default function RangerDetailPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const { pushToast } = useApp();
+
+  // Primary: fetch only this ranger — fast path (single API call, parallel with live patrols).
   const { data: ranger, error, loading, reload } = useAsyncData(() => rangers.get(params.id));
+
+  // Secondary: fire all supporting fetches in parallel — each section shows its own
+  // skeleton while loading, so the ranger header appears immediately.
   const trend = useAsyncData(() => rangers.trend(params.id));
   const auths = useAsyncData(() => authorizations.list());
   const patrolData = useAsyncData(() => patrols.list());
+
   const [removeOpen, setRemoveOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
 
@@ -54,6 +60,8 @@ export default function RangerDetailPage() {
     [myPatrols, auths.data]
   );
 
+  // Only block the FULL page for the critical ranger record.
+  // Secondary data (patrols, auths, trend) loads progressively in-section.
   if (loading) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
   if (!ranger) return <NotFound what="ranger" id={params.id} />;
@@ -127,15 +135,21 @@ export default function RangerDetailPage() {
           <Card>
             <CardHeader title="Performance trend" icon="chart" subtitle="Monthly patrols and beat coverage, last 6 months (mock)" />
             <div className="p-4">
-              <LineChart
-                dataset={
-                  trend.data ?? {
-                    labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
-                    series: [{ name: "Patrols", values: [] }],
+              {trend.loading ? (
+                <div className="flex h-[200px] items-center justify-center">
+                  <div className="h-4 w-48 animate-pulse rounded bg-surface" />
+                </div>
+              ) : (
+                <LineChart
+                  dataset={
+                    trend.data ?? {
+                      labels: ["Feb", "Mar", "Apr", "May", "Jun", "Jul"],
+                      series: [{ name: "Patrols", values: [] }],
+                    }
                   }
-                }
-                height={200}
-              />
+                  height={200}
+                />
+              )}
             </div>
           </Card>
 
@@ -158,9 +172,14 @@ export default function RangerDetailPage() {
             <CardHeader
               title="Current patrol"
               icon="radio"
-              subtitle={currentPatrol ? "Live field status (mock)" : "Not on patrol"}
+              subtitle={patrolData.loading ? "Loading…" : currentPatrol ? "Live field status (mock)" : "Not on patrol"}
             />
-            {currentPatrol ? (
+            {patrolData.loading ? (
+              <div className="space-y-2 p-4">
+                <div className="h-4 w-3/4 animate-pulse rounded bg-surface" />
+                <div className="h-3 w-1/2 animate-pulse rounded bg-surface" />
+              </div>
+            ) : currentPatrol ? (
               <div className="p-4">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-mono text-sm font-semibold text-forest-800">{currentPatrol.code}</span>
@@ -193,7 +212,9 @@ export default function RangerDetailPage() {
 
           <Card>
             <CardHeader title="Recent patrols" icon="route" subtitle="Latest patrols with jurisdiction status (mock)" />
-            {myPatrols.length === 0 ? (
+            {patrolData.loading ? (
+              <SkeletonRows rows={3} />
+            ) : myPatrols.length === 0 ? (
               <p className="p-4 text-sm text-ink-soft">No patrols on record.</p>
             ) : (
               <div className="divide-y divide-line">
@@ -222,6 +243,7 @@ export default function RangerDetailPage() {
 
           <Card>
             <CardHeader title="Recent activity" icon="history" subtitle="Latest events involving this ranger (mock)" />
+
             <div className="p-5">
               <Timeline
                 items={[
