@@ -23,7 +23,12 @@ data class AuthUser(
     val role: String,
     val cader: String?,
     val phone: String?,
-    val isAdmin: Boolean
+    val isAdmin: Boolean,
+    val rangeId: String? = null,
+    val beatId: String? = null,
+    val rangeName: String? = null,
+    val beatName: String? = null,
+    val section: String? = null
 ) {
     val initial: String
         get() = fullName.trim().firstOrNull()?.uppercase() ?: "?"
@@ -42,6 +47,12 @@ data class AuthUser(
             else -> "Field Officer"
         }
 
+    /** Whether this user has a beat-level assignment (FBO/ABO). */
+    val hasBeatAssignment: Boolean get() = beatName != null
+
+    /** Whether this user has a range-level assignment (FRO/DyRO/FSO). */
+    val hasRangeAssignment: Boolean get() = rangeName != null && beatName == null
+
     companion object {
         fun fromJson(o: JSONObject?): AuthUser? {
             o ?: return null
@@ -52,7 +63,12 @@ data class AuthUser(
                 role = o.optString("role", "RANGER"),
                 cader = o.optString("cader").ifEmpty { null },
                 phone = o.optString("phone").ifEmpty { null },
-                isAdmin = o.optBoolean("isAdmin", false)
+                isAdmin = o.optBoolean("isAdmin", false),
+                rangeId = o.optString("rangeId").ifEmpty { null },
+                beatId = o.optString("beatId").ifEmpty { null },
+                rangeName = o.optString("rangeName").ifEmpty { null }.let { if (it == "null") null else it },
+                beatName = o.optString("beatName").ifEmpty { null }.let { if (it == "null") null else it },
+                section = o.optString("section").ifEmpty { null }.let { if (it == "null") null else it }
             )
         }
     }
@@ -254,9 +270,8 @@ class AuthSession(context: Context) {
         fallback
     }
 
-    /** Clears the stored session, the bearer token, and all local data. */
-    fun logout(db: NstrDatabase? = null) {
-        db?.clearAllTables()
+    /** Clears the stored session and bearer token; preserves local data for reuse. */
+    fun logout() {
         prefs.edit().clear().apply()
         client.setAccessToken(null)
     }

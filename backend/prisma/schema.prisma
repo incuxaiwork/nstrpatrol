@@ -27,6 +27,7 @@ model User {
   subDivisionId     String?
   rangeId           String?
   beatId            String?
+  section           String?
   devices           Device[]
   incidents         Incident[]
   verifiedIncidents Incident[] @relation("VerifiedBy")

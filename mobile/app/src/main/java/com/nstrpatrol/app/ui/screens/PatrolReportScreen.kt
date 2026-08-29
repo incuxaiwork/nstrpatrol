@@ -387,7 +387,7 @@ fun PatrolReportScreen(
                         .padding(14.dp)
                 ) {
                     DetailRow("Start time", IndiaTime.full(s.startTime))
-                    if (s.endTime != null) {
+                    if (s.endTime != null && s.status != "ACTIVE") {
                         DetailRow("End time", IndiaTime.full(s.endTime))
                     }
                     DetailRow("Sync status", s.syncStatus)

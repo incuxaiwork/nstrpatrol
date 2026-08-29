@@ -3,6 +3,11 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { prisma } from '../db/prisma';
 import { param } from '../lib/http';
+import { requireAuth } from '../middleware/auth';
+import { validateBody } from '../middleware/validate';
+import { z } from 'zod';
+import * as fs from 'fs';
+import * as path from 'path';
 
 export const gisRouter = Router();
 
@@ -250,6 +255,12 @@ async function fallbackCompartments(): Promise<string> {
 
   return JSON.stringify({ type: 'FeatureCollection', features });
 }
+
+/**
+ * GET /api/gis/beats
+ * Forest beats as a GeoJSON FeatureCollection, properties shaped like the
+ * original mark_beat.json so existing mobile parsing keeps working.
+ */
 gisRouter.get('/beats', async (_req, res) => {
   const body = await cachedGeo('beats', async () => {
     let geojson: string | null = null;
@@ -384,6 +395,26 @@ gisRouter.get('/ranges', async (_req, res) => {
   res.send(body);
 });
 
+/**
+ * GET /api/gis/version
+ * Lightweight hash of beat + compartment counts so mobile can decide
+ * whether to re-fetch the full GeoJSON layers.
+ */
+gisRouter.get('/version', async (_req, res) => {
+  const [beatRow, compRow] = await Promise.all([
+    prisma.$queryRaw<{ cnt: bigint; maxUpdated: Date | null }[]>`
+      SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Beat"
+    `,
+    prisma.$queryRaw<{ cnt: bigint; maxUpdated: Date | null }[]>`
+      SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Compartment"
+    `,
+  ]);
+  res.json({
+    beats: { count: Number(beatRow[0]?.cnt ?? 0), lastUpdated: beatRow[0]?.maxUpdated ?? null },
+    compartments: { count: Number(compRow[0]?.cnt ?? 0), lastUpdated: compRow[0]?.maxUpdated ?? null },
+  });
+});
+
 const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
 
 /**
@@ -515,4 +546,145 @@ gisRouter.get('/assets/:resourceKey', async (req, res) => {
   res.setHeader('X-Asset-Version', String(asset.version));
   res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   res.send(Buffer.from(asset.data));
+});
+
+/* ── Geofencing ─────────────────────────────────────────────────────────── */
+
+
+/** Load the bundled beat GeoJSON (mark_beat.json) for point-in-polygon checks. */
+let _beatFeatures: any[] = [];
+let _beatFeaturesLoaded = false;
+function loadBeatFeatures(): any[] {
+  if (_beatFeaturesLoaded) return _beatFeatures;
+  _beatFeaturesLoaded = true;
+  try {
+    const assetPath = path.resolve(process.cwd(), 'mark_beat.json');
+    const raw = fs.readFileSync(assetPath, 'utf-8');
+    const fc = JSON.parse(raw);
+    _beatFeatures = fc.features ?? [];
+  } catch {
+    _beatFeatures = [];
+  }
+  return _beatFeatures;
+}
+
+/** Ray-casting point-in-polygon. Coordinates are [lng, lat] (GeoJSON order). */
+function pointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+/** Check if a point is inside a GeoJSON geometry (Polygon or MultiPolygon). */
+function pointInGeometry(lng: number, lat: number, geom: any): boolean {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') {
+    return pointInPolygon(lng, lat, geom.coordinates[0]);
+  }
+  if (geom.type === 'MultiPolygon') {
+    return geom.coordinates.some((polygon: number[][][]) => pointInPolygon(lng, lat, polygon[0]));
+  }
+  return false;
+}
+
+const validateLocationSchema = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  beatName: z.string().trim().max(160).optional(),
+  sectionName: z.string().trim().max(160).optional(),
+  rangeName: z.string().trim().max(160).optional(),
+});
+
+/**
+ * POST /api/gis/validate-location
+ * Checks if a GPS coordinate falls within the assigned beat, section, or range polygon.
+ * Used by the mobile app to verify the officer is in their designated area
+ * before starting a patrol.
+ *
+ * Hierarchy: beat → section → range → no assignment
+ */
+gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationSchema), (req, res) => {
+  const { lat, lng, beatName, sectionName, rangeName } = req.body;
+  const features = loadBeatFeatures();
+
+  if (features.length === 0) {
+    res.json({ valid: false, reason: 'no_gis_data', message: 'Beat geometry data not available' });
+    return;
+  }
+
+  // If a specific beat is assigned, check containment in that beat only
+  if (beatName) {
+    const normalised = beatName.toUpperCase();
+    const match = features.find((f: any) =>
+      (f.properties?.Beat ?? '').toUpperCase() === normalised
+    );
+    if (!match) {
+      res.json({ valid: false, reason: 'beat_not_found', message: `Beat "${beatName}" not found in GIS data` });
+      return;
+    }
+    const inside = pointInGeometry(lng, lat, match.geometry);
+    res.json({
+      valid: inside,
+      reason: inside ? 'inside_beat' : 'outside_beat',
+      beat: match.properties?.Beat,
+      range: match.properties?.Range,
+    });
+    return;
+  }
+
+  // If a section is assigned (FSO/DyRO with section), check containment in any beat of that section
+  if (sectionName) {
+    const normalised = sectionName.toUpperCase();
+    const sectionBeats = features.filter((f: any) =>
+      (f.properties?.Section ?? '').toUpperCase() === normalised
+    );
+    if (sectionBeats.length === 0) {
+      // Section not found in GIS — fall through to range check if available
+      if (rangeName) {
+        // fall through to range check below
+      } else {
+        res.json({ valid: false, reason: 'section_not_found', message: `Section "${sectionName}" not found in GIS data` });
+        return;
+      }
+    } else {
+      const insideBeat = sectionBeats.find((f: any) => pointInGeometry(lng, lat, f.geometry));
+      res.json({
+        valid: !!insideBeat,
+        reason: insideBeat ? 'inside_section' : 'outside_section',
+        beat: insideBeat?.properties?.Beat ?? null,
+        range: rangeName ?? sectionBeats[0]?.properties?.Range ?? null,
+        section: sectionName,
+      });
+      return;
+    }
+  }
+
+  // If a range is assigned (FRO/DyRO/FSO without section), check containment in any beat of that range
+  if (rangeName) {
+    const normalised = rangeName.toUpperCase();
+    const rangeBeats = features.filter((f: any) =>
+      (f.properties?.Range ?? '').toUpperCase() === normalised
+    );
+    if (rangeBeats.length === 0) {
+      res.json({ valid: false, reason: 'range_not_found', message: `Range "${rangeName}" not found in GIS data` });
+      return;
+    }
+    const insideBeat = rangeBeats.find((f: any) => pointInGeometry(lng, lat, f.geometry));
+    res.json({
+      valid: !!insideBeat,
+      reason: insideBeat ? 'inside_range' : 'outside_range',
+      beat: insideBeat?.properties?.Beat ?? null,
+      range: rangeName,
+    });
+    return;
+  }
+
+  // No assignment — allow (admin / unassigned)
+  res.json({ valid: true, reason: 'no_assignment', message: 'No beat or range assignment to validate against' });
 });

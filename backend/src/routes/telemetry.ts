@@ -153,8 +153,8 @@ const modelMap: DataMap = {
 for (const key of Object.keys(schemas) as EndpointKey[]) {
   const schema = schemas[key];
   telemetryRouter.post(`/${key}`, validateBody(schema.max(MAX_BATCH)), async (req, res) => {
-    const created = await ingestEntity(key, req.body, req.user!);
-    res.status(201).json({ inserted: created.length, records: created });
+    const inserted = await ingestEntity(key, req.body, req.user!);
+    res.status(201).json({ inserted });
   });
 }
 
