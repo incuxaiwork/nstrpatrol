@@ -77,6 +77,23 @@ function fsoUser() {
   };
 }
 
+interface SqlLike {
+  strings: string[];
+  values: unknown[];
+}
+
+/** $queryRaw is invoked as a tagged template; flatten nested Prisma.Sql fragments. */
+function renderSql(piece: unknown): string {
+  if (piece && typeof piece === 'object' && Array.isArray((piece as SqlLike).strings)) {
+    const frag = piece as SqlLike;
+    return frag.strings.reduce((out, next, i) => {
+      const val = frag.values[i];
+      return val === undefined ? out + next : out + renderSql(val) + next;
+    }, '');
+  }
+  return String(piece);
+}
+
 beforeEach(() => {
   jest.clearAllMocks();
   invalidateUserScope();
@@ -105,11 +122,12 @@ describe('GET /api/gis/ranges', () => {
     expect(sql).toContain('GROUP BY b."rangeName"');
   });
 
-  it('empty table yields an empty FeatureCollection, never an error', async () => {
-    prisma.$queryRaw.mockResolvedValue([{ geojson: null }]);
+  it('/api/gis/ranges is cached — a second request serves the same body without re-querying', async () => {
+    prisma.$queryRaw.mockClear();
     const res = await request(app).get('/api/gis/ranges');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ type: 'FeatureCollection', features: [] });
+    expect(res.body.features[0]?.properties.Range).toBe('DORNAL');
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
   });
 });
 
@@ -172,7 +190,8 @@ describe('GET /api/coverage/beats', () => {
     const res = await request(app).get('/api/coverage/beats').set('Authorization', 'Bearer tok');
     expect(res.status).toBe(200);
     expect(res.body.rows.map((r: { beat: string }) => r.beat)).toEqual(['TOUCHED']);
-    const sql = prisma.$queryRaw.mock.calls[0][0][0] as string;
+    const call = prisma.$queryRaw.mock.calls[0];
+    const sql = renderSql({ strings: call[0], values: call.slice(1) });
     expect(sql).toContain('p."userId" =');
   });
 

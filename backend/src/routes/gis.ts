@@ -1,4 +1,6 @@
 import { Router } from 'express';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { prisma } from '../db/prisma';
 import { param } from '../lib/http';
 
@@ -29,42 +31,263 @@ async function cachedGeo(key: string, load: () => Promise<string>): Promise<stri
   return body;
 }
 
-/**
- * GET /api/gis/beats
- * Forest beats as a GeoJSON FeatureCollection, properties shaped like the
- * original mark_beat.json so existing mobile parsing keeps working.
- */
+/** True when a serialized FeatureCollection string contains no features. */
+function isEmptyFeatureCollection(geojson: string): boolean {
+  try {
+    const fc = JSON.parse(geojson) as { features?: unknown[] };
+    return !Array.isArray(fc.features) || fc.features.length === 0;
+  } catch {
+    return true;
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Non-PostGIS fallback.
+ *
+ * When the extended `postgis` database driver is unavailable (its C shared
+ * library was removed from the host, see the recovery audit), the `geom`
+ * columns and `ST_*` functions do not exist, so the SQL serializers above
+ * yield an empty FeatureCollection. To keep the GIS map functional we serve
+ * the ORIGINAL bundled reference geometry (mobile/app/src/main/assets/
+ * mark_beat.json + mark_comp.json) instead of fabricating anything.
+ *
+ * This is READ-ONLY: it never writes to the database. It reconstructs, in
+ * memory, the exact FeatureCollection the PostGIS serializer produced:
+ *   - feature `id` is the BEAT/COMPARTMENT PRIMARY KEY (so the frontend's
+ *     OBJECTID_1 ≡ Beat.id / Compartment.id identity contract is kept and
+ *     FKs remain valid), and
+ *   - the polygon coordinates are the original source geometry from the
+ *     bundled assets (the same data that was imported into PostGIS).
+ *
+ * It only runs when the PostGIS path returns no features, so once a PostGIS
+ * database is restored the richer DB-backed serialization is used again
+ * automatically with no code change.
+ * ------------------------------------------------------------------ */
+
+interface GeoFeature { type: 'Feature'; id?: unknown; properties: Record<string, unknown>; geometry: unknown; }
+interface GeoFeatureCollection { type: 'FeatureCollection'; features: GeoFeature[]; }
+
+/* Paths are probed at request time so the same module works when running from
+ * `src` (tsx) or compiled `dist` (node dist/index.js). */
+const ASSET_DIR_CANDIDATES = [
+  resolve(__dirname, '../../../mobile/app/src/main/assets'),
+  resolve(__dirname, '../../mobile/app/src/main/assets'),
+];
+
+/* Explicit disambiguation for beat names that map to > 1 DB row (mirrors the
+ * restore script). Key = normalized GeoJSON beat name; value = canonical DB
+ * Beat id (the record owning compartments/users). */
+const BEAT_OVERRIDE: Record<string, string> = {
+  NAGULAVARAM: 'ee7364e9-7f52-4ec5-bef2-8a9f0e704509',
+  PBOMMALAPURAM: 'f5a70975-3595-49ef-9192-beedb020bd2f',
+  PEDDACHAMA: 'c2f23388-b061-414b-b8b0-2b17af945ba0',
+};
+
+const normName = (s: unknown): string => String(s ?? '').toUpperCase().replace(/\./g, '').replace(/\s+/g, '');
+
+let assetDir: string | null = null;
+async function findAssetDir(): Promise<string> {
+  if (assetDir) return assetDir;
+  for (const d of ASSET_DIR_CANDIDATES) {
+    try {
+      const beats = resolve(d, 'mark_beat.json');
+      await readFile(beats);
+      assetDir = d;
+      return d;
+    } catch {
+      /* try next */
+    }
+  }
+  throw new Error('mark_beat.json / mark_comp.json not found in expected asset directories');
+}
+
+async function loadAssetGeoJson(fileName: string): Promise<GeoFeatureCollection> {
+  const dir = await findAssetDir();
+  const raw = await readFile(resolve(dir, fileName), 'utf-8');
+  return JSON.parse(raw) as GeoFeatureCollection;
+}
+
+interface DbBeatRow {
+  id: string;
+  name: string;
+  rangeName: string | null;
+  section: string | null;
+  division: string | null;
+  circle: string | null;
+  district: string | null;
+  areaHa: number | null;
+  compCount: number;
+  userCount: number;
+}
+
+type BeatResolution = { id: string; how: 'unique' | 'override' | 'heuristic' } | null;
+
+function makeBeatResolver(byNorm: Map<string, DbBeatRow[]>) {
+  return (beatName: unknown): BeatResolution => {
+    const key = normName(beatName);
+    if (!key) return null;
+    if (key in BEAT_OVERRIDE) {
+      const id = BEAT_OVERRIDE[key];
+      if (byNorm.get(key)?.some((b) => b.id === id)) return { id, how: 'override' };
+      return null;
+    }
+    const candidates = byNorm.get(key) ?? [];
+    if (candidates.length === 1) return { id: candidates[0].id, how: 'unique' };
+    if (candidates.length > 1) {
+      const sorted = [...candidates].sort((a, b) => b.compCount - a.compCount || b.userCount - a.userCount);
+      if (sorted[0].compCount > sorted[1].compCount) return { id: sorted[0].id, how: 'heuristic' };
+      return null; // tied — never guess
+    }
+    return null;
+  };
+}
+
+/** Build the beats FeatureCollection from the bundled asset geometry joined to
+ *  DB Beat primary keys, preserving the original API property shape. */
+async function fallbackBeats(): Promise<string> {
+  const [beatsFC, dbBeats] = await Promise.all([
+    loadAssetGeoJson('mark_beat.json'),
+    prisma.$queryRaw<DbBeatRow[]>`
+      SELECT b.id, b.name, b."rangeName"::text, b."section"::text, b."division"::text,
+             b."circle"::text, b."district"::text, b."areaHa",
+        (SELECT count(*)::int FROM "Compartment" cc WHERE cc."beatId" = b.id) AS "compCount",
+        (SELECT count(*)::int FROM "User" u WHERE u."beatId" = b.id) AS "userCount"
+      FROM "Beat" b`,
+  ]);
+
+  const byNorm = new Map<string, DbBeatRow[]>();
+  for (const b of dbBeats) {
+    const k = normName(b.name);
+    if (!byNorm.has(k)) byNorm.set(k, []);
+    byNorm.get(k)!.push(b);
+  }
+  const resolveBeat = makeBeatResolver(byNorm);
+
+  const features: GeoFeature[] = [];
+  const assigned = new Set<string>();
+  for (const f of beatsFC.features) {
+    if (!f.geometry || !f.properties['Beat']) continue;
+    const resolved = resolveBeat(f.properties['Beat']);
+    if (!resolved || assigned.has(resolved.id)) continue;
+    assigned.add(resolved.id);
+    const b = dbBeats.find((x) => x.id === resolved.id)!;
+    features.push({
+      type: 'Feature',
+      id: b.id,
+      geometry: f.geometry,
+      properties: {
+        OBJECTID_1: b.id,
+        Beat: b.name,
+        Section: b.section ?? '',
+        Range: b.rangeName ?? '',
+        Division: b.division ?? '',
+        Circle: b.circle ?? '',
+        District: b.district ?? '',
+        Area_ha: b.areaHa ?? 0,
+      },
+    });
+  }
+
+  return JSON.stringify({ type: 'FeatureCollection', features });
+}
+
+interface DbCompRow { id: string; compNo: string; beatId: string | null; areaHa: number | null; }
+
+/** Build the compartments FeatureCollection from the bundled asset geometry
+ *  joined to DB Compartment primary keys, preserving the API property shape. */
+async function fallbackCompartments(): Promise<string> {
+  const [compsFC, dbBeats, dbComps] = await Promise.all([
+    loadAssetGeoJson('mark_comp.json'),
+    prisma.$queryRaw<DbBeatRow[]>`
+      SELECT b.id, b.name, b."rangeName"::text, b."section"::text, b."division"::text,
+             b."circle"::text, b."district"::text, b."areaHa",
+        (SELECT count(*)::int FROM "Compartment" cc WHERE cc."beatId" = b.id) AS "compCount",
+        (SELECT count(*)::int FROM "User" u WHERE u."beatId" = b.id) AS "userCount"
+      FROM "Beat" b`,
+    prisma.$queryRaw<DbCompRow[]>`SELECT id, "compNo", "beatId", "areaHa" FROM "Compartment"`,
+  ]);
+
+  const byNorm = new Map<string, DbBeatRow[]>();
+  for (const b of dbBeats) {
+    const k = normName(b.name);
+    if (!byNorm.has(k)) byNorm.set(k, []);
+    byNorm.get(k)!.push(b);
+  }
+  const resolveBeat = makeBeatResolver(byNorm);
+  const beatNameById = new Map<string, string>(dbBeats.map((b) => [b.id, b.name]));
+
+  const byKey = new Map<string, string[]>();
+  for (const cc of dbComps) {
+    const key = `${cc.compNo}|${cc.beatId ?? 'NULL'}`;
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key)!.push(cc.id);
+  }
+
+  const features: GeoFeature[] = [];
+  const used = new Set<string>();
+  for (const f of compsFC.features) {
+    if (!f.geometry || f.properties['COMP_NO'] == null) continue;
+    const resolved = resolveBeat(f.properties['BEAT']);
+    if (!resolved) continue;
+    const key = `${String(f.properties['COMP_NO'])}|${resolved.id}`;
+    const candidates = (byKey.get(key) ?? []).filter((id) => !used.has(id));
+    if (candidates.length === 0) continue;
+    const targetId = candidates[0];
+    used.add(targetId);
+    const comp = dbComps.find((x) => x.id === targetId)!;
+    features.push({
+      type: 'Feature',
+      id: comp.id,
+      geometry: f.geometry,
+      properties: {
+        OBJECTID_1: comp.id,
+        COMP_NO: comp.compNo,
+        BEAT: comp.beatId ? (beatNameById.get(comp.beatId) ?? '') : '',
+        AREA_HA: comp.areaHa ?? 0,
+      },
+    });
+  }
+
+  return JSON.stringify({ type: 'FeatureCollection', features });
+}
 gisRouter.get('/beats', async (_req, res) => {
   const body = await cachedGeo('beats', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', id,
-          'geometry', ST_AsGeoJSON(geom)::json,
-          'properties', json_build_object(
-            'OBJECTID_1', id,
-            'Beat', name,
-            'Section', COALESCE(section, ''),
-            'Range', COALESCE("rangeName", ''),
-            'Division', COALESCE(division, ''),
-            'Circle', COALESCE(circle, ''),
-            'District', COALESCE(district, ''),
-            'Area_ha', COALESCE("areaHa", 0)
-          )
-        ) AS feature
-        FROM "Beat"
-        WHERE geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    let geojson: string | null = null;
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '{"type":"FeatureCollection","features":[]}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', id,
+            'geometry', ST_AsGeoJSON(geom)::json,
+            'properties', json_build_object(
+              'OBJECTID_1', id,
+              'Beat', name,
+              'Section', COALESCE(section, ''),
+              'Range', COALESCE("rangeName", ''),
+              'Division', COALESCE(division, ''),
+              'Circle', COALESCE(circle, ''),
+              'District', COALESCE(district, ''),
+              'Area_ha', COALESCE("areaHa", 0)
+            )
+          ) AS feature
+          FROM "Beat"
+          WHERE geom IS NOT NULL
+        ) t
+      `;
+      geojson = rows[0]?.geojson ?? null;
+    } catch {
+      geojson = null; // PostGIS unavailable — fall back to bundled assets below.
+    }
+    if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
+    return fallbackBeats();
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -77,32 +300,39 @@ gisRouter.get('/beats', async (_req, res) => {
  */
 gisRouter.get('/compartments', async (_req, res) => {
   const body = await cachedGeo('compartments', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', c.id,
-          'geometry', ST_AsGeoJSON(c.geom)::json,
-          'properties', json_build_object(
-            'OBJECTID_1', c.id,
-            'COMP_NO', c."compNo",
-            'BEAT', COALESCE(b.name, ''),
-            'AREA_HA', COALESCE(c."areaHa", 0)
-          )
-        ) AS feature
-        FROM "Compartment" c
-        LEFT JOIN "Beat" b ON b.id = c."beatId"
-        WHERE c.geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    let geojson: string | null = null;
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '{"type":"FeatureCollection","features":[]}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', c.id,
+            'geometry', ST_AsGeoJSON(c.geom)::json,
+            'properties', json_build_object(
+              'OBJECTID_1', c.id,
+              'COMP_NO', c."compNo",
+              'BEAT', COALESCE(b.name, ''),
+              'AREA_HA', COALESCE(c."areaHa", 0)
+            )
+          ) AS feature
+          FROM "Compartment" c
+          LEFT JOIN "Beat" b ON b.id = c."beatId"
+          WHERE c.geom IS NOT NULL
+        ) t
+      `;
+      geojson = rows[0]?.geojson ?? null;
+    } catch {
+      geojson = null; // PostGIS unavailable — fall back to bundled assets below.
+    }
+    if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
+    return fallbackCompartments();
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=86400');

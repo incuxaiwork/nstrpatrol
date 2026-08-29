@@ -23,7 +23,8 @@
     "prisma:studio": "prisma studio",
     "seed:org": "tsx scripts/seed-org.ts",
     "import:gis": "tsx scripts/import-gis.ts",
-    "import:personnel": "tsx scripts/import-personnel.ts"
+    "import:personnel": "tsx scripts/import-personnel.ts",
+    "restore:gis:geometry": "tsx scripts/restore-gis-geometry.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1112.0",
