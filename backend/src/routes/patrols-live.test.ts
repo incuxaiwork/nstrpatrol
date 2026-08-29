@@ -16,10 +16,10 @@ jest.mock('../db/prisma', () => ({
     },
     patrolPoint: {
       findMany: jest.fn(),
-      createManyAndReturn: jest.fn(),
+      createMany: jest.fn(),
       groupBy: jest.fn(),
     },
-    stepReading: { createManyAndReturn: jest.fn() },
+    stepReading: { createMany: jest.fn() },
     syncLog: { create: jest.fn() },
     user: { findUnique: jest.fn(), findMany: jest.fn() },
     forest: { findFirst: jest.fn(), create: jest.fn() },
@@ -37,8 +37,8 @@ import { invalidateUserScope } from '../middleware/auth';
 
 type PrismaMock = {
   patrol: { findMany: jest.Mock; upsert: jest.Mock };
-  patrolPoint: { findMany: jest.Mock; createManyAndReturn: jest.Mock; groupBy: jest.Mock };
-  stepReading: { createManyAndReturn: jest.Mock };
+  patrolPoint: { findMany: jest.Mock; createMany: jest.Mock; groupBy: jest.Mock };
+  stepReading: { createMany: jest.Mock };
   syncLog: { create: jest.Mock };
   user: { findUnique: jest.Mock; findMany: jest.Mock };
   forest: { findFirst: jest.Mock; create: jest.Mock };
@@ -276,13 +276,13 @@ describe('GPS point ingest dedupe (POST /api/sync/upload)', () => {
 
   test('first upload inserts every record', async () => {
     db.patrolPoint.findMany.mockResolvedValue([]);
-    db.patrolPoint.createManyAndReturn.mockResolvedValue([{ id: 'cp1' }, { id: 'cp2' }]);
+    db.patrolPoint.createMany.mockResolvedValue({ count: 2 });
 
     const res = await uploadBatch([devicePoint(12.81, 79.7, 1000), devicePoint(12.815, 79.704, 2000)]);
 
     expect(res.status).toBe(201);
     expect(res.body.results[0]).toEqual({ entity: 'points', inserted: 2 });
-    expect(db.patrolPoint.createManyAndReturn).toHaveBeenCalledTimes(1);
+    expect(db.patrolPoint.createMany).toHaveBeenCalledTimes(1);
   });
 
   test('re-uploading the same batch after an interrupted sync inserts nothing', async () => {
@@ -292,18 +292,18 @@ describe('GPS point ingest dedupe (POST /api/sync/upload)', () => {
       { patrolId: 'pat1', timestamp: new Date(1000) },
       { patrolId: 'pat1', timestamp: new Date(2000) },
     ]);
-    db.patrolPoint.createManyAndReturn.mockResolvedValue([]);
+    db.patrolPoint.createMany.mockResolvedValue({ count: 0 });
 
     const res = await uploadBatch([devicePoint(12.81, 79.7, 1000), devicePoint(12.815, 79.704, 2000)]);
 
     expect(res.status).toBe(201);
     expect(res.body.totalInserted).toBe(0);
-    expect(db.patrolPoint.createManyAndReturn).not.toHaveBeenCalled();
+    expect(db.patrolPoint.createMany).not.toHaveBeenCalled();
   });
 
   test('collapses duplicates inside a single batch', async () => {
     db.patrolPoint.findMany.mockResolvedValue([]);
-    db.patrolPoint.createManyAndReturn.mockResolvedValue([{ id: 'cp1' }]);
+    db.patrolPoint.createMany.mockResolvedValue({ count: 1 });
 
     const res = await uploadBatch([
       devicePoint(12.81, 79.7, 1000),
@@ -313,13 +313,13 @@ describe('GPS point ingest dedupe (POST /api/sync/upload)', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.results[0].inserted).toBe(1);
-    const data = db.patrolPoint.createManyAndReturn.mock.calls[0][0].data;
+    const data = db.patrolPoint.createMany.mock.calls[0][0].data;
     expect(data).toHaveLength(1);
   });
 
   test('partial overlap inserts only the genuinely new fixes', async () => {
     db.patrolPoint.findMany.mockResolvedValue([{ patrolId: 'pat1', timestamp: new Date(1000) }]);
-    db.patrolPoint.createManyAndReturn.mockResolvedValue([{ id: 'cp_new' }]);
+    db.patrolPoint.createMany.mockResolvedValue({ count: 1 });
 
     const res = await uploadBatch([
       devicePoint(12.81, 79.7, 1000),
@@ -328,12 +328,12 @@ describe('GPS point ingest dedupe (POST /api/sync/upload)', () => {
 
     expect(res.status).toBe(201);
     expect(res.body.results[0].inserted).toBe(1);
-    const data = db.patrolPoint.createManyAndReturn.mock.calls[0][0].data;
+    const data = db.patrolPoint.createMany.mock.calls[0][0].data;
     expect((data[0].timestamp as Date).getTime()).toBe(3000);
   });
 
   test('other telemetry entities keep plain insert semantics (no dedupe)', async () => {
-    db.stepReading.createManyAndReturn.mockResolvedValue([{ id: 'sr1' }, { id: 'sr2' }]);
+    db.stepReading.createMany.mockResolvedValue({ count: 2 });
 
     const res = await request(app)
       .post('/api/sync/upload')

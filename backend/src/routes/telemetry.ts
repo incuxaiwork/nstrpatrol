@@ -166,7 +166,7 @@ export async function ingestEntity(
   key: EndpointKey,
   input: unknown,
   user: { id: string; role: string; isAdmin: boolean },
-): Promise<{ id: string }[]> {
+): Promise<number> {
   const schema = schemas[key] as z.ZodArray<z.ZodType<Record<string, unknown>>>;
   const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string; timestamp: Date }[];
   await authorizePatrols(user, records);
@@ -195,11 +195,15 @@ export async function ingestEntity(
       return true;
     });
   }
-  if (data.length === 0) return [];
-  const model = (prisma as unknown as Record<string, { createManyAndReturn: (args: { data: unknown[] }) => Promise<{ id: string }[]> }>)[
+  if (data.length === 0) return 0;
+  // Prisma's createManyAndReturn generates SQL referencing a phantom 'new'
+  // column in PatrolPoint; use createMany (no RETURNING clause) and return the
+  // inserted count. The dedupe above still guarantees we never double-count.
+  const model = (prisma as unknown as Record<string, { createMany: (args: { data: unknown[] }) => Promise<{ count: number }> }>)[
     modelMap[key].model
   ];
-  return model.createManyAndReturn({ data });
+  const result = await model.createMany({ data });
+  return result.count;
 }
 
 telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {
