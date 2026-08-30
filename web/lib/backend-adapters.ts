@@ -69,44 +69,60 @@ export function unionExtent(...fcs: GeoJsonFeatureCollection[]): GeoExtent | nul
   };
 }
 
-/** Projector that maps lon/lat into the shared SVG viewBox (1000×700). */
+/**
+ * Projector that maps lon/lat into the shared SVG viewBox (see SVG_MAP_SPACE).
+ * Pure affine map with NO integer rounding: because the inverse (svgToLngLat
+ * in map-space.ts) uses the exact same constants, projecting a polygon to SVG
+ * and projecting its centroid back reproduces the source centroid exactly (the
+ * coordinate-invertibility contract; verified by scripts/verify-gis-projection.mjs).
+ */
 function makeProjector(extent: GeoExtent) {
   const spanLon = Math.max(extent.maxLon - extent.minLon, 1e-6);
   const spanLat = Math.max(extent.maxLat - extent.minLat, 1e-6);
   const availW = VIEW.w - VIEW.pad * 2;
   const availH = VIEW.h - VIEW.pad * 2;
   return (lon: number, lat: number) => ({
-    x: Math.round(VIEW.pad + ((lon - extent.minLon) / spanLon) * availW),
-    y: Math.round(VIEW.pad + ((extent.maxLat - lat) / spanLat) * availH),
+    x: VIEW.pad + ((lon - extent.minLon) / spanLon) * availW,
+    y: VIEW.pad + ((extent.maxLat - lat) / spanLat) * availH,
   });
 }
 
+/**
+ * The SINGLE shared projection box. The explicitly passed extent (services.ts
+ * computes one union extent for all layers so they align) is authoritative;
+ * without it each collection keeps its own union; without geometry the SVG
+ * viewBox constants (the real Markapur survey box) take over.
+ */
 function extentOf(fc: GeoJsonFeatureCollection, fallback: GeoExtent | null): GeoExtent {
-  return unionExtent(fc) ?? fallback ?? {
-    minLon: SVG_MAP_SPACE.minLon,
-    maxLon: SVG_MAP_SPACE.maxLon,
-    minLat: SVG_MAP_SPACE.minLat,
-    maxLat: SVG_MAP_SPACE.maxLat,
-  };
+  return fallback ?? unionExtent(fc) ?? SVG_MAP_SPACE;
 }
 
 export function beatsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BeatPolygon[] {
   const features = fc.features.filter(
-    (f) => f.geometry?.type === "Polygon" && Array.isArray((f.geometry.coordinates as unknown[])[0])
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
   return features.map((f, i) => {
-    const ring = ringOf(f);
     const coverage = Number(f.properties.coveragePct ?? f.properties.Coverage_pct);
+    // ALL outer rings (Polygon → 1 ring; MultiPolygon → one per part) so no
+    // fragment of a fragmented beat is ever dropped. `points` keeps the
+    // first (primary) ring for labels, containment and single-anchor logic.
+    const rings = ringsOf(f).filter((ring) => ring.length >= 3);
+    const svg = (ring: LngLatRing[]) =>
+      ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ");
+    const siblingParts = rings.length > 1 ? rings.map(svg) : undefined;
     return {
       id: String(f.id ?? `api-beat-${i}`),
       name: String(f.properties.Beat ?? f.properties.name ?? `Beat ${i + 1}`),
       division: String(f.properties.Division ?? ""),
       range: String(f.properties.Range ?? ""),
-      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+      points: rings[0] ? svg(rings[0]) : "",
+      parts: siblingParts,
       coveragePct: Number.isFinite(coverage) ? coverage : null,
       // Zero-patrol flag only when the backend supplies a coverage value.
       ...(Number.isFinite(coverage) ? { isZeroPatrol: coverage < 70 } : {}),
@@ -119,7 +135,14 @@ export interface CompartmentPolygon {
   compNo: string;
   beat: string;
   points: string;
+  /** Interior rings of the same polygon part (holes), SVG point-strings.
+   *  Present only when the source polygon actually carries holes; the
+   *  renderer emits them as [outer, ...holes] so enclosures read as
+   *  genuine cut-outs instead of solidly filled compartments. */
+  holes?: string[];
   areaHa: number;
+  /** Facing block this compartment belongs to (backend BLOCK property). */
+  block?: string;
   /** Region tags (client-side spatial resolution over real polygons). */
   rangeId?: string;
   beatId?: string;
@@ -163,6 +186,35 @@ function ringsOf(feature: { geometry: { type: string; coordinates: unknown } | n
       .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
       .map(([lon, lat]) => ({ lon, lat }));
   });
+}
+
+/** One polygon part plus its interior rings (holes), validity-filtered. */
+interface RingedPart {
+  outer: LngLatRing[];
+  holes: LngLatRing[][];
+}
+
+const asLngLatRing = (ring: unknown): LngLatRing[] =>
+  ((Array.isArray(ring) ? ring : []) as number[][])
+    .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+    .map(([lon, lat]) => ({ lon, lat }));
+
+/** Normalize a Polygon/MultiPolygon into parts, keeping each part's holes. */
+function ringedPartsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): RingedPart[] {
+  const g = feature.geometry;
+  if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
+  const polys: unknown[][] =
+    g.type === "Polygon" ? [g.coordinates as unknown[]] : (g.coordinates as unknown[][]);
+  return polys
+    .filter((poly) => Array.isArray(poly) && poly.length >= 1)
+    .map((poly) => ({
+      outer: asLngLatRing(poly[0]),
+      holes: (poly as unknown[])
+        .slice(1)
+        .map(asLngLatRing)
+        .filter((ring) => ring.length >= 3),
+    }))
+    .filter((part) => part.outer.length >= 3);
 }
 
 export function boundariesFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BoundaryPolygon[] {
@@ -211,24 +263,67 @@ export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: G
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
-  /* One polygon per outer ring — MultiPolygons expand into sibling parts
+  /* One polygon per ringed part — MultiPolygons expand into sibling parts
    * sharing compNo/beat/area (deterministic -pN id suffixes) so no feature
-   * ever silently disappears from the map. */
+   * ever silently disappears from the map. Interior rings (holes) stay
+   * attached to their own outer ring and are NOT flattened into siblings. */
   return features.flatMap((f, i) => {
     const compNo = String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`);
     const beat = String(f.properties.BEAT ?? "");
+    const block = String(f.properties.BLOCK ?? "") || undefined;
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
     const areaHa = Number.isFinite(area) ? area : 0;
     const baseId = String(f.id ?? `api-comp-${i}`);
-    return ringsOf(f)
-      .filter((ring) => ring.length > 0)
-      .map((ring, part) => ({
-        id: part === 0 ? baseId : `${baseId}-p${part + 1}`,
+    return ringedPartsOf(f)
+      .map((part, partIdx) => ({
+        id: partIdx === 0 ? baseId : `${baseId}-p${partIdx + 1}`,
         compNo,
         beat,
-        points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+        block,
+        points: part.outer.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+        ...(part.holes.length ? { holes: part.holes.map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")) } : {}),
         areaHa,
       }));
+  });
+}
+
+/** One Facing block — the dissolve group of its compartments' outer rings. */
+export interface BlockPolygon {
+  id: string;
+  /** Canonical block name (the backend BLOCK property). */
+  name: string;
+  compartmentCount: number;
+  areaHa: number;
+  /** One SVG ring per compartment outer ring in this block; the renderer
+   *  edge-dissolves them into the clean block outline (ST_Union-equivalent). */
+  parts: string[];
+}
+
+export function blocksFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BlockPolygon[] {
+  const features = fc.features.filter(
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
+  );
+  if (features.length === 0) return [];
+
+  const proj = makeProjector(extentOf(fc, extent ?? null));
+
+  return features.map((f, i) => {
+    const name = String(f.properties.BLOCK ?? f.properties.name ?? `Block ${i + 1}`);
+    const count = Number(f.properties.COMPARTMENT_COUNT);
+    const area = Number(f.properties.AREA_HA);
+    return {
+      id: String(f.id ?? `api-block-${i}`),
+      name,
+      compartmentCount: Number.isFinite(count) ? count : 0,
+      areaHa: Number.isFinite(area) ? area : 0,
+      // Every outer ring across the (Multi)Polygon — MultiPolygon-safe, one
+      // part per ring, so no part of a fragmented block ever disappears.
+      parts: ringsOf(f)
+        .filter((ring) => ring.length > 0)
+        .map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")),
+    };
   });
 }
 

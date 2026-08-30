@@ -344,12 +344,14 @@ model Compartment {
   beatId    String?
   compNo    String
   areaHa    Float?
+  block     String?
   geom      Unsupported("geometry")?
   createdAt DateTime                 @default(now())
   beat      Beat?                    @relation(fields: [beatId], references: [id])
 
   @@index([geom], type: Gist)
   @@index([beatId])
+  @@index([block])
 }
 
 model PatrolRoute {

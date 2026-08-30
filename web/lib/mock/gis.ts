@@ -11,7 +11,11 @@ export interface BeatPolygon {
   name: string;
   division: string;
   range: string;
-  points: string; // SVG polygon points
+  points: string; // SVG polygon points (largest / first ring)
+  /** Additional SVG rings for fragmented beats — MultiPolygon-safe (one
+   *  string per outer ring). `points` stays the primary ring for labels &
+   *  region tagging; renderers dissolve / union across parts. */
+  parts?: string[];
   coveragePct: number | null;
   isZeroPatrol?: boolean;
   /** Region tags (client-side spatial resolution over real polygons). */

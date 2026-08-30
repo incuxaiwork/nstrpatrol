@@ -27,6 +27,7 @@ import Link from "next/link";
 import {
   Map as MapLibreMap,
   LngLatBounds,
+  AJAXError,
   setWorkerUrl,
   type MapMouseEvent,
   type ExpressionSpecification,
@@ -42,18 +43,22 @@ if (typeof window !== "undefined") {
   setWorkerUrl(new URL("/maplibre-gl-worker.mjs", window.location.href).href);
 }
 import { Icon } from "@/components/icons";
+import { MapLayersPanel } from "@/components/map-layers-panel";
 import { cn } from "@/lib/utils";
 import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
 import { DEFAULT_LAYER_STATE, type BasemapKey, type ForestLayerState } from "@/lib/map-layers";
 import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
-import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 import type { TaggedGrid } from "@/lib/grid-regions";
 import { unitName } from "@/lib/mock/hierarchy";
 import { categoryMeta } from "@/lib/mock/observations";
 import type { Observation, Ranger } from "@/lib/types";
+import type { BlockPolygon, BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 import {
   analysisGridsToFeatures,
   beatsToFeatures,
+  blockLabelsToFeatures,
+  blocksToFeatures,
+  boundaryFromBeats,
   boundariesToFeatures,
   compartmentLabelsToFeatures,
   compartmentsToFeatures,
@@ -80,6 +85,19 @@ const STREET_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
 const ESRI_SAT_URL =
   "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
 const TERRAIN_TILE_URL = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
+
+/** Online rasters that back the street / satellite / terrain basemap radio —
+ *  endpoints the browser hits directly (the atlas is served via /api/tiles).
+ *  Esri's ArcGIS has been observed refusing these networks with HTTP 403 (bodies
+ *  carry no CORS header, so MapLibre surfaces them as "Failed to fetch (0)")
+ *  — see the AJAXError handling below; OSM/OpenTopoMap are listed so their
+ *  tile failures are also throttled instead of spamming the console. */
+const ESRI_TILE_HOSTS = [
+  "server.arcgisonline.com",
+  "services.arcgisonline.com",
+  "basemaps.arcgis.com",
+];
+const EXTERNAL_TILE_HOSTS = [...ESRI_TILE_HOSTS, "tile.openstreetmap.org", "tile.opentopomap.org"];
 const DIVISION_CENTER: [number, number] = [79.15, 15.92];
 
 /** One point of the live SOS alert feed rendered as its own map layer. */
@@ -103,6 +121,8 @@ export interface MapProps {
   liveBeats?: BeatPolygon[];
   compartments?: CompartmentPolygon[];
   boundary?: BoundaryPolygon[];
+  /** Facing blocks — compartments dissolved by canonical block name (BLOCK). */
+  blocks?: BlockPolygon[];
   /** Reference backend ForestGrid cells (survey grid, ~3.3 km). */
   grids?: GridPolygon[];
   /**
@@ -115,6 +135,10 @@ export interface MapProps {
   analysisGrids?: TaggedGrid[];
   /** Active analysis-grid cell size (drives label + tooltip). */
   gridSize?: GridSizeKey;
+  /** Analysis-grid size label for the fullscreen overlay panel ("1 km"). */
+  gridSizeLabel?: string;
+  /** Size change handler for the fullscreen overlay panel (regenerates the grid). */
+  onGridSizeChange?(size: GridSizeKey): void;
   /** Analysis-grid cells currently selected (deterministic cell ids). */
   selectedGridIds?: ReadonlySet<string>;
   /** A grid cell was clicked (toggle handled by the parent). */
@@ -228,10 +252,17 @@ const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]
   // were orphaned outside this map and stayed visible with every box off
   // (the reported stray violet lines).
   beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-auth-fill", "gl-auth-line"],
-  ranges: ["gl-ranges-outline", "gl-ranges-label"],
+ranges: ["gl-ranges-outline", "gl-ranges-label"],
   compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
-  analysisGrid: ["gl-agrid-fill", "gl-agrid-line", "gl-agrid-label", "gl-agrid-sel-fill", "gl-agrid-sel-line"],
+  blocks: ["gl-blocks-fill", "gl-blocks-outline", "gl-blocks-label"],
   grids: ["gl-grids-fill", "gl-grids-line"],
+  analysisGrid: [
+    "gl-agrid-fill",
+    "gl-agrid-line",
+    "gl-agrid-label",
+    "gl-agrid-sel-fill",
+    "gl-agrid-sel-line",
+  ],
   routes: [
     "gl-routes",
     "gl-live-path-case",
@@ -332,6 +363,8 @@ function buildLayers(m: MapLibreMap) {
     "replay-head",
     "replay-points",
     "compartments",
+    "blocks",
+    "block-labels",
     "ranges",
     "range-labels",
     "compartment-labels",
@@ -424,38 +457,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 3. Reserve boundary — the STRONGEST administrative line: solid deep
-  //    forest green, heaviest width. Outline only — never a fill.
-  m.addLayer({
-    id: "gl-boundary-line",
-    type: "line",
-    source: "boundary",
-    paint: {
-      "line-color": "#1B4332",
-      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3.2, 14, 5.5],
-      "line-opacity": 0.95,
-    },
-  });
-  m.addLayer({
-    id: "gl-boundary-label",
-    type: "symbol",
-    source: "boundary",
-    minzoom: 7,
-    layout: {
-      "text-field": ["get", "name"],
-      "text-size": 13,
-      "text-transform": "uppercase",
-      "text-letter-spacing": 0.08,
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": "#143d2b",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 2,
-    },
-  });
-
-  // 4. Per-beat coverage tint (green ramp where a beat carries a coverage
+  // 3. Per-beat coverage tint (green ramp where a beat carries a coverage
   //    figure). It is a COVERAGE visualization and follows the Coverage
   //    checkbox — Beat ON alone shows boundaries only.
   m.addLayer({
@@ -477,7 +479,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 5. Danger heat blocks.
+  // 4. Danger heat blocks.
   m.addLayer({
     id: "gl-heat",
     type: "fill",
@@ -485,7 +487,85 @@ function buildLayers(m: MapLibreMap) {
     paint: { "fill-color": "#B3261E", "fill-opacity": ["*", ["get", "intensity"], 0.32] },
   });
 
-  // 6. Beat polygons — boundary-focused: the fill exists ONLY for click
+  // 5. Compartments — the LIGHTEST administrative line: thin red dashed,
+  //    low opacity, zoom-gated so dense internal boundaries only appear when
+  //    the admin has zoomed in. Fill is hit-test only. Drawn BELOW the beats
+  //    stack (hierarchy bottom→top: compartments → blocks → beats → ranges →
+  //    boundary) so beats always render on top of compartment lines.
+  m.addLayer({
+    id: "gl-compartments-fill",
+    type: "fill",
+    source: "compartments",
+    paint: { "fill-color": "#E65100", "fill-opacity": 0.02 },
+  });
+  m.addLayer({
+    id: "gl-compartments-line",
+    type: "line",
+    source: "compartments",
+    minzoom: 9.5,
+    paint: {
+      "line-color": "#B3261E",
+      "line-width": 1,
+      "line-dasharray": [4, 3],
+      "line-opacity": 0.7,
+    },
+  });
+  m.addLayer({
+    id: "gl-compartments-label",
+    type: "symbol",
+    source: "compartment-labels",
+    minzoom: 11,
+    layout: {
+      "text-field": ["get", "compNo"],
+      "text-size": 10,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": "#6A3AB2",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 1.5,
+    },
+  });
+
+  // 6. Blocks — the Facing dissolve: each compartment's canonical block name
+  //    merges its outline into one medium purple boundary (ST_Union-equivalent,
+  //    edge-dissolved in map-space so interior compartment lines vanish).
+  //    Between compartments (below) and beats (above): blocks are the coarser
+  //    operational unit patrols actually refer to.
+  m.addLayer({
+    id: "gl-blocks-fill",
+    type: "fill",
+    source: "blocks",
+    paint: { "fill-color": "#5B2C6F", "fill-opacity": 0.07 },
+  });
+  m.addLayer({
+    id: "gl-blocks-outline",
+    type: "line",
+    source: "blocks",
+    paint: {
+      "line-color": "#5B2C6F",
+      "line-width": 2,
+      "line-opacity": 0.85,
+    },
+  });
+  m.addLayer({
+    id: "gl-blocks-label",
+    type: "symbol",
+    source: "block-labels",
+    minzoom: 7.5,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-size": 12,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": "#5B2C6F",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 2,
+    },
+  });
+
+  // 7. Beat polygons — boundary-focused: the fill exists ONLY for click
   //    hit-testing (fill-opacity ≈ 0), outlines are a distinct teal so beats
   //    never read as a green bucket and never blend with the deep-green
   //    reserve boundary. Zero-patrol beats keep their red dashed outline;
@@ -523,7 +603,7 @@ function buildLayers(m: MapLibreMap) {
         "case",
         ["boolean", ["get", "isZero"], false],
         "#B3261E",
-        ["case", ["boolean", ["get", "selected"], false], "#0B4F49", "#0F766E"],
+        ["case", ["boolean", ["get", "selected"], false], "#B4450C", "#E65100"],
       ],
       "line-width": ["case", ["boolean", ["get", "selected"], false], 3, 2.2],
       "line-opacity": 0.9,
@@ -552,58 +632,24 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#0C5A52"],
+      "text-color": ["case", ["boolean", ["get", "isZero"], false], "#B3261E", "#C2410C"],
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
   });
 
-  // 7. Compartments — the LIGHTEST administrative line: thin amber, low
-  //    opacity, zoom-gated so dense internal boundaries only appear when the
-  //    admin has zoomed in. Fill is hit-test only.
-  m.addLayer({
-    id: "gl-compartments-fill",
-    type: "fill",
-    source: "compartments",
-    paint: { "fill-color": "#E65100", "fill-opacity": 0.02 },
-  });
-  m.addLayer({
-    id: "gl-compartments-line",
-    type: "line",
-    source: "compartments",
-    minzoom: 9.5,
-    paint: { "line-color": "#E65100", "line-width": 1, "line-opacity": 0.6 },
-  });
-  m.addLayer({
-    id: "gl-compartments-label",
-    type: "symbol",
-    source: "compartment-labels",
-    minzoom: 11,
-    layout: {
-      "text-field": ["get", "compNo"],
-      "text-size": 10,
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": "#B34700",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 1.5,
-    },
-  });
-
-  // 8. Ranges (derived hulls of each range's beats) — one consistent warm
-  //    secondary color (burnt sienna), dashed, between the heavy forest
-  //    boundary and the thin teal beats. A rainbow of per-range colors read
-  //    as random violet/orange noise; hierarchy needs ONE range color.
+  // 8. Ranges (derived hulls of each range's beats) — one consistent strong
+  //    blue. Between the medium purple blocks and the heavy forest boundary.
+  //    A rainbow of per-range colors read as random violet/orange noise;
+  //    hierarchy needs ONE range color.
   m.addLayer({
     id: "gl-ranges-outline",
     type: "line",
     source: "ranges",
     paint: {
-      "line-color": "#92500E",
-      "line-width": 2.5,
-      "line-dasharray": [9, 5],
-      "line-opacity": 0.9,
+      "line-color": "#0E4C92",
+      "line-width": 3,
+      "line-opacity": 0.95,
     },
   });
   m.addLayer({
@@ -617,13 +663,46 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#92500E",
+      "text-color": "#0E4C92",
       "text-halo-color": "#ffffff",
       "text-halo-width": 2,
     },
   });
 
-  // 8b. Analysis grid — frontend-generated metric cells (configurable size).
+  // 9. Reserve boundary — the STRONGEST administrative line: solid deep
+  //    forest green, heaviest width. Painted AFTER the unit layers (blocks,
+  //    ranges, …) so the forest outline always reads on top. Outline only —
+  //    never a fill.
+  m.addLayer({
+    id: "gl-boundary-line",
+    type: "line",
+    source: "boundary",
+    paint: {
+      "line-color": "#1B4332",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3.2, 14, 5.5],
+      "line-opacity": 0.95,
+    },
+  });
+  m.addLayer({
+    id: "gl-boundary-label",
+    type: "symbol",
+    source: "boundary",
+    minzoom: 7,
+    layout: {
+      "text-field": ["get", "name"],
+      "text-size": 13,
+      "text-transform": "uppercase",
+      "text-letter-spacing": 0.08,
+      "text-allow-overlap": false,
+    },
+    paint: {
+      "text-color": "#143d2b",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 2,
+    },
+  });
+
+  // 9b. Analysis grid — frontend-generated metric cells (configurable size).
   //     Placed beneath patrol routes / markers so operational data always
   //     stays on top. Selection is a data-driven highlight on the same cells.
   m.addLayer({
@@ -663,7 +742,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 9. Patrol routes + playback track. The replay visual is the Android
+  // 10. Patrol routes + playback track. The replay visual is the Android
   //    PatrolReportScreen language: white casing under a bold blue line
   //    (#2E7BF6 w 5 @ 0.95, round caps), every recorded GPS fix as a small
   //    blue dot, and the playhead as the app's "current position" marker
@@ -722,7 +801,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 9b. LIVE patrol operations (GET /api/patrols/live). Painted AFTER the
+  // 10b. LIVE patrol operations (GET /api/patrols/live). Painted AFTER the
   //     historical routes/replay and BEFORE the ground markers/SOS layers,
   //     so the active-patrol window reads on top of recorded traces while an
   //     SOS alert still wins the stack. Amber = live operations color; gray
@@ -783,7 +862,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "text-color": "#5B3A00", "text-halo-color": "#ffffff", "text-halo-width": 2 },
   });
 
-  // 10. Ground markers — rangers, sightings/incidents, SOS.
+  // 11. Ground markers — rangers, sightings/incidents, SOS.
   m.addLayer({
     id: "gl-markers-ranger",
     type: "circle",
@@ -837,7 +916,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "text-color": "#fff", "text-halo-color": "#B3261E", "text-halo-width": 2 },
   });
 
-  // 11. Analysis-grid selection highlight — above routes/markers so the
+  // 12. Analysis-grid selection highlight — above routes/markers so the
   //     choice reads clearly; painted only on selected cells.
   m.addLayer({
     id: "gl-agrid-sel-fill",
@@ -854,7 +933,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "line-color": "#0E4C92", "line-width": 2, "line-opacity": 0.9 },
   });
 
-  // 12. Live SOS alert feed (GET /api/alerts → SOS events). A halo ring +
+  // 13. Live SOS alert feed (GET /api/alerts → SOS events). A halo ring +
   //     bold dot + label; sits above everything so an emergency is always
   //     readable regardless of overlay density.
   m.addLayer({
@@ -1044,10 +1123,13 @@ export function MapWorkspace({
   liveBeats,
   compartments,
   boundary,
+  blocks,
   grids,
   coverageById,
   analysisGrids,
   gridSize = DEFAULT_GRID_SIZE,
+  gridSizeLabel: gridSizeLabelProp,
+  onGridSizeChange,
   selectedGridIds,
   onGridClick,
   onGridHover,
@@ -1070,6 +1152,13 @@ export function MapWorkspace({
   const didFit = useRef(false);
   const [ready, setReady] = useState(false);
 
+  /** True once Esri tile loads have failed (403 / "Failed to fetch (0)" on this
+   *  network) — drives the one-time "satellite unreachable" notice. */
+  const [satelliteDown, setSatelliteDown] = useState(false);
+  /** Failing external-tile URLs already surfaced, so the console stays quiet
+   *  after the first occurrence of each. */
+  const seenTileErrors = useRef(new Set<string>());
+
   // Layer state is controlled when a panel owns it (GIS workspace); the
   // internal fallback keeps lightweight embeds working without a panel
   // (fixed defaults — no toggles without an owning panel).
@@ -1077,6 +1166,7 @@ export function MapWorkspace({
   const layerState = layerStateProp ?? internalLayers;
   const [legendOpen, setLegendOpen] = useState(false);
   const [isFull, setIsFull] = useState(false);
+  const [layersOverlayOpen, setLayersOverlayOpen] = useState(false);
 
   const [replayOn, setReplayOn] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
@@ -1139,7 +1229,24 @@ export function MapWorkspace({
       attributionControl: { compact: true },
     });
     map.on("error", (e) => {
-      console.error("GL map error:", (e as { error?: unknown }).error ?? e);
+      const err = (e as { error?: unknown }).error;
+      if (err instanceof AJAXError) {
+        const url = /https?:\/\/[^\s)]+/.exec(err.message)?.[0] ?? err.message;
+        if (EXTERNAL_TILE_HOSTS.some((h) => url.includes(h))) {
+          // Provider-side refusal (Esri 403 without CORS, flaky tile hosts).
+          // Log once per failing URL, then go quiet.
+          if (!seenTileErrors.current.has(url)) {
+            seenTileErrors.current.add(url);
+            console.warn("Basemap tile unreachable:", url);
+          }
+          if (ESRI_TILE_HOSTS.some((h) => url.includes(h))) setSatelliteDown(true);
+          return;
+        }
+      }
+      console.error("GL map error:", err ?? e);
+    });
+    map.on("sourcedata", (e) => {
+      if (e.sourceId === "satellite" && e.isSourceLoaded) setSatelliteDown(false);
     });
     map.on("load", () => {
       buildLayers(map);
@@ -1185,7 +1292,16 @@ export function MapWorkspace({
   const rangeLabelsFc = useMemo(() => rangeLabelsToFeatures(ranges), [ranges]);
   const compartmentsFc = useMemo(() => compartmentsToFeatures(comps), [comps]);
   const compartmentLabelsFc = useMemo(() => compartmentLabelsToFeatures(comps), [comps]);
-  const boundaryFc = useMemo(() => boundariesToFeatures(boundary ?? []), [boundary]);
+  const blocksFc = useMemo(() => blocksToFeatures(blocks ?? []), [blocks]);
+  const blockLabelsFc = useMemo(() => blockLabelsToFeatures(blocks ?? []), [blocks]);
+  // Reserved forest boundary. When the backend /boundary endpoint is empty
+  // (PostGIS unavailable), derive the boundary from the REAL beat polygons
+  // (edge dissolve → ST_Union-equivalent outline) so the Forest Boundary
+  // layer still renders genuine geometry instead of nothing.
+  const derivedBoundary = useMemo(() => boundaryFromBeats(beats), [beats]);
+  const effectiveBoundary =
+    boundary && boundary.length > 0 ? boundary : derivedBoundary;
+  const boundaryFc = useMemo(() => boundariesToFeatures(effectiveBoundary), [effectiveBoundary]);
   const gridsFc = useMemo(() => gridsToFeatures(grids ?? [], coverageById), [grids, coverageById]);
   const analysisGridsFc = useMemo(
     () => analysisGridsToFeatures(analysisGrids ?? [], selectedGridIds),
@@ -1205,6 +1321,8 @@ export function MapWorkspace({
     setSourceData(m, "range-labels", rangeLabelsFc);
     setSourceData(m, "compartments", compartmentsFc);
     setSourceData(m, "compartment-labels", compartmentLabelsFc);
+    setSourceData(m, "blocks", blocksFc);
+    setSourceData(m, "block-labels", blockLabelsFc);
     setSourceData(m, "boundary", boundaryFc);
     setSourceData(m, "grids", gridsFc);
     setSourceData(m, "analysis-grid", analysisGridsFc);
@@ -1223,7 +1341,7 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
+  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, blocksFc, blockLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
 
   // Layer checkbox visibility (overlay groups).
   useEffect(() => {
@@ -1438,7 +1556,7 @@ export function MapWorkspace({
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
           <Icon name="layers" size={13} className="text-forest-700" />
-          Layer controls live in the MAP LAYERS panel
+          Layer controls in the MAP LAYERS panel (Layers button in fullscreen)
         </span>
       </div>
 
@@ -1447,6 +1565,15 @@ export function MapWorkspace({
 
         {/* Honest operational status strip (counts / empty states of enabled ops layers) */}
         {statusChip && <div className="absolute left-3 top-3 z-10 max-w-[min(70%,26rem)]">{statusChip}</div>}
+
+        {/* Satellite is Esri-only; when ArcGIS refuses this network, say so
+            instead of silently showing a bare backdrop. */}
+        {satelliteDown && layerState.basemap === "satellite" && (
+          <div className="absolute left-3 top-14 z-20 max-w-[min(80%,24rem)] rounded-md border border-amber-300 bg-amber-50/95 px-3 py-2 text-[11px] leading-relaxed text-amber-900 shadow-card">
+            Satellite imagery is unreachable from this network — Esri is refusing tile requests (403).
+            Switch to <b>Atlas</b>, <b>Street</b> or <b>Terrain</b> for a working basemap.
+          </div>
+        )}
 
         {/* Floating controls (app parity — top right) */}
         <div className="absolute right-3 top-3 z-10 flex flex-col gap-2">
@@ -1478,7 +1605,28 @@ export function MapWorkspace({
             icon={isFull ? "minimize" : "maximize"}
             onClick={toggleFullscreen}
           />
+          {isFull && (
+            <MapFloatButton
+              label={layersOverlayOpen ? "Hide layers panel" : "Show layers panel"}
+              icon={"layers"}
+              onClick={() => setLayersOverlayOpen((v) => !v)}
+            />
+          )}
         </div>
+
+        {/* Layer controls overlay — appears ONLY in fullscreen, where the
+            MAP LAYERS panel in the page sidebar is off-screen. */}
+        {isFull && layersOverlayOpen && (
+          <div className="absolute bottom-16 right-3 z-20 flex max-h-[calc(100%-9rem)] w-72 flex-col overflow-y-auto rounded-md border border-line bg-white/95 p-3 shadow-card">
+            <MapLayersPanel
+              layerState={layerState}
+              onChange={(next) => onLayerStateChange?.(next)}
+              gridSizeLabel={gridSizeLabelProp}
+              gridSize={gridSize}
+              onGridSizeChange={onGridSizeChange}
+            />
+          </div>
+        )}
 
         {/* Legend (collapsible; reflects only the layers currently on) */}
         <div className="absolute bottom-3 left-3 z-10 max-w-52 overflow-hidden rounded-md border border-line bg-white/95 shadow-card">
@@ -1610,9 +1758,10 @@ const BASEMAP_LABELS: Record<BasemapKey, string> = {
 function activeLegendRows(s: ForestLayerState): { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] {
   const rows: { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] = [];
   if (s.boundary) rows.push({ color: "#1B4332", label: "Forest boundary" });
-  if (s.ranges) rows.push({ color: "#92500E", label: "Range boundary", dashed: true });
-  if (s.beats) rows.push({ color: "#0F766E", label: "Beat boundary" });
-  if (s.compartments) rows.push({ color: "#E65100", label: "Compartment boundary" });
+  if (s.ranges) rows.push({ color: "#0E4C92", label: "Range boundary" });
+  if (s.beats) rows.push({ color: "#E65100", label: "Beat boundary" });
+  if (s.blocks) rows.push({ color: "#5B2C6F", label: "Block (Facing)" });
+  if (s.compartments) rows.push({ color: "#B3261E", label: "Compartment boundary", dashed: true });
   if (s.routes) {
     rows.push({ color: "#FF8F00", label: "Live patrol route (active patrol)" });
     rows.push({ color: "#2E7D32", label: "Patrol route" });
@@ -1646,7 +1795,7 @@ function MapFloatButton({
   onClick,
 }: {
   label: string;
-  icon: "zoomIn" | "zoomOut" | "compass" | "locate" | "maximize" | "minimize";
+  icon: "zoomIn" | "zoomOut" | "compass" | "locate" | "maximize" | "minimize" | "layers";
   onClick(): void;
 }) {
   return (

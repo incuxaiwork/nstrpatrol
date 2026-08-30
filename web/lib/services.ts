@@ -36,6 +36,7 @@ import {
 import {
   alertFromApi,
   beatsFromGeoJson,
+  blocksFromGeoJson,
   boundariesFromGeoJson,
   compartmentsFromGeoJson,
   gridsFromGeoJson,
@@ -44,7 +45,7 @@ import {
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
-  unionExtent,
+  type BlockPolygon,
   type BoundaryPolygon,
   type CompartmentPolygon,
   type GeoExtent,
@@ -72,7 +73,7 @@ import type {
   Weapon,
 } from "@/lib/types";
 import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
-import { lngLatToSvg } from "@/lib/map-space";
+import { lngLatToSvg, SVG_MAP_SPACE } from "@/lib/map-space";
 
 /* Mock paths resolve on the next microtask — no artificial latency. */
 const delay = (_ms = 0) => new Promise<void>((resolve) => setTimeout(resolve, _ms));
@@ -710,6 +711,7 @@ export const gis = {
         compartments: CompartmentPolygon[];
         boundary: BoundaryPolygon[];
         grids: GridPolygon[];
+        blocks: BlockPolygon[];
         extent: GeoExtent | null;
       };
       at: number;
@@ -719,22 +721,31 @@ export const gis = {
       compartments: CompartmentPolygon[];
       boundary: BoundaryPolygon[];
       grids: GridPolygon[];
+      blocks: BlockPolygon[];
       extent: GeoExtent | null;
     }> | null = null;
 
     async function fetchSpatial() {
-      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
+      const [beatFc, compFc, boundaryFc, gridFc, blockFc] = await Promise.all([
         api.gis.beats(),
         api.gis.compartments(),
         api.gis.boundary(),
         api.gis.grids(),
+        api.gis.blocks(),
       ]);
-      const extent: GeoExtent | null = unionExtent(beatFc, compFc);
+      // EVERY layer projects through the single shared render box
+      // (SVG_MAP_SPACE). The map-space inverse (svgToLngLat) uses the exact
+      // same constants, so the forward/inverse round trip is an affine
+      // identity — layers land on the true lon/lat, never displaced (a
+      // data-driven union extent here would NOT match the fixed inverse box
+      // and silently shift every polygon by up to ~1 km).
+      const extent: GeoExtent | null = SVG_MAP_SPACE;
       return {
         beats: beatsFromGeoJson(beatFc, extent),
         compartments: compartmentsFromGeoJson(compFc, extent),
         boundary: boundariesFromGeoJson(boundaryFc, extent),
         grids: gridsFromGeoJson(gridFc, extent),
+        blocks: blocksFromGeoJson(blockFc, extent),
         extent,
       };
     }
@@ -744,6 +755,7 @@ export const gis = {
       compartments: CompartmentPolygon[];
       boundary: BoundaryPolygon[];
       grids: GridPolygon[];
+      blocks: BlockPolygon[];
       extent: GeoExtent | null;
     }> => {
       if (cached && Date.now() - cached.at < TTL_MS) return cached.data;
@@ -770,7 +782,11 @@ export const gis = {
   boundary: async (): Promise<BoundaryPolygon[]> => (await gis.spatial()).boundary,
   /** Reference grid cells (GeoJSON → SVG polygons). */
   grids: async (): Promise<GridPolygon[]> => (await gis.spatial()).grids,
-  /** Real lon/lat extent the shared GIS projection is anchored to. */
+  /** Facing blocks — the dissolve of compartments by canonical block name
+   *  (GeoJSON → SVG polygons). */
+  blocks: async (): Promise<BlockPolygon[]> => (await gis.spatial()).blocks,
+  /** The single render box the shared GIS projection anchors to — identical
+   *  to the inverse map-space constants, so the SVG round trip is exact. */
   extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,
   /** Map asset catalog (MBTiles atlases etc.) from the backend. */
   assets: async (): Promise<ApiMapAsset[]> => api.gis.assets(),

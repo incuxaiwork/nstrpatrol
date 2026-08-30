@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { prisma } from '../src/db/prisma';
+import { canonicalBlock } from '../src/gis/block-registry';
 
 const MBTILES_KEY = 'NSTR.mbtiles';
 
@@ -117,10 +118,13 @@ async function importCompartments(compartments: GeoFeatureCollection): Promise<n
     const params: unknown[] = [];
     let idx = 1;
 
-    for (const feature of batch) {
+for (const feature of batch) {
       const p = feature.properties;
       const compNo = asText(p['COMP_NO'], '') ?? '';
       const areaHa = asFloat(p['AREA_HA']);
+      // Facing logic: the canonical block this compartment faces into
+      // (BLOCK attr from the mark request JSON → canonical name).
+      const blockName = canonicalBlock(p['BLOCK']);
       const beatName = asText(p['BEAT'], '')?.toUpperCase() ?? '';
 
       // Fuzzy match: exact → strip dots → strip spaces
@@ -129,13 +133,13 @@ async function importCompartments(compartments: GeoFeatureCollection): Promise<n
         beatId = beatMap.get(beatName) ?? beatMap.get(beatName.replace(/\./g, '')) ?? beatMap.get(beatName.replace(/\s+/g, '')) ?? null;
       }
 
-      values.push(`(gen_random_uuid()::text, $${idx}::text, $${idx + 1}::double precision, $${idx + 2}::text, ST_GeomFromGeoJSON($${idx + 3}::text), now())`);
-      params.push(compNo, areaHa, beatId, JSON.stringify(feature.geometry));
-      idx += 4;
+      values.push(`(gen_random_uuid()::text, $${idx}::text, $${idx + 1}::double precision, $${idx + 2}::text, $${idx + 3}::text, ST_GeomFromGeoJSON($${idx + 4}::text), now())`);
+      params.push(compNo, areaHa, blockName, beatId, JSON.stringify(feature.geometry));
+      idx += 5;
       count++;
     }
 
-    const sql = `INSERT INTO "Compartment" (id, "compNo", "areaHa", "beatId", geom, "createdAt") VALUES ${values.join(', ')}`;
+    const sql = `INSERT INTO "Compartment" (id, "compNo", "areaHa", "block", "beatId", geom, "createdAt") VALUES ${values.join(', ')}`;
     await prisma.$executeRawUnsafe(sql, ...params);
     process.stdout.write(`  Inserted ${Math.min(i + BATCH, valid.length)}/${valid.length}\r`);
   }

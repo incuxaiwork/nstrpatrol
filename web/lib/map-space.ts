@@ -7,32 +7,50 @@
  */
 
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
-import type { BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
+import type { BoundaryPolygon, BlockPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
 import type { TaggedGrid } from "@/lib/grid-regions";
 
-/** SVG viewBox shared by the mock renderers (see lib/backend-adapters.ts). */
+/**
+ * SVG viewBox SHARED BY BOTH PROJECTION DIRECTIONS — this is the invertibility
+ * contract that fixes the old coordinate bug:
+ *
+ *   - backend-adapters' makeProjector maps lon/lat → SVG with THIS box
+ *     (the shared union extent below), and
+ *   - the builders in this module map SVG -> lon/lat with the SAME box via
+ *     svgToLngLat / svgRingToLngLat.
+ *
+ * Because the forward map (adapters) and inverse map (svgToLngLat) use the
+ * exact same affine constants and no integer rounding, projecting a polygon
+ * to SVG and projecting its centroid back to geographic coordinates
+ * reproduces the original centroid EXACTLY (see scripts/verify-gis-projection.mjs
+ * for the numeric proof — the old hardcoded 78.6–79.7 / 15.4–16.4 box put the
+ * centroid 26.07 km off).
+ *
+ * The extents are the real union bounding box of the Markapur survey
+ * (backend/assets/mark_beat.json + mark_comp.json, computed read-only) so the
+ * box is a true superset of every contour and never clipped.
+ */
 export const SVG_MAP_SPACE = {
   w: 1000,
   h: 700,
   pad: 60,
-  /** Real-world bounding box the mock viewBox maps onto (Markapur Division). */
-  minLon: 78.6,
-  maxLon: 79.7,
-  minLat: 15.4,
-  maxLat: 16.4,
+  /** Real-world bounding box the viewBox maps onto (Markapur Division survey
+   *  union — beats ∪ compartments, no padding needed: pad is already spatial). */
+  minLon: 78.79562386115231,
+  maxLon: 79.5670037025589,
+  minLat: 15.591406785794561,
+  maxLat: 16.634652237510807,
 };
 
 const availW = SVG_MAP_SPACE.w - SVG_MAP_SPACE.pad * 2;
 const availH = SVG_MAP_SPACE.h - SVG_MAP_SPACE.pad * 2;
-
-const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
 
 /** SVG viewBox point → [lon, lat]. */
 export function svgToLngLat(x: number, y: number): [number, number] {
   const { pad, minLon, maxLon, minLat, maxLat } = SVG_MAP_SPACE;
   const lon = minLon + ((x - pad) / availW) * (maxLon - minLon);
   const lat = maxLat - ((y - pad) / availH) * (maxLat - minLat);
-  return [round6(lon), round6(lat)];
+  return [lon, lat];
 }
 
 /** [lon, lat] → SVG viewBox point (inverse of svgToLngLat). */
@@ -81,23 +99,34 @@ export function beatsToFeatures(
 ): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
-    features: beats.map((b) => ({
-      type: "Feature",
-      id: b.id,
-      properties: flatProps({
+    features: beats.map((b) => {
+      // All outer rings — MultiPolygon-safe: a fragmented beat renders as
+      // ONE feature (ONE label) whose geometry carries every disjoint part.
+      const rings = [b.points, ...(b.parts ?? [])]
+        .map(svgRingToLngLat)
+        .filter((r) => r.length >= 4);
+      const coordinates = rings.map((r) => [r]);
+      return {
+        type: "Feature",
         id: b.id,
-        name: b.name,
-        division: b.division,
-        range: b.range,
-        rangeId: b.rangeId ?? null,
-        beatId: b.beatId ?? null,
-        coveragePct: b.coveragePct,
-        isZero: b.isZeroPatrol === true,
-        isAuth: false,
-        selected: selectedId === b.id,
-      }),
-      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(b.points)] },
-    })),
+        properties: flatProps({
+          id: b.id,
+          name: b.name,
+          division: b.division,
+          range: b.range,
+          rangeId: b.rangeId ?? null,
+          beatId: b.beatId ?? null,
+          coveragePct: b.coveragePct,
+          isZero: b.isZeroPatrol === true,
+          isAuth: false,
+          selected: selectedId === b.id,
+        }),
+        geometry:
+          coordinates.length > 1
+            ? { type: "MultiPolygon", coordinates }
+            : { type: "Polygon", coordinates: coordinates[0] ?? [] },
+      };
+    }),
   };
 }
 
@@ -105,18 +134,25 @@ export function beatsToFeatures(
 export function boundariesToFeatures(boundaries: BoundaryPolygon[]): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
-    features: boundaries.flatMap((b) =>
-      b.parts.map((points, i) => ({
+    features: boundaries.map((b) => {
+      const coordinates = b.parts.map((part) => [svgRingToLngLat(part)]);
+      return {
         type: "Feature",
-        id: b.parts.length > 1 ? `${b.id}-${i}` : b.id,
+        id: b.id,
         properties: flatProps({
           id: b.id,
           name: b.name,
           forestCode: b.forestCode,
         }),
-        geometry: { type: "Polygon", coordinates: [svgRingToLngLat(points)] },
-      }))
-    ),
+        // ONE feature per boundary regardless of part count. The symbol layer
+        // therefore emits exactly ONE label per forest, anchored to the whole
+        // dissolved outline — never one label per fragment along the rim.
+        geometry:
+          coordinates.length > 1
+            ? { type: "MultiPolygon", coordinates }
+            : { type: "Polygon", coordinates: coordinates[0] ?? [] },
+      };
+    }),
   };
 }
 
@@ -402,10 +438,13 @@ export interface RangePolygon {
   id: string;
   name: string;
   division: string;
-  points: string; // SVG ring of the range's outer hull
+  /** Primary SVG ring of the range outline — the largest part. */
+  points: string;
   color: string;
   /** Hierarchy range id, when the beats carry region tags. */
   rangeId?: string;
+  /** Additional SVG rings when a range is spatially fragmented. */
+  parts?: string[];
 }
 
 export const RANGE_COLORS = [
@@ -429,34 +468,14 @@ function parsePoly(points: string): [number, number][] {
     });
 }
 
-/** Convex hull (Andrew's monotone chain) — used to outline a range's beats. */
-function convexHull(points: [number, number][]): [number, number][] {
-  if (points.length < 3) return points;
-  const pts = [...points].sort((a, b) => a[0] - b[0] || a[1] - b[1]);
-  const cross = (o: [number, number], a: [number, number], b: [number, number]) =>
-    (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
-  const lower: [number, number][] = [];
-  for (const p of pts) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
-    lower.push(p);
-  }
-  const upper: [number, number][] = [];
-  for (let i = pts.length - 1; i >= 0; i--) {
-    const p = pts[i];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
-    upper.push(p);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
-}
-
 export function rangeLabel(key: string): string {
   const m = key.match(/^r-(\w+)$/i);
   return m ? m[1].toUpperCase() : key;
 }
 
-/** Group beats by range and outline each range (union hull of its beats). */
+/** Group beats by range and edge-dissolve each range's real beat outlines.
+ *  Same union semantics as the forest boundary (dissolveRings) so range
+ *  boundaries follow the actual beat edges instead of a convex hull. */
 export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
   const byRange = new Map<string, BeatPolygon[]>();
   for (const b of beats) {
@@ -465,23 +484,216 @@ export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
     byRange.get(key)!.push(b);
   }
   const entries = [...byRange.entries()];
-  return entries.map(([key, group], i) => {
-    const pts: [number, number][] = [];
-    for (const b of group) pts.push(...parsePoly(b.points));
-    const hull = convexHull(pts);
-    return {
-      id: `range-${key}`,
-      name: rangeLabel(key),
-      division: group[0]?.division ?? "",
-      rangeId: group.find((b) => b.rangeId)?.rangeId,
-      points: hull.map((p) => `${p[0]},${p[1]}`).join(" "),
-      color: RANGE_COLORS[i % RANGE_COLORS.length],
-    };
-  });
+  return entries
+    .map(([key, group], i): RangePolygon | null => {
+      const polys: [number, number][][] = [];
+      for (const b of group) {
+        for (const ringStr of [b.points, ...(b.parts ?? [])]) {
+          const ring = parsePoly(ringStr);
+          if (ring.length >= 4) polys.push(ring);
+        }
+      }
+      // Fragmented ranges yield several rings; `points` keeps the largest so
+      // its centroid anchors the range label.
+      const parts = dissolveRings(polys).sort(
+        (a, b) => parsePoly(b).length - parsePoly(a).length
+      );
+      if (parts.length === 0) return null;
+      return {
+        id: `range-${key}`,
+        name: rangeLabel(key),
+        division: group[0]?.division ?? "",
+        rangeId: group.find((b) => b.rangeId)?.rangeId,
+        points: parts[0],
+        parts: parts.length > 1 ? parts : undefined,
+        color: RANGE_COLORS[i % RANGE_COLORS.length],
+      };
+    })
+    .filter((r): r is RangePolygon => r !== null);
 }
 
-function ringCentroid(points: string): [number, number] {
-  const ring = parsePoly(points);
+/**
+ * Dissolve a set of closed SVG polygon rings into the outline of their
+ * union (edge dissolve). An edge owned by exactly one ring is part of the
+ * dissolved boundary; an edge shared by two rings is interior and dropped.
+ * Edges are keyed canonically by their two endpoints *without* direction
+ * (the lexicographically smaller endpoint first), so an interior divider
+ * counts as shared no matter which direction each neighbouring ring
+ * digitised it in (survey rings commonly trace a shared boundary in
+ * opposite directions). Vertices are quantized to an EPS grid before
+ * keying — adjacent rings rarely digitize a shared node to the exact same
+ * double, and EPS (~0.2 m at this scale) snaps near-identical vertices
+ * together — while the surviving boundary vertices keep their original
+ * (unquantized) coordinates, so the dissolve never moves the map.
+ * Surviving edges are walked back into closed rings.
+ * Returns [] when nothing can be dissolved (no rings, or no boundary
+ * edges) so a layer using it stays honestly empty.
+ */
+export function dissolveRings(polys: [number, number][][]): string[] {
+  if (polys.length === 0) return [];
+
+  const EPS = 2e-3;
+  const qk = (p: [number, number]): string =>
+    `${Math.round(p[0] / EPS)},${Math.round(p[1] / EPS)}`;
+  const nodeExact = new Map<string, [number, number]>();
+  const edgeRings = new Map<string, Set<number>>();
+  for (let ri = 0; ri < polys.length; ri++) {
+    const poly = polys[ri];
+    const seen = new Set<string>();
+    for (let i = 0; i < poly.length - 1; i++) {
+      const a = poly[i];
+      const b = poly[i + 1];
+      if (a[0] === b[0] && a[1] === b[1]) continue;
+      const qa = qk(a);
+      const qb = qk(b);
+      if (qa === qb) continue;
+      const key = qa < qb ? `${qa}|${qb}` : `${qb}|${qa}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const rings = edgeRings.get(key) ?? new Set<number>();
+      rings.add(ri);
+      edgeRings.set(key, rings);
+      if (!nodeExact.has(qa)) nodeExact.set(qa, a);
+      if (!nodeExact.has(qb)) nodeExact.set(qb, b);
+    }
+  }
+
+  const neighbors = new Map<string, string[]>();
+  for (const [key, rings] of edgeRings) {
+    if (rings.size !== 1) continue;
+    const [a, b] = key.split("|");
+    const la = neighbors.get(a) ?? [];
+    la.push(b);
+    neighbors.set(a, la);
+    const lb = neighbors.get(b) ?? [];
+    lb.push(a);
+    neighbors.set(b, lb);
+  }
+  if (neighbors.size === 0) return [];
+
+  // Reassemble the surviving boundary edges into closed rings by planar face
+  // traversal. Each boundary edge separates two dissolving cells; ordering the
+  // neighbours of every vertex by angle, each face is recovered by following
+  // every directed edge to its successor around the same face (the neighbour
+  // immediately before the incoming vertex in the circular order). Junction
+  // vertices and fragmented edges resolve exactly — no heuristic that could
+  // jump to a distant vertex and draw a long straight chord across open
+  // terrain, and no vertex is ever moved.
+  const parseV = (s: string): [number, number] => {
+    const i = s.indexOf(",");
+    return [Number(s.slice(0, i)), Number(s.slice(i + 1))];
+  };
+  const angleOf = (o: [number, number], n: [number, number]): number =>
+    Math.atan2(n[1] - o[1], n[0] - o[0]);
+  const sortedNeighbors = new Map<string, string[]>();
+  for (const [u, nbrs] of neighbors) {
+    const o = nodeExact.get(u) ?? parseV(u);
+    sortedNeighbors.set(
+      u,
+      [...nbrs].sort((p, q) => {
+        const a = angleOf(o, nodeExact.get(p) ?? parseV(p));
+        const b = angleOf(o, nodeExact.get(q) ?? parseV(q));
+        return a - b;
+      }),
+    );
+  }
+  const nextOf = new Map<string, string>();
+  for (const [v, nbrs] of sortedNeighbors) {
+    const deg = nbrs.length;
+    for (let i = 0; i < deg; i++) {
+      nextOf.set(`${nbrs[i]}|${v}`, `${v}|${nbrs[(i - 1 + deg) % deg]}`);
+    }
+  }
+
+  const used = new Set<string>();
+  const parts: string[] = [];
+  for (const [startDir] of nextOf) {
+    if (used.has(startDir)) continue;
+    const ring: string[] = [];
+    let dir = startDir;
+    let guard = 0;
+    while (!used.has(dir) && guard <= nextOf.size) {
+      used.add(dir);
+      ring.push(dir.slice(0, dir.indexOf("|")));
+      dir = nextOf.get(dir)!;
+      guard++;
+    }
+    if (ring.length < 3) continue;
+    // The face traversal yields every face of the boundary planar graph,
+    // including the unbounded exterior face. Bounded dissolving faces are
+    // traversed counterclockwise — keep only those (positive signed area) and
+    // drop the exterior.
+    let signedArea = 0;
+    for (let i = 0; i < ring.length; i++) {
+      const p = nodeExact.get(ring[i]) ?? parseV(ring[i]);
+      const q = nodeExact.get(ring[(i + 1) % ring.length]) ?? parseV(ring[(i + 1) % ring.length]);
+      signedArea += p[0] * q[1] - q[0] * p[1];
+    }
+    if (signedArea <= 0) continue;
+    // Close the ring (first point repeated) so MapLibre renders a Polygon,
+    // emitting the original (unquantized) coordinates.
+    parts.push(
+      [...ring, ring[0]]
+        .map((k) => {
+          const v = nodeExact.get(k) ?? parseV(k);
+          return `${v[0]},${v[1]}`;
+        })
+        .join(" "),
+    );
+  }
+
+  // A ~0.0253 km² per SVG-unit² scale times a 0.01 km² floor drops the
+  // sub-meter sliver rings that survive the dissolve when neighbouring
+  // beats share slightly non-identical edges (common in survey data). Those
+  // slivers draw as hairline fragments along the rim and fragment the field
+  // stacking of the two sides. Kept parts are the forest's true islands.
+  if (parts.length > 1) {
+    const KM2_PER_SVG2 = 0.0253;
+    const svg2Area = (ring: string): number => {
+      const v = ring.split(/\s+/).map(parseV);
+      let a = 0;
+      for (let i = 0; i < v.length - 1; i++) a += v[i][0] * v[i + 1][1] - v[i + 1][0] * v[i][1];
+      return Math.abs(a / 2);
+    };
+    return parts.filter((p) => svg2Area(p) * KM2_PER_SVG2 >= 0.01);
+  }
+  return parts;
+}
+
+/**
+ * Derive the reserved forest boundary as the union of the real beat
+ * polygons (edge dissolve, see dissolveRings). Beats in a division tile
+ * contiguously — shared interior edges dissolve away, leaving the forest's
+ * outer outline: the same result the (unavailable, PostGIS) /boundary path
+ * would produce via ST_Union(geom), computed read-only from the real beat
+ * geometry with no new dependency and no fabricated coordinates.
+ *
+ * Returns [] when nothing can be dissolved (no beats, or no boundary
+ * edges) so the layer stays honestly empty.
+ */
+export function boundaryFromBeats(beats: BeatPolygon[]): BoundaryPolygon[] {
+  const polys: [number, number][][] = [];
+  for (const b of beats) {
+    for (const ringStr of [b.points, ...(b.parts ?? [])]) {
+      const ring = parsePoly(ringStr);
+      if (ring.length >= 4) polys.push(ring);
+    }
+  }
+  const parts = dissolveRings(polys);
+  if (parts.length === 0) return [];
+
+  return [
+    {
+      id: "forest-boundary",
+      name: "Forest boundary",
+      forestCode: "",
+      parts,
+    },
+  ];
+}
+
+function ringCentroid(ringLike: string | [number, number][]): [number, number] {
+  const ring = typeof ringLike === "string" ? parsePoly(ringLike) : ringLike;
   const n = ring.length || 1;
   const x = ring.reduce((a, p) => a + p[0], 0) / n;
   const y = ring.reduce((a, p) => a + p[1], 0) / n;
@@ -491,18 +703,25 @@ function ringCentroid(points: string): [number, number] {
 export function rangesToFeatures(ranges: RangePolygon[]): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
-    features: ranges.map((r) => ({
-      type: "Feature",
-      id: r.id,
-      properties: flatProps({
+    features: ranges.map((r) => {
+      const all = r.parts && r.parts.length > 1 ? r.parts : [r.points];
+      const coordinates = all.map((part) => [svgRingToLngLat(part)]);
+      return {
+        type: "Feature",
         id: r.id,
-        name: r.name,
-        division: r.division,
-        rangeId: r.rangeId ?? null,
-        color: r.color,
-      }),
-      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(r.points)] },
-    })),
+        properties: flatProps({
+          id: r.id,
+          name: r.name,
+          division: r.division,
+          rangeId: r.rangeId ?? null,
+          color: r.color,
+        }),
+        geometry:
+          coordinates.length > 1
+            ? { type: "MultiPolygon", coordinates }
+            : { type: "Polygon", coordinates: coordinates[0] },
+      };
+    }),
   };
 }
 
@@ -524,20 +743,27 @@ export function rangeLabelsToFeatures(ranges: RangePolygon[]): GeoFeatureCollect
 export function compartmentsToFeatures(comps: CompartmentPolygon[]): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
-    features: comps.map((c) => ({
-      type: "Feature",
-      id: c.id,
-      properties: flatProps({
+    features: comps.map((c) => {
+      const coordinates = [svgRingToLngLat(c.points), ...(c.holes ?? []).map((h) => svgRingToLngLat(h))];
+      return {
+        type: "Feature",
         id: c.id,
-        compNo: c.compNo,
-        beat: c.beat,
-        areaHa: c.areaHa,
-        rangeId: c.rangeId ?? null,
-        beatId: c.beatId ?? null,
-        compId: c.compId ?? c.id,
-      }),
-      geometry: { type: "Polygon", coordinates: [svgRingToLngLat(c.points)] },
-    })),
+        properties: flatProps({
+          id: c.id,
+          compNo: c.compNo,
+          beat: c.beat,
+          block: c.block ?? null,
+          areaHa: c.areaHa,
+          rangeId: c.rangeId ?? null,
+          beatId: c.beatId ?? null,
+          compId: c.compId ?? c.id,
+        }),
+        geometry: {
+          type: "Polygon",
+          coordinates: [coordinates[0], ...(coordinates.length > 1 ? coordinates.slice(1) : [])],
+        },
+      };
+    }),
   };
 }
 
@@ -555,6 +781,64 @@ export function compartmentLabelsToFeatures(comps: CompartmentPolygon[]): GeoFea
           beatId: c.beatId ?? null,
           compId: c.compId ?? c.id,
         }),
+        geometry: { type: "Point", coordinates: svgToLngLat(x, y) },
+      };
+    }),
+  };
+}
+
+/* ------------------------------------------------------------------ */
+/* Blocks — the Facing dissolve                                        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Render the Facing blocks. Each block's `parts` are the outer rings of the
+ * compartments that share the block's canonical name; they are edge-dissolved
+ * here (same ST_Union-equivalent dissolve as the forest boundary) so block
+ * boundaries follow the real contour outlines instead of showing the
+ * interior compartment lines. Fragmented blocks yield multiple parts →
+ * MultiPolygon. A block with nothing to dissolve stays honestly empty.
+ */
+export function blocksToFeatures(blocks: BlockPolygon[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: blocks.flatMap((b) => {
+      const parts = dissolveRings(b.parts.map(parsePoly));
+      if (parts.length === 0) return [];
+      const coordinates = parts.map((part) => [svgRingToLngLat(part)]);
+      return [
+        {
+          type: "Feature",
+          id: b.id,
+          properties: flatProps({
+            id: b.id,
+            name: b.name,
+            block: b.name,
+            compartmentCount: b.compartmentCount,
+            areaHa: b.areaHa,
+          }),
+          geometry:
+            coordinates.length > 1
+              ? { type: "MultiPolygon", coordinates }
+              : ({ type: "Polygon", coordinates: coordinates[0] } as GeoJSON.Polygon),
+        },
+      ];
+    }),
+  };
+}
+
+export function blockLabelsToFeatures(blocks: BlockPolygon[]): GeoFeatureCollection {
+  return {
+    type: "FeatureCollection",
+    features: blocks.map((b) => {
+      // Anchor the label on the largest ring so fragmented blocks get one
+      // readable centroid instead of a midpoint floating between parts.
+      const rings = b.parts.map(parsePoly).sort((a, b) => b.length - a.length);
+      const [x, y] = ringCentroid(rings[0]?.length ? rings[0] : []);
+      return {
+        type: "Feature",
+        id: `${b.id}-label`,
+        properties: flatProps({ name: b.name, block: b.name }),
         geometry: { type: "Point", coordinates: svgToLngLat(x, y) },
       };
     }),

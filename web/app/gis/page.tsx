@@ -667,10 +667,13 @@ function GisWorkspace() {
               liveBeats={taggedBeats}
               compartments={taggedCompartments}
               boundary={boundary}
+              blocks={spatialData.data?.blocks ?? []}
               grids={taggedGrids}
               coverageById={coverageById}
               analysisGrids={taggedAnalysisGrids}
               gridSize={analysisGridSize}
+              gridSizeLabel={gridSizeLabel(analysisGridSize)}
+              onGridSizeChange={changeGridSize}
               selectedGridIds={selectedGridIds}
               onGridClick={toggleGrid}
               onGridHover={setHoveredGridId}

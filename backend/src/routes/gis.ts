@@ -6,8 +6,7 @@ import { param } from '../lib/http';
 import { requireAuth } from '../middleware/auth';
 import { validateBody } from '../middleware/validate';
 import { z } from 'zod';
-import * as fs from 'fs';
-import * as path from 'path';
+import { canonicalBlock } from '../gis/block-registry';
 
 export const gisRouter = Router();
 
@@ -125,7 +124,7 @@ interface DbBeatRow {
   userCount: number;
 }
 
-type BeatResolution = { id: string; how: 'unique' | 'override' | 'heuristic' } | null;
+type BeatResolution = { id: string; how: 'unique' | 'range' | 'override' | 'heuristic' } | null;
 
 function makeBeatResolver(byNorm: Map<string, DbBeatRow[]>) {
   return (beatName: unknown): BeatResolution => {
@@ -144,6 +143,53 @@ function makeBeatResolver(byNorm: Map<string, DbBeatRow[]>) {
       return null; // tied — never guess
     }
     return null;
+  };
+}
+
+/**
+ * Beat-specific resolver that serves the BEAT POLYGON layer (not
+ * compartments): when a normalized beat name has more than one DB row AND
+ * more than one source polygon (e.g. NAGULAVARAM exists as two disjoint
+ * territories — V.P.SOUTH and MARKAPUR — with two DB rows), each polygon is
+ * matched to a DISTINCT DB beat so no territory is lost. Disambiguation
+ * order: unique candidate → normalized range match → override → comp-count
+ * heuristic. Range matching mirrors the survey: the source polygon's Range
+ * equals the owning beat's rangeName, so both NAGULAVARAM polygons get real
+ * geometry instead of the second being dropped as a duplicate (which left a
+ * hole in the forest-boundary dissolve).
+ */
+function makeBeatResolverForBeats(byNorm: Map<string, DbBeatRow[]>) {
+  const consumed = new Set<string>();
+  return (beatName: unknown, rangeName: unknown): BeatResolution => {
+    const key = normName(beatName);
+    if (!key) return null;
+    const avail = (byNorm.get(key) ?? []).filter((b) => !consumed.has(b.id));
+    if (avail.length === 0) return null;
+    if (avail.length === 1) {
+      consumed.add(avail[0].id);
+      return { id: avail[0].id, how: 'unique' };
+    }
+    const rk = normName(rangeName);
+    if (rk) {
+      const byRange = avail.filter((b) => normName(b.rangeName) === rk);
+      if (byRange.length === 1) {
+        consumed.add(byRange[0].id);
+        return { id: byRange[0].id, how: 'range' };
+      }
+    }
+    if (key in BEAT_OVERRIDE) {
+      const id = BEAT_OVERRIDE[key];
+      if (avail.some((b) => b.id === id)) {
+        consumed.add(id);
+        return { id, how: 'override' };
+      }
+    }
+    const sorted = [...avail].sort((a, b) => b.compCount - a.compCount || b.userCount - a.userCount);
+    if (sorted[0].compCount > sorted[1].compCount) {
+      consumed.add(sorted[0].id);
+      return { id: sorted[0].id, how: 'heuristic' };
+    }
+    return null; // tied — never guess
   };
 }
 
@@ -166,15 +212,16 @@ async function fallbackBeats(): Promise<string> {
     if (!byNorm.has(k)) byNorm.set(k, []);
     byNorm.get(k)!.push(b);
   }
-  const resolveBeat = makeBeatResolver(byNorm);
+  // Range-aware resolver: a beat name that owns several disjoint territories
+  // (NAGULAVARAM) maps EACH source polygon to a distinct DB beat. Shares the
+  // same deadline/owner semantics for unique and duplicate-but-orphaned names.
+  const resolveBeat = makeBeatResolverForBeats(byNorm);
 
   const features: GeoFeature[] = [];
-  const assigned = new Set<string>();
   for (const f of beatsFC.features) {
     if (!f.geometry || !f.properties['Beat']) continue;
-    const resolved = resolveBeat(f.properties['Beat']);
-    if (!resolved || assigned.has(resolved.id)) continue;
-    assigned.add(resolved.id);
+    const resolved = resolveBeat(f.properties['Beat'], f.properties['Range']);
+    if (!resolved) continue;
     const b = dbBeats.find((x) => x.id === resolved.id)!;
     features.push({
       type: 'Feature',
@@ -196,7 +243,24 @@ async function fallbackBeats(): Promise<string> {
   return JSON.stringify({ type: 'FeatureCollection', features });
 }
 
-interface DbCompRow { id: string; compNo: string; beatId: string | null; areaHa: number | null; }
+interface DbCompRow { id: string; compNo: string; beatId: string | null; areaHa: number | null; block: string | null; }
+
+/** Compartment rows for the compartment fallback. The `block` (Facing)
+ *  column is optional — a database that has not run the compartment_block
+ *  migration lacks it, and the whole fallback must not die on a schema-drift
+ *  deployment (the compartments layer would go empty). When the column is
+ *  absent, `block` stays null and the asset's canonical BLOCK is served. */
+async function loadFallbackCompartments(): Promise<DbCompRow[]> {
+  try {
+    return await prisma.$queryRaw<DbCompRow[]>`
+      SELECT id, "compNo", "beatId", "areaHa", "block" FROM "Compartment"
+    `;
+  } catch {
+    return await prisma.$queryRaw<DbCompRow[]>`
+      SELECT id, "compNo", "beatId", "areaHa", NULL::text AS "block" FROM "Compartment"
+    `;
+  }
+}
 
 /** Build the compartments FeatureCollection from the bundled asset geometry
  *  joined to DB Compartment primary keys, preserving the API property shape. */
@@ -209,7 +273,7 @@ async function fallbackCompartments(): Promise<string> {
         (SELECT count(*)::int FROM "Compartment" cc WHERE cc."beatId" = b.id) AS "compCount",
         (SELECT count(*)::int FROM "User" u WHERE u."beatId" = b.id) AS "userCount"
       FROM "Beat" b`,
-    prisma.$queryRaw<DbCompRow[]>`SELECT id, "compNo", "beatId", "areaHa" FROM "Compartment"`,
+    loadFallbackCompartments(),
   ]);
 
   const byNorm = new Map<string, DbBeatRow[]>();
@@ -228,29 +292,76 @@ async function fallbackCompartments(): Promise<string> {
     byKey.get(key)!.push(cc.id);
   }
 
+  const compById = new Map(dbComps.map((c) => [c.id, c]));
+
   const features: GeoFeature[] = [];
   const used = new Set<string>();
+  let dropped = 0;
   for (const f of compsFC.features) {
     if (!f.geometry || f.properties['COMP_NO'] == null) continue;
-    const resolved = resolveBeat(f.properties['BEAT']);
-    if (!resolved) continue;
-    const key = `${String(f.properties['COMP_NO'])}|${resolved.id}`;
-    const candidates = (byKey.get(key) ?? []).filter((id) => !used.has(id));
-    if (candidates.length === 0) continue;
-    const targetId = candidates[0];
+    const compNo = String(f.properties['COMP_NO']);
+    const beatLabel = String(f.properties['BEAT'] ?? '');
+    const resolved = resolveBeat(beatLabel);
+    let targetId: string | null = null;
+    let beatRow: DbBeatRow | null = null;
+
+    if (resolved) {
+      // Normal join key: compNo|beatId, first unused candidate wins.
+      const key = `${compNo}|${resolved.id}`;
+      const candidates = (byKey.get(key) ?? []).filter((id) => !used.has(id));
+      if (candidates.length > 0) {
+        targetId = candidates[0];
+        beatRow = dbBeats.find((x) => x.id === resolved.id) ?? null;
+      }
+    } else if (beatLabel.trim() === '') {
+      // Compartment with NO beat watermark at all (never assigned/imported,
+      // e.g. the enclosure object OBJECTID_1=850, COMP_NO="0",
+      // AREA_HA="155.26"). Match the unmatched DB Compartment (beatId IS
+      // NULL) uniquely on COMP_NO + AREA_HA — never guessed when tied or
+      // when the AREA_HA figure is missing.
+      const orphans = (byKey.get(`${compNo}|NULL`) ?? [])
+        .filter((id) => !used.has(id))
+        .map((id) => compById.get(id)!)
+        .filter((c) => c.areaHa != null && Math.abs(c.areaHa - Number(f.properties['AREA_HA'])) < 0.25);
+      if (orphans.length === 1) targetId = orphans[0].id;
+    }
+
+    if (!targetId) {
+      dropped++;
+      continue;
+    }
     used.add(targetId);
-    const comp = dbComps.find((x) => x.id === targetId)!;
+    const comp = compById.get(targetId)!;
+    // Facing attribute: the DB block when imported/restored, else the
+    // canonical name of the marker's own BLOCK property (asset authority).
+    const block = comp.block ?? canonicalBlock(f.properties['BLOCK']);
     features.push({
       type: 'Feature',
       id: comp.id,
       geometry: f.geometry,
+      // Same property set as the mobile mark_comp.json asset: hierarchy
+      // fields come from the owning Beat, BLOCK from the Facing attribute.
       properties: {
         OBJECTID_1: comp.id,
         COMP_NO: comp.compNo,
-        BEAT: comp.beatId ? (beatNameById.get(comp.beatId) ?? '') : '',
+        BEAT: beatRow ? (beatNameById.get(comp.beatId ?? '') ?? '') : '',
+        BLOCK: block,
+        SECTION: beatRow?.section ?? '',
+        RANGE: beatRow?.rangeName ?? '',
+        DIVISION: beatRow?.division ?? '',
+        CIRCLE: beatRow?.circle ?? '',
+        DISTRICT: beatRow?.district ?? '',
         AREA_HA: comp.areaHa ?? 0,
       },
     });
+  }
+
+  if (dropped > 0) {
+    console.warn(
+      `[gis] compartments fallback dropped ${dropped}/${compsFC.features.length} ` +
+        `asset feature(s): no unambiguous DB join (orphan/empty-beat tie, or beat ` +
+        `name not found). Serving the remaining features — nothing silent.`,
+    );
   }
 
   return JSON.stringify({ type: 'FeatureCollection', features });
@@ -330,6 +441,14 @@ gisRouter.get('/compartments', async (_req, res) => {
               'OBJECTID_1', c.id,
               'COMP_NO', c."compNo",
               'BEAT', COALESCE(b.name, ''),
+              -- mobile mark_comp.json property set; hierarchy fields layered
+              -- in from the owning Beat, BLOCK from the Facing attribute.
+              'BLOCK', COALESCE(c."block", ''),
+              'SECTION', COALESCE(b.section, ''),
+              'RANGE', COALESCE(b."rangeName", ''),
+              'DIVISION', COALESCE(b.division, ''),
+              'CIRCLE', COALESCE(b.circle, ''),
+              'DISTRICT', COALESCE(b.district, ''),
               'AREA_HA', COALESCE(c."areaHa", 0)
             )
           ) AS feature
@@ -339,11 +458,104 @@ gisRouter.get('/compartments', async (_req, res) => {
         ) t
       `;
       geojson = rows[0]?.geojson ?? null;
+    } catch (err: any) {
+      // PostGIS unavailable → bundled asset geometry is the authoritative
+      // path, but never silently: the ops log must make clear the DB rows
+      // with geometry are NOT being served.
+      console.warn(
+        '[gis] compartments: PostGIS unavailable (falling back to bundled mark_comp.json geometry, read-only).',
+        err?.message ?? err,
+      );
+      geojson = null;
+    }
+    if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
+    return fallbackCompartments();
+  });
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.send(body);
+});
+
+/** One outer ring from a Polygon/MultiPolygon feature ([lng,lat][] pairs). */
+function outerRingsOf(feature: GeoFeature): number[][][] {
+  const g = feature.geometry as { type?: string; coordinates?: unknown } | null | undefined;
+  if (!g || (g.type !== 'Polygon' && g.type !== 'MultiPolygon')) return [];
+  const polys: unknown[] = g.type === 'Polygon' ? [g.coordinates] : (g.coordinates as unknown[]);
+  return polys.flatMap((poly) => {
+    const outer = Array.isArray(poly) ? poly[0] : poly;
+    return Array.isArray(outer) ? [outer as number[][]] : [];
+  });
+}
+
+/**
+ * GET /api/gis/blocks
+ * Forest blocks as a GeoJSON FeatureCollection — the Facing dissolve: every
+ * compartment whose canonical BLOCK attribute matches is merged into its
+ * block. PostGIS path uses ST_Union (ST_MakeValid-safe, one MultiPolygon per
+ * block); when PostGIS is unavailable the bundled asset geometry is grouped
+ * by the same canonical block (one part per compartment outer ring — the
+ * frontend edge-dissolves those rings into the clean outline, mirroring the
+ * ST_Union result). Compartments without a block attribute are excluded.
+ */
+gisRouter.get('/blocks', async (_req, res) => {
+  const body = await cachedGeo('blocks', async () => {
+    let geojson: string | null = null;
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '{"type":"FeatureCollection","features":[]}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', 'block-' || c."block",
+            'geometry', ST_AsGeoJSON(ST_Union(ST_CollectionExtract(ST_MakeValid(c.geom), 3)))::json,
+            'properties', json_build_object(
+              'BLOCK', c."block",
+              'COMPARTMENT_COUNT', COUNT(*)::int,
+              'AREA_HA', ROUND(SUM(COALESCE(c."areaHa", 0)))::int
+            )
+          ) AS feature
+          FROM "Compartment" c
+          WHERE c.geom IS NOT NULL AND c."block" IS NOT NULL AND c."block" <> ''
+          GROUP BY c."block"
+        ) t
+      `;
+      geojson = rows[0]?.geojson ?? null;
     } catch {
       geojson = null; // PostGIS unavailable — fall back to bundled assets below.
     }
     if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
-    return fallbackCompartments();
+
+    const compsFC = await loadAssetGeoJson('mark_comp.json');
+    const byBlock = new Map<string, { rings: number[][][]; count: number; areaHa: number }>();
+    for (const f of compsFC.features) {
+      if (!f.geometry || f.properties['COMP_NO'] == null) continue;
+      const block = canonicalBlock(f.properties['BLOCK']);
+      if (!block) continue;
+      const entry = byBlock.get(block) ?? { rings: [], count: 0, areaHa: 0 };
+      entry.rings.push(...outerRingsOf(f));
+      entry.count += 1;
+      entry.areaHa += Number(f.properties['AREA_HA']) || 0;
+      byBlock.set(block, entry);
+    }
+    const features: GeoFeature[] = [...byBlock.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([block, entry]) => ({
+        type: 'Feature',
+        id: `block-${block}`,
+        geometry: { type: 'MultiPolygon', coordinates: entry.rings },
+        properties: {
+          BLOCK: block,
+          COMPARTMENT_COUNT: entry.count,
+          AREA_HA: Math.round(entry.areaHa),
+        },
+      }));
+    return JSON.stringify({ type: 'FeatureCollection', features });
   });
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
   res.setHeader('Cache-Control', 'public, max-age=86400');
@@ -406,7 +618,7 @@ gisRouter.get('/version', async (_req, res) => {
       SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Beat"
     `,
     prisma.$queryRaw<{ cnt: bigint; maxUpdated: Date | null }[]>`
-      SELECT COUNT(*)::int AS cnt, MAX("updatedAt") AS "maxUpdated" FROM "Compartment"
+      SELECT COUNT(*)::int AS cnt, MAX("createdAt") AS "maxUpdated" FROM "Compartment"
     `,
   ]);
   res.json({
@@ -551,15 +763,17 @@ gisRouter.get('/assets/:resourceKey', async (req, res) => {
 /* ── Geofencing ─────────────────────────────────────────────────────────── */
 
 
-/** Load the bundled beat GeoJSON (mark_beat.json) for point-in-polygon checks. */
+/** Load the bundled beat GeoJSON (mark_beat.json) for point-in-polygon checks.
+ *  Resolved through the same probed asset dir as the GIS fallback serializers
+ *  (single asset authority — never a cwd-dependent copy). */
 let _beatFeatures: any[] = [];
 let _beatFeaturesLoaded = false;
-function loadBeatFeatures(): any[] {
+async function loadBeatFeatures(): Promise<any[]> {
   if (_beatFeaturesLoaded) return _beatFeatures;
   _beatFeaturesLoaded = true;
   try {
-    const assetPath = path.resolve(process.cwd(), 'mark_beat.json');
-    const raw = fs.readFileSync(assetPath, 'utf-8');
+    const dir = await findAssetDir();
+    const raw = await readFile(resolve(dir, 'mark_beat.json'), 'utf-8');
     const fc = JSON.parse(raw);
     _beatFeatures = fc.features ?? [];
   } catch {
@@ -609,9 +823,9 @@ const validateLocationSchema = z.object({
  *
  * Hierarchy: beat → section → range → no assignment
  */
-gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationSchema), (req, res) => {
+gisRouter.post('/validate-location', requireAuth, validateBody(validateLocationSchema), async (req, res) => {
   const { lat, lng, beatName, sectionName, rangeName } = req.body;
-  const features = loadBeatFeatures();
+  const features = await loadBeatFeatures();
 
   if (features.length === 0) {
     res.json({ valid: false, reason: 'no_gis_data', message: 'Beat geometry data not available' });

@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "verify:gis": "node scripts/verify-gis-projection.mjs"
   },
   "dependencies": {
     "maplibre-gl": "^6.3.0",

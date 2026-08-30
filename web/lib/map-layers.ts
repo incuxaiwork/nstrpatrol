@@ -23,6 +23,8 @@ export interface ForestLayerState {
   beats: boolean;
   ranges: boolean;
   compartments: boolean;
+  /** Facing dissolve — compartments grouped into blocks by canonical name. */
+  blocks: boolean;
   analysisGrid: boolean;
   grids: boolean;
   routes: boolean;
@@ -36,19 +38,24 @@ export interface ForestLayerState {
 }
 
 export const DEFAULT_LAYER_STATE: ForestLayerState = {
-  basemap: "satellite",
-  boundary: true,
-  beats: true,
-  ranges: true,
-  compartments: true,
-  analysisGrid: true,
-  grids: true,
-  routes: true,
-  rangers: true,
-  markers: true,
-  sos: true,
-  zeropatrol: true,
-  coverage: true,
+  // Atlas (offline NSTR.mbtiles raster) is the default GIS basemap — Esri
+  // satellite is fully available in the selector but must never be required:
+  // the ArcGIS host returns 403 without CORS on some networks, which degrades
+  // to a bare backdrop.
+  basemap: "atlas",
+  boundary: false,
+  beats: false,
+  ranges: false,
+  compartments: false,
+  blocks: false,
+  analysisGrid: false,
+  grids: false,
+  routes: false,
+  rangers: false,
+  markers: false,
+  sos: false,
+  zeropatrol: false,
+  coverage: false,
   heat: false,
 };
 
@@ -82,9 +89,10 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
       label: "Forest & administrative",
       rows: [
         { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid deep-green reserve outline & label" },
-        { key: "ranges", title: "Range Boundaries", subtitle: "Burnt-sienna dashed range hulls & labels" },
-        { key: "beats", title: "Beat Boundaries", subtitle: "Teal beat outlines & labels — no fill" },
-        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin amber internal lines (zoom in) & labels" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Solid blue range hulls & labels" },
+        { key: "beats", title: "Beat Boundaries", subtitle: "Orange beat outlines & labels — no fill" },
+        { key: "blocks", title: "Blocks", subtitle: "Facing dissolve — compartments grouped by canonical block, medium purple outlines & labels" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin red dashed internal lines (zoom in) & labels" },
       ],
     },
     {
