@@ -4,8 +4,12 @@ object AppConfig {
     // GPS recording defaults — overridable via SettingsStore.
     /** How often the recorder loop polls for a new fix (ms). */
     const val DEFAULT_POINT_POLL_MS = 3000L
-    /** Minimum distance (m) between successive recorded points. */
-    const val DEFAULT_MIN_DISPLACEMENT_M = 0.0
+    /** Minimum distance (m) between successive recorded points — 5 m filters GPS jitter when still. */
+    const val DEFAULT_MIN_DISPLACEMENT_M = 5.0
+    /** When STILL, require this larger displacement to cut stationary drift (GPS wanders ~3-8 m). */
+    const val STILL_MIN_DISPLACEMENT_M = 10.0
+    /** Tiny jumps below this are always jitter, even when moving slowly. */
+    const val JITTER_DISTANCE_M = 3.0
     /** Maximum age (ms) of a GPS fix to accept for recording. */
     const val DEFAULT_MAX_FIX_AGE_MS = 300_000L
     /** Minimum time (ms) between successive recorded points (fallback). */

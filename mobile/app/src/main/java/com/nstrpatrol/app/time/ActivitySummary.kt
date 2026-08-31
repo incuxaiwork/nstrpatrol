@@ -193,7 +193,15 @@ object ActivitySummary {
         for (i in 1 until points.size) {
             val p1 = points[i - 1]
             val p2 = points[i]
-            total += singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            val dist = singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
+            val dt = p2.timestamp - p1.timestamp
+            val speedKmh = if (dt > 0) (dist / 1000.0) / (dt / 3_600_000.0) else 0.0
+            // Same jitter filter as recorder: ignore tiny jumps that crept in before the fix
+            if (dist < AppConfig.JITTER_DISTANCE_M && speedKmh < 1.0) continue
+            if (dist < 5.0 && speedKmh < 0.5) continue
+            val acc = minOf(p1.accuracy ?: Float.MAX_VALUE, p2.accuracy ?: Float.MAX_VALUE).toDouble()
+            if (dist < acc * 0.5 && speedKmh < 2.0 && dist < 8.0) continue
+            total += dist
         }
         return total
     }

@@ -303,7 +303,9 @@ class TelemetryRecorder(
      * sampling interval has elapsed or it has moved enough since the last
      * point. Recording on displacement (not just time) captures the real route
      * instead of a handful of far-apart samples, so reported distance matches
-     * the actual track.
+     * the actual track. Stationary jitter is filtered: when STILL we require
+     * ~10 m displacement, and tiny <3 m jumps are never recorded while speed
+     * is ~0.
      */
     private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean): Boolean {
         val telemetry = telemetryManager.telemetry.value
@@ -321,11 +323,27 @@ class TelemetryRecorder(
         val minDisp = settings?.gpsMinDisplacementM?.value ?: AppConfig.DEFAULT_MIN_DISPLACEMENT_M
         val baseSampleInterval = settings?.gpsSampleIntervalMs?.value ?: AppConfig.DEFAULT_SAMPLE_INTERVAL_MS
         val sampleInterval = effectiveSampleInterval(baseSampleInterval)
-        if (!force &&
-            disp < minDisp &&
-            timeSince < sampleInterval
-        ) {
-            return false
+        if (!force) {
+            // --- Stationary jitter filter (the reported bug) ---
+            // When phone is still, GPS wanders 3-8 m every fix. With minDisp=0
+            // the old `disp < minDisp && time < interval` never filtered, so
+            // every 10 s a jitter point was stored and distance crept up.
+            val isStill = _movement.value.mode == MovementMode.STILL
+            val acc = telemetry.horizontalAccuracyMeters?.toDouble() ?: Double.MAX_VALUE
+            val speedKmh = telemetry.speedMps?.let { it * 3.6 } ?: 0.0
+            if (isStill && disp < maxOf(minDisp, AppConfig.STILL_MIN_DISPLACEMENT_M)) {
+                return false
+            }
+            if (disp < AppConfig.JITTER_DISTANCE_M && speedKmh < 1.0) {
+                return false
+            }
+            // Displacement inside the accuracy circle at low speed is noise.
+            if (disp < acc * 0.6 && disp < 8.0 && speedKmh < 1.5) {
+                return false
+            }
+            if (disp < minDisp && timeSince < sampleInterval) {
+                return false
+            }
         }
 
         dao.insertPoint(

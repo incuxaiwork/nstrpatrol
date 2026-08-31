@@ -1226,7 +1226,14 @@ private fun computeDistance(points: List<PatrolPointEntity>): Double {
             cos(Math.toRadians(p2.latitude)) *
             sin(dLon / 2).let { it * it }
         val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        total += 6_371_000.0 * c
+        val dist = 6_371_000.0 * c
+        val dt = p2.timestamp - p1.timestamp
+        val speedKmh = if (dt > 0) (dist / 1000.0) / (dt / 3_600_000.0) else 0.0
+        if (dist < 3.0 && speedKmh < 1.0) continue
+        if (dist < 5.0 && speedKmh < 0.5) continue
+        val acc = minOf(p1.accuracy ?: Float.MAX_VALUE, p2.accuracy ?: Float.MAX_VALUE).toDouble()
+        if (dist < acc * 0.5 && speedKmh < 2.0 && dist < 8.0) continue
+        total += dist
     }
     return total
 }
