@@ -8,22 +8,21 @@
 import { useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { gis, rangers as servicesRangers, observations as servicesObservations, hierarchy as hierarchyService, sos as sosService } from "@/lib/services";
+import { gis, hierarchy as hierarchyService, sos as sosService } from "@/lib/services";
 import type { GisLivePatrol } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
-import { api, invalidateCache, ApiError } from "@/lib/api";
 import type { ApiGridCoverage } from "@/lib/api";
 import { fixFreshness, useLiveTracking, useTicker } from "@/lib/use-live-tracking";
 import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { DataTable } from "@/components/data";
 import { MapWorkspace } from "@/components/map-loader";
-import { MapSidebarFacts, type GridRegionFilter } from "@/components/map";
+import { type GridRegionFilter } from "@/components/map";
 import { MapLayersPanel } from "@/components/map-layers-panel";
 import { DEFAULT_LAYER_STATE, type ForestLayerState } from "@/lib/map-layers";
 import { RegionFilter } from "@/components/gis-region-filter";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
-import { SkeletonRows, ErrorState } from "@/components/ui/loading";
+import { SkeletonRows } from "@/components/ui/loading";
 import { stamp, exportRows } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { RegionReportDialog } from "@/components/reports/dialogs";
@@ -31,6 +30,7 @@ import { FOREST_CONTEXT, GRID_SIZES, DEFAULT_GRID_SIZE, gridSizeLabel, type Grid
 import { tagBeats, tagCompartments, tagGrids, type TaggedGrid } from "@/lib/grid-regions";
 import { buildAnalysisGrid } from "@/lib/gis/grid";
 import type { GridCoverageInfo, LivePathFeature, LiveRangerFeature } from "@/lib/map-space";
+import { rangesFromBeats, svgRingToLngLat } from "@/lib/map-space";
 import type { GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
@@ -44,32 +44,12 @@ function heatTone(v: number): number {
   return 0.12 + v * 0.55;
 }
 
-/** Honest message for a failed coverage request (never shown as "0%"). */
-function coverageErrorMessage(err: Error): string {
-  if (err instanceof ApiError) {
-    if (err.status === 401) return "Sign in required — patrol coverage unavailable.";
-    if (err.status === 403) return "You don't have access to patrol coverage for this scope.";
-    if (err.status === 404) return "Patrol coverage endpoint unavailable.";
-    if (err.status >= 500) return "Patrol coverage server error — try again shortly.";
-    return `Patrol coverage unavailable (${err.status}).`;
-  }
-  return "Patrol coverage unavailable — check the backend connection.";
-}
-
 function formatCoverageTime(iso: string | null): string | null {
   if (!iso) return null;
   const d = new Date(iso);
   if (!Number.isFinite(d.getTime())) return null;
   return d.toLocaleString([], { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
-
-const COVERAGE_SCOPE_LABELS: Record<string, string> = {
-  DIVISION: "Division-wide",
-  SUB_DIVISION: "Sub-division scope",
-  RANGE: "Range scope",
-  BEAT: "Beat scope",
-  OPERATIONAL: "Personal patrol scope",
-};
 
 /** Row-level coverage detail attached to a selected reference grid cell. */
 export interface GridCoverageDetail {
@@ -82,11 +62,28 @@ export interface GridCoverageDetail {
 
 function selectedDetail(
   selected: string | null,
-  beats: { id: string; name: string; coveragePct: number | null }[],
-  comps: { id: string; compNo: string; beat: string; areaHa: number }[],
+  beats: {
+    id: string;
+    name: string;
+    range?: string;
+    rangeId?: string;
+    beatId?: string;
+    coveragePct: number | null;
+    isZeroPatrol?: boolean;
+  }[],
+  comps: {
+    id: string;
+    compNo: string;
+    beat: string;
+    areaHa: number;
+    rangeId?: string;
+    beatId?: string;
+    compId?: string;
+  }[],
   routes: GisRoute[],
   markers: GisMarker[],
   grids: { id: string; gridCode: string; rangeId?: string; beatId?: string; compId?: string }[],
+  ranges: { id: string; name: string; rangeId?: string }[],
   names: { rangeName(id?: string): string | undefined; beatName(id?: string): string | undefined; compNo(id?: string): string | undefined },
   coverageById: Record<string, GridCoverageInfo> | null = null,
   coverageLoaded: boolean = false,
@@ -157,12 +154,18 @@ function selectedDetail(
       tag: "Reference grid",
     };
   }
-  const comp = comps.find((c) => c.id === selected);
+  const comp = comps.find((c) => c.compId === selected || c.id === selected);
   if (comp) {
+    const beat = comp.beat ? beats.find((b) => b.name === comp.beat) : undefined;
+    const rangeName =
+      (comp.rangeId ? names.rangeName(comp.rangeId) : undefined) ?? (beat?.range ?? undefined);
     return {
       kind: "compartment" as const,
       title: `Compartment ${comp.compNo}`,
-      body: `${comp.areaHa > 0 ? comp.areaHa + " ha · " : ""}${comp.beat || "beat not mapped"}`,
+      compNo: comp.compNo,
+      body: `${comp.areaHa > 0 ? comp.areaHa + " ha" : ""}`,
+      beatName: comp.beat || undefined,
+      rangeName,
       href: "/gis",
       cta: "Dismiss",
       tone: "neutral" as const,
@@ -172,14 +175,29 @@ function selectedDetail(
   const beat = beats.find((b) => b.id === selected);
   if (beat) {
     const zero = beatIsZero(beat);
+    const rangeName =
+      (beat.rangeId ? names.rangeName(beat.rangeId) : undefined) ?? beat.range ?? undefined;
     return {
       kind: "beat" as const,
       title: `${beat.name} beat`,
       body: beat.coveragePct == null ? "Coverage data pending" : `${beat.coveragePct}% coverage`,
+      rangeName,
       href: "/gis",
       cta: "Zoom to beat",
       tone: zero ? "danger" : ("neutral" as const),
       tag: zero ? "Zero patrol zone" : undefined,
+    };
+  }
+  const range = ranges.find((r) => r.id === selected);
+  if (range) {
+    return {
+      kind: "range" as const,
+      title: names.rangeName(range.rangeId) ?? range.name,
+      rangeName: names.rangeName(range.rangeId) ?? range.name,
+      href: "/gis",
+      cta: "Dismiss",
+      tone: "neutral" as const,
+      tag: "Range",
     };
   }
   const marker = markers.find((m) => m.id === selected);
@@ -233,7 +251,6 @@ function GisWorkspace() {
   const gridsData = { data: spatialData.data?.grids ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
   const extentData = { data: spatialData.data?.extent ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
 
-  const assetsData = useAsyncData(() => gis.assets(), [], { cacheKey: "gis:assets" });
   const [rawSelected, setSelected] = useState<string | null>(null);
   // No patrol preselected — play/pause appears only after the admin picks one.
   const [replayPatrol, setReplayPatrol] = useState<string | null>(null);
@@ -262,8 +279,6 @@ function GisWorkspace() {
     [layerState.routes],
     { cacheKey: "gis:routes" }
   );
-  const rangersData = useAsyncData(() => servicesRangers.list(), [], { cacheKey: "rangers:list" });
-  const observationsData = useAsyncData(() => servicesObservations.list(), [], { cacheKey: "observations:list" });
   // Authoritative coverage (GET /api/coverage/grids). Backend computes the
   // scope; the frontend only joins + displays. Non-blocking: the map and the
   // analysis grid stay usable while this loads.
@@ -321,7 +336,6 @@ function GisWorkspace() {
     for (const c of cells) map[c.id] = { covered: c.covered, pointCount: c.pointCount, lastPatrolledAt: c.lastPatrolledAt };
     return map;
   }, [coverageData.data]);
-  const coverageSummary = coverageData.data?.summary ?? null;
 
   // Live SOS alert feed (Part B) — powers the dedicated SOS map layer and
   // the ?sos= deep link. Strict remote; a failure surfaces as an inline
@@ -448,11 +462,58 @@ function GisWorkspace() {
   const beats = beatsData.data ?? [];
   const compartments = compartmentsData.data ?? [];
   const boundary = boundaryData.data ?? [];
-  const grids = gridsData.data ?? [];
   const markers = markersData.data ?? [];
   const routes = routesData.data ?? [];
   const heat: HeatBlock[] = [];
   const units = unitsData.data ?? null;
+  // Derived range hulls (for range selection) — tagged beats carry rangeId so
+  // the range's register name resolves via unitNames.rangeName().
+  const ranges = rangesFromBeats(taggedBeats);
+
+  // Camera fit tied to the GIS filter — selecting a Range → Beat → Compartment
+  // from the GEO filters must narrow the visible map to that entity, not just
+  // change dropdown values. Re-computed whenever the filter (or the underlying
+  // geometry) changes, so the map refits on each Range/Beat/Compartment pick.
+  const filterFitRequest = useMemo<{
+    west: number; south: number; east: number; north: number;
+  } | null>(() => {
+    if (!regionFilter.rangeId) return null;
+    const ringBounds = (ring: string) => {
+      let west = Infinity, south = Infinity, east = -Infinity, north = -Infinity;
+      for (const [lon, lat] of svgRingToLngLat(ring)) {
+        if (lon < west) west = lon;
+        if (lon > east) east = lon;
+        if (lat < south) south = lat;
+        if (lat > north) north = lat;
+      }
+      return Number.isFinite(west) ? { west, south, east, north } : null;
+    };
+    let bounds: { west: number; south: number; east: number; north: number } | null = null;
+    if (regionFilter.compId) {
+      const c = taggedCompartments.find(
+        (x) => x.compId === regionFilter.compId || x.id === regionFilter.compId
+      );
+      bounds = c ? ringBounds(c.points) : null;
+    } else if (regionFilter.beatId) {
+      const b = taggedBeats.find((x) => x.beatId === regionFilter.beatId);
+      bounds = b ? ringBounds(b.points) : null;
+    } else {
+      for (const b of taggedBeats) {
+        if (b.rangeId !== regionFilter.rangeId) continue;
+        const bb = ringBounds(b.points);
+        if (!bb) continue;
+        bounds = bounds
+          ? {
+              west: Math.min(bounds.west, bb.west),
+              south: Math.min(bounds.south, bb.south),
+              east: Math.max(bounds.east, bb.east),
+              north: Math.max(bounds.north, bb.north),
+            }
+          : bb;
+      }
+    }
+    return bounds;
+  }, [regionFilter, taggedBeats, taggedCompartments]);
 
   // Selecting a patrol route on the map arms the replay for that patrol —
   // EXCEPT a LIVE selection: replaying an active patrol would fight the live
@@ -471,12 +532,7 @@ function GisWorkspace() {
 
   const zeroPatrolBeats = beats.filter((b) => beatIsZero(b));
   const coverageLoaded = !coverageData.loading && !coverageData.error && coverageById != null;
-  const regionFilterActive =
-    regionFilter.rangeId != null || regionFilter.beatId != null || regionFilter.compId != null;
-  // Range/Compartment-only selections cannot be sent to the coverage API
-  // (no backend id catalog) — surface that honestly next to the summary.
-  const coverageMixedScope = regionFilterActive && coverageBeatId == null;
-  const detail = selectedDetail(selected, beats, compartments, routes, markers, taggedGrids, unitNames, coverageById, coverageLoaded, liveById);
+  const detail = selectedDetail(selected, taggedBeats, taggedCompartments, routes, markers, taggedGrids, ranges, unitNames, coverageById, coverageLoaded, liveById);
 
   // Honest operational status strip inside the map — counts of the ENABLED
   // operational layers, with explicit empty/unavailable wording (never fake).
@@ -667,9 +723,6 @@ function GisWorkspace() {
               liveBeats={taggedBeats}
               compartments={taggedCompartments}
               boundary={boundary}
-              blocks={spatialData.data?.blocks ?? []}
-              grids={taggedGrids}
-              coverageById={coverageById}
               analysisGrids={taggedAnalysisGrids}
               gridSize={analysisGridSize}
               gridSizeLabel={gridSizeLabel(analysisGridSize)}
@@ -708,6 +761,7 @@ function GisWorkspace() {
                 </p>
               ) : statusChip}
               regionFilter={regionFilter}
+              fitRequest={filterFitRequest}
             />
           </Card>
 
@@ -807,56 +861,6 @@ function GisWorkspace() {
               </p>
             </div>
           </Card>
-
-          {/* Grid data availability — explicit API GAP states, never fabricated values */}
-          <Card className="mt-4">
-            <CardHeader
-              title="Grid data availability"
-              icon="grid"
-              subtitle="Reference grid cells from the backend GIS API (ForestGrid)"
-            />
-            <div className="space-y-2 p-4 text-sm">
-              {grids.length > 0 ? (
-                <>
-                  <p className="flex items-center gap-2 text-ink">
-                    <Badge tone="success" dot>{taggedGrids.length} grid cells loaded</Badge>
-                    <span className="text-xs text-ink-soft">
-                      Range / beat / compartment attribution is resolved from the real GIS polygons.
-                    </span>
-                  </p>
-                  {coverageData.error ? (
-                    <p className="flex items-start gap-2 rounded-field border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-                      <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
-                      {coverageErrorMessage(coverageData.error)} The Reference Grid stays visible
-                      without coverage coloring.
-                    </p>
-                  ) : coverageSummary ? (
-                    <>
-                      <p className="flex items-start gap-2 rounded-field border border-success/30 bg-success-soft px-3 py-2 text-xs text-forest-800">
-                        <Icon name="check" size={14} className="mt-0.5 shrink-0" />
-                        Authoritative coverage is live — Patrolled {coverageSummary.patrolledCells} /{" "}
-                        {coverageSummary.totalCells}, Unpatrolled {coverageSummary.unpatrolledCells} /{" "}
-                        {coverageSummary.totalCells}, {coverageSummary.coveragePercent}% coverage.
-                      </p>
-                      <p className="flex items-center gap-2 text-xs text-ink-soft">
-                        {coverageData.loading ? "Refreshing coverage…" : "Coverage is computed per request from patrol points ∩ ForestGrid (PostGIS)."}
-                      </p>
-                    </>
-                  ) : (
-                    <p className="flex items-start gap-2 rounded-field border border-warning/30 bg-warning-soft px-3 py-2 text-xs text-[#8a4b00]">
-                      <Icon name="alert" size={14} className="mt-0.5 shrink-0" />
-                      Loading patrol coverage…
-                    </p>
-                  )}
-                </>
-              ) : (
-                <p className="rounded-field border border-line bg-surface px-3 py-2 text-xs text-ink-soft">
-                  No grid data available. The grid layer stays hidden until the backend GIS API
-                  returns survey grid polygons.
-                </p>
-              )}
-            </div>
-          </Card>
         </div>
 
         <div className="space-y-4">
@@ -874,121 +878,6 @@ function GisWorkspace() {
                 gridSize={analysisGridSize}
                 onGridSizeChange={changeGridSize}
               />
-            </div>
-          </Card>
-
-          <MapSidebarFacts rangers={rangersData.data ?? []} observations={observationsData.data ?? []} />
-
-          <Card>
-            <CardHeader
-              title="Patrol Coverage"
-              icon="layers"
-              subtitle="Authoritative ForestGrid coverage — computed by the backend (PostGIS)"
-              actions={
-                coverageData.data && !coverageData.loading && !coverageData.error ? (
-                  <button
-                    onClick={() => { invalidateCache(); coverageData.reload(); }}
-                    aria-label="Refresh patrol coverage"
-                    className="inline-flex h-7 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50"
-                  >
-                    <Icon name="refresh" size={12} /> Refresh
-                  </button>
-                ) : undefined
-              }
-            />
-            <div className="space-y-2.5 p-4">
-              {coverageData.error ? (
-                <>
-                  <p className="flex items-start gap-2 rounded-field border border-danger/30 bg-danger-soft px-3 py-2 text-xs text-danger">
-                    <Icon name="alert" size={13} className="mt-0.5 shrink-0" />
-                    {coverageErrorMessage(coverageData.error)}
-                  </p>
-                  <button
-                    onClick={() => { invalidateCache(); coverageData.reload(); }}
-                    className="inline-flex h-7 items-center gap-1 rounded-field border border-line bg-white px-2.5 text-xs font-medium text-ink transition hover:bg-forest-50"
-                  >
-                    <Icon name="refresh" size={12} /> Retry
-                  </button>
-                </>
-              ) : !coverageData.data ? (
-                <p className="text-xs text-ink-soft">Loading patrol coverage…</p>
-              ) : (
-                <>
-                  <CoverageSummaryCard summary={coverageSummary!} coverage={coverageData.data!} />
-                  {coverageData.loading && (
-                    <p className="text-xs text-ink-faint">Refreshing patrol coverage…</p>
-                  )}
-                  {coverageMixedScope && (
-                    <p className="rounded-field border border-line bg-surface px-2.5 py-2 text-[11px] leading-snug text-ink-soft">
-                      Region filter active — the summary is the backend division scope (this filter
-                      has no backend id in the reference catalog); cells on the map are
-                      region-filtered.
-                    </p>
-                  )}
-                </>
-              )}
-            </div>
-          </Card>
-
-          {assetsData.data && assetsData.data.length > 0 && (
-            <Card>
-              <CardHeader
-                title="Map assets"
-                icon="layers"
-                subtitle={`${assetsData.data.length} file(s) served by the backend GIS API`}
-              />
-              <div className="space-y-1.5 p-4">
-                {assetsData.data.map((a) => (
-                  <a
-                    key={a.id}
-                    href={api.gis.asset(a.resourceKey)}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-forest-50"
-                  >
-                    <Icon name="file" size={15} className="text-forest-700" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm text-ink">{a.resourceKey}</span>
-                      <span className="block text-xs text-ink-soft">
-                        {a.contentType} · {Math.round(a.sizeBytes / 1024)} KB · v{a.version}
-                      </span>
-                    </span>
-                  </a>
-                ))}
-              </div>
-            </Card>
-          )}
-
-          <Card>
-            <CardHeader title="Route playback" icon="play" subtitle="Replay a completed patrol trace" />
-            {routesData.error && (
-              <p className="px-4 pb-2 text-xs text-danger">
-                Couldn&apos;t load patrol routes — {routesData.error.message}
-              </p>
-            )}
-            <div className="space-y-2 p-4">
-              {routes.map((r) => (
-                <button
-                  key={r.id}
-                  onClick={() => setReplayPatrol(r.patrolId)}
-                  className={cn(
-                    "flex w-full items-center gap-2.5 rounded-card border px-3 py-2.5 text-left transition-colors",
-                    replayPatrol === r.patrolId
-                      ? "border-forest-600 bg-forest-50"
-                      : "border-line bg-surface hover:border-forest-600"
-                  )}
-                >
-                  <span className="size-2.5 rounded-full" style={{ background: r.color }} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium text-ink">{r.label}</p>
-                    <p className="text-xs text-ink-soft">{r.patrolId} · {r.status}</p>
-                  </div>
-                  {replayPatrol === r.patrolId && <Badge tone="success">Active</Badge>}
-                </button>
-              ))}
-              {routes.length === 0 && !routesData.error && (
-                <p className="py-4 text-center text-sm text-ink-soft">No patrol routes with GPS traces yet.</p>
-              )}
             </div>
           </Card>
         </div>
@@ -1046,8 +935,6 @@ function GisWorkspace() {
     </div>
   );
 }
-
-function cn(...args: unknown[]) { return args.filter(Boolean).join(" "); }
 
 type Detail = ReturnType<typeof selectedDetail>;
 
@@ -1158,6 +1045,24 @@ function SelectedCard({
               </p>
             )}
           </div>
+        ) : detail.kind === "range" ? (
+          <div className="mt-2.5 space-y-1.5 text-xs">
+            <InfoRow label="Range" value={detail.title} />
+            <InfoRow label="Division" value={FOREST_CONTEXT.divisionName} />
+          </div>
+        ) : detail.kind === "beat" ? (
+          <div className="mt-2.5 space-y-1.5 text-xs">
+            <InfoRow label="Beat" value={detail.title.replace(/\sbeat$/, "")} />
+            <InfoRow label="Range" value={detail.rangeName ?? "Not available"} />
+            {detail.body && <InfoRow label="Coverage" value={detail.body} />}
+          </div>
+        ) : detail.kind === "compartment" ? (
+          <div className="mt-2.5 space-y-1.5 text-xs">
+            <InfoRow label="Compartment" value={detail.compNo || "Not available"} />
+            <InfoRow label="Beat" value={detail.beatName ?? "Not available"} />
+            <InfoRow label="Range" value={detail.rangeName ?? "Not available"} />
+            {detail.body ? <InfoRow label="Area" value={detail.body} /> : null}
+          </div>
         ) : (
           <p className="mt-0.5 text-xs text-ink-soft">{detail.body}</p>
         )}
@@ -1182,31 +1087,5 @@ function InfoRow({ label, value }: { label: string; value: string }) {
       <span className="shrink-0 text-ink-soft">{label}</span>
       <span className="text-right font-medium text-ink">{value}</span>
     </div>
-  );
-}
-
-/** Sidebar summary — displays the backend's authoritative summary verbatim. */
-function CoverageSummaryCard({ summary, coverage }: { summary: NonNullable<ApiGridCoverage["summary"]>; coverage: ApiGridCoverage }) {
-  const generated = formatCoverageTime(coverage.generatedAt);
-  return (
-    <>
-      <div className="flex items-end justify-between border-b border-line pb-2">
-        <span className="text-xs font-medium text-ink-soft">Coverage</span>
-        <span className="text-2xl font-semibold tabular-nums text-ink">{summary.coveragePercent}%</span>
-      </div>
-      <div className="space-y-1.5 pt-1">
-        <InfoRow label="Patrolled" value={`${summary.patrolledCells} / ${summary.totalCells}`} />
-        <InfoRow label="Unpatrolled" value={`${summary.unpatrolledCells} / ${summary.totalCells}`} />
-        <InfoRow label="Patrol points" value={String(summary.pointCount)} />
-      </div>
-      <div className="flex flex-wrap items-center gap-2 border-t border-line pt-2">
-        <Badge tone={summary.patrolledCells > 0 ? "success" : "neutral"}>
-          {summary.patrolledCells > 0 ? "Patrolled" : "Unpatrolled"}
-        </Badge>
-        <span className="text-[10px] text-ink-faint">
-          {COVERAGE_SCOPE_LABELS[coverage.scope.kind] ?? "Backend scope"} · computed {generated ?? "now"}
-        </span>
-      </div>
-    </>
   );
 }

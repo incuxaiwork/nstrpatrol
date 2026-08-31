@@ -10,10 +10,10 @@
  *     the camera,
  *   • a free viewport: pan/zoom is NOT clamped to the forest bounds,
  *   • the same GeoJSON layer model — reserve boundary, forest beats,
- *     ranges, compartments, grids, patrol routes, ranger / sighting /
- *     incident markers, the live SOS alert feed, coverage tint, danger heat
- *     — every overlay driven by the EXTERNAL layer control panel via real
- *     MapLibre visibility switches (lib/map-layers.ts),
+ *     ranges, compartments, the analysis grid, patrol routes, ranger /
+ *     sighting / incident markers, the live SOS alert feed, coverage tint,
+ *     danger heat — every overlay driven by the EXTERNAL layer control panel
+ *     via real MapLibre visibility switches (lib/map-layers.ts),
  *   • interactive affordances: pan / zoom / rotate / tilt gestures,
  *     tap-to-select, floating controls (zoom in/out, reset bearing,
  *     recenter, fullscreen), collapsible legend and patrol-track replay.
@@ -22,7 +22,7 @@
  * lon/lat). Replaces the old static SVG map across all pages.
  */
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Map as MapLibreMap,
@@ -52,18 +52,15 @@ import type { TaggedGrid } from "@/lib/grid-regions";
 import { unitName } from "@/lib/mock/hierarchy";
 import { categoryMeta } from "@/lib/mock/observations";
 import type { Observation, Ranger } from "@/lib/types";
-import type { BlockPolygon, BoundaryPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
+import type { BoundaryPolygon, CompartmentPolygon } from "@/lib/backend-adapters";
 import {
   analysisGridsToFeatures,
   beatsToFeatures,
-  blockLabelsToFeatures,
-  blocksToFeatures,
   boundaryFromBeats,
   boundariesToFeatures,
   compartmentLabelsToFeatures,
   compartmentsToFeatures,
   emptyFc,
-  gridsToFeatures,
   heatToFeatures,
   livePathsToFeatures,
   liveRangersToFeatures,
@@ -71,10 +68,10 @@ import {
   rangeLabelsToFeatures,
   rangesFromBeats,
   rangesToFeatures,
+  regionHoverToFeatures,
   replayFeatures,
   routeToTimed,
   routesToFeatures,
-  type GridCoverageInfo,
   type LivePathFeature,
   type LiveRangerFeature,
   type TimedPoint,
@@ -121,16 +118,6 @@ export interface MapProps {
   liveBeats?: BeatPolygon[];
   compartments?: CompartmentPolygon[];
   boundary?: BoundaryPolygon[];
-  /** Facing blocks — compartments dissolved by canonical block name (BLOCK). */
-  blocks?: BlockPolygon[];
-  /** Reference backend ForestGrid cells (survey grid, ~3.3 km). */
-  grids?: GridPolygon[];
-  /**
-   * Authoritative coverage per ForestGrid id (from GET /api/coverage/grids,
-   * joined by grid id). Feeds the patrolled/unpatrolled data-driven styling
-   * on the reference grid. Cells without a record keep the neutral style.
-   */
-  coverageById?: Record<string, GridCoverageInfo> | null;
   /** Attribute-registered analysis-grid cells (frontend-generated, configurable size). */
   analysisGrids?: TaggedGrid[];
   /** Active analysis-grid cell size (drives label + tooltip). */
@@ -193,6 +180,12 @@ export interface MapProps {
    * change without touching layer state.
    */
    focus?: { lng: number; lat: number; zoom?: number } | null;
+  /**
+   * Camera fit request when the region filter narrows to a specific
+   * Range / Beat / Compartment. Applied via fitBounds whenever the bounds
+   * change. Null/omitted fits nothing (clears back to the free camera).
+   */
+   fitRequest?: { west: number; south: number; east: number; north: number } | null;
 }
 
 export interface GridRegionFilter {
@@ -236,7 +229,6 @@ const CLICKABLE = [
   "gl-markers-obs",
   "gl-markers-sos",
   "gl-sos-dot",
-  "gl-grids-fill",
 ];
 
 /** Checkbox → GL layer ids. The basemap radio is handled separately
@@ -246,16 +238,16 @@ const TOGGLE_LAYERS: Record<Exclude<keyof ForestLayerState, "basemap">, string[]
   // renders as the plain basemap inside its outline. Beats DO carry the
   // Android-app's subtle dark-green tint (#1E4620 @ 0.12, MapsScreen.kt
   // "beats-fill-layer"); sources are untouched beyond that.
-  boundary: ["gl-boundary-line", "gl-boundary-label"],
+boundary: ["gl-boundary-line"],
   // Beat group owns EVERYTHING beat-derived: hit-test fill, outlines, labels
   // AND the authorized-patrol highlight (gl-auth-*) — previously these two
   // were orphaned outside this map and stayed visible with every box off
-  // (the reported stray violet lines).
-  beats: ["gl-beats-fill", "gl-beats-outline", "gl-beats-label", "gl-auth-fill", "gl-auth-line"],
-ranges: ["gl-ranges-outline", "gl-ranges-label"],
-  compartments: ["gl-compartments-fill", "gl-compartments-line", "gl-compartments-label"],
-  blocks: ["gl-blocks-fill", "gl-blocks-outline", "gl-blocks-label"],
-  grids: ["gl-grids-fill", "gl-grids-line"],
+  // (the reported stray violet lines). Labels are governed by the
+  // label-priority effect (LAYER_LABEL_RULES) so a coarser layer's label
+  // never overlaps a finer one's.
+  beats: ["gl-beats-fill", "gl-beats-outline", "gl-auth-fill", "gl-auth-line"],
+  ranges: ["gl-ranges-fill", "gl-ranges-outline"],
+  compartments: ["gl-compartments-fill", "gl-compartments-line"],
   analysisGrid: [
     "gl-agrid-fill",
     "gl-agrid-line",
@@ -283,9 +275,9 @@ ranges: ["gl-ranges-outline", "gl-ranges-label"],
   markers: ["gl-markers-obs"],
   sos: ["gl-markers-sos", "gl-markers-sos-label", "gl-sos-dot", "gl-sos-ring", "gl-sos-label"],
   zeropatrol: ["gl-beats-zero-dash"],
-  // Coverage group = authoritative grid coverage + the per-beat coverage tint
-  // (a coverage visualization, not a boundary — so Beat ON stays pure lines).
-  coverage: ["gl-grids-coverage", "gl-grids-coverage-line", "gl-beats-coverage"],
+  // Coverage group = the per-beat coverage tint (a coverage visualization,
+  // not a boundary — so Beat ON stays pure lines).
+  coverage: ["gl-beats-coverage"],
   heat: ["gl-heat"],
 };
 
@@ -310,11 +302,8 @@ const REGION_FILTERED_LAYERS = [
   "gl-compartments-line",
   "gl-compartments-label",
   "gl-ranges-outline",
+  "gl-ranges-fill",
   "gl-ranges-label",
-  "gl-grids-fill",
-  "gl-grids-line",
-  "gl-grids-coverage",
-  "gl-grids-coverage-line",
   "gl-agrid-fill",
   "gl-agrid-line",
   "gl-agrid-label",
@@ -363,13 +352,10 @@ function buildLayers(m: MapLibreMap) {
     "replay-head",
     "replay-points",
     "compartments",
-    "blocks",
-    "block-labels",
     "ranges",
     "range-labels",
     "compartment-labels",
     "boundary",
-    "grids",
     "analysis-grid",
     "sos-alerts",
   ]) {
@@ -396,68 +382,7 @@ function buildLayers(m: MapLibreMap) {
     layout: { visibility: "none" },
   });
 
-  // 2. Survey grids — geographic grid cells from the backend GIS API.
-  //    Subtle by design: lines must never overpower patrol routes, incidents,
-  //    observations or forest boundaries (zoomed out → lighter/simplified,
-  //    zoomed in → clearer). Geometry is the backend's real grid — this
-  //    frontend never generates a second grid in the browser.
-  m.addLayer({
-    id: "gl-grids-fill",
-    type: "fill",
-    source: "grids",
-    paint: { "fill-color": "#8a8f98", "fill-opacity": 0.05 },
-  });
-  m.addLayer({
-    id: "gl-grids-line",
-    type: "line",
-    source: "grids",
-    minzoom: 5.5,
-    paint: {
-      "line-color": "#8a8f98",
-      "line-width": ["interpolate", ["linear"], ["zoom"], 7, 0.5, 13, 1.1, 16, 1.6],
-      "line-opacity": ["interpolate", ["linear"], ["zoom"], 6, 0.2, 10, 0.45, 14, 0.75],
-    },
-  });
-  // Per-cell coverage tint — data-driven fill fed by the authoritative
-  // coverage API (joined by ForestGrid id). coverageStatus ∈ covered /
-  // uncovered; a cell without a coverage record stays neutral (no data).
-  // Colors re-use the established GIS palette (see legend rows below).
-  m.addLayer({
-    id: "gl-grids-coverage",
-    type: "fill",
-    source: "grids",
-    filter: ["!=", ["get", "coverageStatus"], null],
-    paint: {
-      "fill-color": [
-        "case",
-        ["==", ["get", "coverageStatus"], "covered"],
-        "#2E7D32",
-        ["==", ["get", "coverageStatus"], "uncovered"],
-        "#B3261E",
-        "#8a8f98",
-      ],
-      "fill-opacity": 0.18,
-    },
-  });
-  m.addLayer({
-    id: "gl-grids-coverage-line",
-    type: "line",
-    source: "grids",
-    filter: ["!=", ["get", "coverageStatus"], null],
-    paint: {
-      "line-color": [
-        "case",
-        ["==", ["get", "coverageStatus"], "covered"],
-        "#2E7D32",
-        ["==", ["get", "coverageStatus"], "uncovered"],
-        "#B3261E",
-        "#8a8f98",
-      ],
-      "line-width": 1.6,
-    },
-  });
-
-  // 3. Per-beat coverage tint (green ramp where a beat carries a coverage
+  // 2. Per-beat coverage tint (green ramp where a beat carries a coverage
   //    figure). It is a COVERAGE visualization and follows the Coverage
   //    checkbox — Beat ON alone shows boundaries only.
   m.addLayer({
@@ -479,7 +404,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 4. Danger heat blocks.
+  // 3. Danger heat blocks.
   m.addLayer({
     id: "gl-heat",
     type: "fill",
@@ -487,11 +412,11 @@ function buildLayers(m: MapLibreMap) {
     paint: { "fill-color": "#B3261E", "fill-opacity": ["*", ["get", "intensity"], 0.32] },
   });
 
-  // 5. Compartments — the LIGHTEST administrative line: thin red dashed,
-  //    low opacity, zoom-gated so dense internal boundaries only appear when
-  //    the admin has zoomed in. Fill is hit-test only. Drawn BELOW the beats
-  //    stack (hierarchy bottom→top: compartments → blocks → beats → ranges →
-  //    boundary) so beats always render on top of compartment lines.
+  // 4. Compartments — bright sky-blue dashed internal lines, zoom-gated so
+  //    dense internal boundaries only appear when the admin has zoomed in.
+  //    Fill is hit-test only. Drawn BELOW the beats stack (hierarchy
+  //    bottom→top: compartments → beats → ranges → boundary) so beats always
+  //    render on top of compartment lines.
   m.addLayer({
     id: "gl-compartments-fill",
     type: "fill",
@@ -502,12 +427,22 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-compartments-line",
     type: "line",
     source: "compartments",
-    minzoom: 9.5,
+    minzoom: 9.0,
     paint: {
-      "line-color": "#B3261E",
-      "line-width": 1,
-      "line-dasharray": [4, 3],
-      "line-opacity": 0.7,
+      "line-color": [
+        "case",
+        ["boolean", ["get", "filtered"], false],
+        "#FACC15",
+        "#38BDF8",
+      ],
+      "line-width": ["case", ["boolean", ["get", "filtered"], false], 2.5, 1.6],
+      "line-dasharray": [
+        "case",
+        ["boolean", ["get", "filtered"], false],
+        ["literal", [1, 0]],
+        ["literal", [4, 3]],
+      ],
+      "line-opacity": ["case", ["boolean", ["get", "filtered"], false], 1, 0.95],
     },
   });
   m.addLayer({
@@ -521,51 +456,13 @@ function buildLayers(m: MapLibreMap) {
       "text-allow-overlap": false,
     },
     paint: {
-      "text-color": "#6A3AB2",
+      "text-color": "#0C8BB8",
       "text-halo-color": "#ffffff",
       "text-halo-width": 1.5,
     },
   });
 
-  // 6. Blocks — the Facing dissolve: each compartment's canonical block name
-  //    merges its outline into one medium purple boundary (ST_Union-equivalent,
-  //    edge-dissolved in map-space so interior compartment lines vanish).
-  //    Between compartments (below) and beats (above): blocks are the coarser
-  //    operational unit patrols actually refer to.
-  m.addLayer({
-    id: "gl-blocks-fill",
-    type: "fill",
-    source: "blocks",
-    paint: { "fill-color": "#5B2C6F", "fill-opacity": 0.07 },
-  });
-  m.addLayer({
-    id: "gl-blocks-outline",
-    type: "line",
-    source: "blocks",
-    paint: {
-      "line-color": "#5B2C6F",
-      "line-width": 2,
-      "line-opacity": 0.85,
-    },
-  });
-  m.addLayer({
-    id: "gl-blocks-label",
-    type: "symbol",
-    source: "block-labels",
-    minzoom: 7.5,
-    layout: {
-      "text-field": ["get", "name"],
-      "text-size": 12,
-      "text-allow-overlap": false,
-    },
-    paint: {
-      "text-color": "#5B2C6F",
-      "text-halo-color": "#ffffff",
-      "text-halo-width": 2,
-    },
-  });
-
-  // 7. Beat polygons — boundary-focused: the fill exists ONLY for click
+  // 5. Beat polygons — boundary-focused: the fill exists ONLY for click
   //    hit-testing (fill-opacity ≈ 0), outlines are a distinct teal so beats
   //    never read as a green bucket and never blend with the deep-green
   //    reserve boundary. Zero-patrol beats keep their red dashed outline;
@@ -601,12 +498,23 @@ function buildLayers(m: MapLibreMap) {
     paint: {
       "line-color": [
         "case",
+        ["boolean", ["get", "filtered"], false],
+        "#FACC15",
+        ["boolean", ["get", "selected"], false],
+        "#B4450C",
         ["boolean", ["get", "isZero"], false],
         "#B3261E",
-        ["case", ["boolean", ["get", "selected"], false], "#B4450C", "#E65100"],
+        "#E65100",
       ],
-      "line-width": ["case", ["boolean", ["get", "selected"], false], 3, 2.2],
-      "line-opacity": 0.9,
+      "line-width": [
+        "case",
+        ["boolean", ["get", "filtered"], false],
+        3,
+        ["boolean", ["get", "selected"], false],
+        3,
+        2.2,
+      ],
+      "line-opacity": ["case", ["boolean", ["get", "selected"], false], 1, 0.9],
     },
   });
   m.addLayer({
@@ -638,16 +546,24 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 8. Ranges (derived hulls of each range's beats) — one consistent strong
-  //    blue. Between the medium purple blocks and the heavy forest boundary.
-  //    A rainbow of per-range colors read as random violet/orange noise;
-  //    hierarchy needs ONE range color.
+  // 6. Ranges (derived hulls of each range's beats) — one consistent vivid
+  //    bright-pink boundary. Between the beat outlines and the heavy forest
+  //    boundary. A rainbow of per-range colors read as random violet/orange
+  //    noise; hierarchy needs ONE range color. An invisible fill makes the
+  //    range area individually clickable (range selection), hiding with the
+  //    same checkbox group.
+  m.addLayer({
+    id: "gl-ranges-fill",
+    type: "fill",
+    source: "ranges",
+    paint: { "fill-color": "#FF1493", "fill-opacity": 0.02 },
+  });
   m.addLayer({
     id: "gl-ranges-outline",
     type: "line",
     source: "ranges",
     paint: {
-      "line-color": "#0E4C92",
+      "line-color": "#FF1493",
       "line-width": 3,
       "line-opacity": 0.95,
     },
@@ -669,16 +585,15 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 9. Reserve boundary — the STRONGEST administrative line: solid deep
-  //    forest green, heaviest width. Painted AFTER the unit layers (blocks,
-  //    ranges, …) so the forest outline always reads on top. Outline only —
-  //    never a fill.
+  // 7. Reserve boundary — the STRONGEST administrative line: solid red,
+  //    heaviest width. Painted AFTER the unit layers (ranges, …) so the
+  //    forest outline always reads on top. Outline only — never a fill.
   m.addLayer({
     id: "gl-boundary-line",
     type: "line",
     source: "boundary",
     paint: {
-      "line-color": "#1B4332",
+      "line-color": "#DC2626",
       "line-width": ["interpolate", ["linear"], ["zoom"], 8, 3.2, 14, 5.5],
       "line-opacity": 0.95,
     },
@@ -702,7 +617,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 9b. Analysis grid — frontend-generated metric cells (configurable size).
+  // 7b. Analysis grid — frontend-generated metric cells (configurable size).
   //     Placed beneath patrol routes / markers so operational data always
   //     stays on top. Selection is a data-driven highlight on the same cells.
   m.addLayer({
@@ -742,7 +657,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 10. Patrol routes + playback track. The replay visual is the Android
+  // 8. Patrol routes + playback track. The replay visual is the Android
   //    PatrolReportScreen language: white casing under a bold blue line
   //    (#2E7BF6 w 5 @ 0.95, round caps), every recorded GPS fix as a small
   //    blue dot, and the playhead as the app's "current position" marker
@@ -801,7 +716,7 @@ function buildLayers(m: MapLibreMap) {
     },
   });
 
-  // 10b. LIVE patrol operations (GET /api/patrols/live). Painted AFTER the
+  // 9b. LIVE patrol operations (GET /api/patrols/live). Painted AFTER the
   //     historical routes/replay and BEFORE the ground markers/SOS layers,
   //     so the active-patrol window reads on top of recorded traces while an
   //     SOS alert still wins the stack. Amber = live operations color; gray
@@ -862,7 +777,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "text-color": "#5B3A00", "text-halo-color": "#ffffff", "text-halo-width": 2 },
   });
 
-  // 11. Ground markers — rangers, sightings/incidents, SOS.
+  // 10. Ground markers — rangers, sightings/incidents, SOS.
   m.addLayer({
     id: "gl-markers-ranger",
     type: "circle",
@@ -916,7 +831,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "text-color": "#fff", "text-halo-color": "#B3261E", "text-halo-width": 2 },
   });
 
-  // 12. Analysis-grid selection highlight — above routes/markers so the
+  // 11. Analysis-grid selection highlight — above routes/markers so the
   //     choice reads clearly; painted only on selected cells.
   m.addLayer({
     id: "gl-agrid-sel-fill",
@@ -933,7 +848,7 @@ function buildLayers(m: MapLibreMap) {
     paint: { "line-color": "#0E4C92", "line-width": 2, "line-opacity": 0.9 },
   });
 
-  // 13. Live SOS alert feed (GET /api/alerts → SOS events). A halo ring +
+  // 12. Live SOS alert feed (GET /api/alerts → SOS events). A halo ring +
   //     bold dot + label; sits above everything so an emergency is always
   //     readable regardless of overlay density.
   m.addLayer({
@@ -963,6 +878,34 @@ function buildLayers(m: MapLibreMap) {
     source: "sos-alerts",
     layout: { "text-field": "SOS", "text-size": 11 },
     paint: { "text-color": "#ffffff" },
+  });
+
+  // 13. Region hover highlight — the TOPMOST boundary layer. Drawn after
+  //     every other layer so a hovered Beat / Compartment's COMPLETE boundary
+  //     always renders above Forest/Range/Beat/Compartment lines and fills no
+  //     matter how dense the map is. Fed with only the hovered geometry via
+  //     the "region-hover" source (empty = no highlight). Uses a dark casing
+  //     halo so the yellow reads clearly on satellite/terrain basemaps.
+  m.addSource("region-hover", { type: "geojson", data: emptyFc() });
+  m.addLayer({
+    id: "gl-region-hover-case",
+    type: "line",
+    source: "region-hover",
+    paint: {
+      "line-color": "#1F2937",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 6, 5, 14, 9],
+      "line-opacity": 0.55,
+    },
+  });
+  m.addLayer({
+    id: "gl-region-hover-line",
+    type: "line",
+    source: "region-hover",
+    paint: {
+      "line-color": "#FACC15",
+      "line-width": ["interpolate", ["linear"], ["zoom"], 6, 2.5, 14, 4.5],
+      "line-opacity": 1,
+    },
   });
 }
 
@@ -1123,9 +1066,6 @@ export function MapWorkspace({
   liveBeats,
   compartments,
   boundary,
-  blocks,
-  grids,
-  coverageById,
   analysisGrids,
   gridSize = DEFAULT_GRID_SIZE,
   gridSizeLabel: gridSizeLabelProp,
@@ -1145,6 +1085,7 @@ export function MapWorkspace({
   onLayerStateChange,
   sosAlerts,
   focus,
+  fitRequest,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
@@ -1167,6 +1108,18 @@ export function MapWorkspace({
   const [legendOpen, setLegendOpen] = useState(false);
   const [isFull, setIsFull] = useState(false);
   const [layersOverlayOpen, setLayersOverlayOpen] = useState(false);
+
+  // Region hover (beats/compartments) — drives the yellow outline highlight.
+  // Kept via a ref so the pointer handler never re-fires per mousemove.
+  const regionHoverRef = useRef<{ beatId?: string; compId?: string }>({});
+  const [regionHover, setRegionHover] = useState<{ beatId?: string; compId?: string }>({});
+  const applyRegionHover = useCallback((next: { beatId?: string; compId?: string }) => {
+    const cur = regionHoverRef.current;
+    if (next.beatId !== cur.beatId || next.compId !== cur.compId) {
+      regionHoverRef.current = next;
+      setRegionHover(next);
+    }
+  }, []);
 
   const [replayOn, setReplayOn] = useState(false);
   const [replaySpeed, setReplaySpeed] = useState(1);
@@ -1261,7 +1214,12 @@ export function MapWorkspace({
   }, []);
 
   // Feed GeoJSON data into the sources.
-  const beatsFc = useMemo(() => beatsToFeatures(beats, selectedId), [beats, selectedId]);
+  const filterBeatId = regionFilter?.beatId ?? null;
+  const filterCompId = regionFilter?.compId ?? null;
+  const beatsFc = useMemo(
+    () => beatsToFeatures(beats, selectedId, regionHover.beatId ?? null, filterBeatId),
+    [beats, selectedId, regionHover.beatId, filterBeatId]
+  );
   // When the dedicated SOS layer is fed, drop SOS-kind points from the
   // generic sightings/incidents layer so an alert never renders twice.
   const groundMarkers = useMemo(
@@ -1290,10 +1248,25 @@ export function MapWorkspace({
   const heatFc = useMemo(() => heatToFeatures(heat ?? []), [heat]);
   const rangesFc = useMemo(() => rangesToFeatures(ranges), [ranges]);
   const rangeLabelsFc = useMemo(() => rangeLabelsToFeatures(ranges), [ranges]);
-  const compartmentsFc = useMemo(() => compartmentsToFeatures(comps), [comps]);
+  const compartmentsFc = useMemo(
+    () => compartmentsToFeatures(comps, regionHover.compId ?? null, filterCompId),
+    [comps, regionHover.compId, filterCompId]
+  );
   const compartmentLabelsFc = useMemo(() => compartmentLabelsToFeatures(comps), [comps]);
-  const blocksFc = useMemo(() => blocksToFeatures(blocks ?? []), [blocks]);
-  const blockLabelsFc = useMemo(() => blockLabelsToFeatures(blocks ?? []), [blocks]);
+  // Topmost hover highlight — the complete boundary of the hovered Beat or
+  // Compartment, fed only to the dedicated region-hover source (see
+  // buildLayers). Empty when nothing is hovered.
+  const regionHoverFc = useMemo(
+    () =>
+      regionHoverToFeatures(
+        regionHover.beatId ?? null,
+        regionHover.compId ?? null,
+        beats,
+        comps,
+        (c) => c.compId ?? null
+      ),
+    [regionHover.beatId, regionHover.compId, beats, comps]
+  );
   // Reserved forest boundary. When the backend /boundary endpoint is empty
   // (PostGIS unavailable), derive the boundary from the REAL beat polygons
   // (edge dissolve → ST_Union-equivalent outline) so the Forest Boundary
@@ -1302,7 +1275,6 @@ export function MapWorkspace({
   const effectiveBoundary =
     boundary && boundary.length > 0 ? boundary : derivedBoundary;
   const boundaryFc = useMemo(() => boundariesToFeatures(effectiveBoundary), [effectiveBoundary]);
-  const gridsFc = useMemo(() => gridsToFeatures(grids ?? [], coverageById), [grids, coverageById]);
   const analysisGridsFc = useMemo(
     () => analysisGridsToFeatures(analysisGrids ?? [], selectedGridIds),
     [analysisGrids, selectedGridIds]
@@ -1321,10 +1293,8 @@ export function MapWorkspace({
     setSourceData(m, "range-labels", rangeLabelsFc);
     setSourceData(m, "compartments", compartmentsFc);
     setSourceData(m, "compartment-labels", compartmentLabelsFc);
-    setSourceData(m, "blocks", blocksFc);
-    setSourceData(m, "block-labels", blockLabelsFc);
+    setSourceData(m, "region-hover", regionHoverFc);
     setSourceData(m, "boundary", boundaryFc);
-    setSourceData(m, "grids", gridsFc);
     setSourceData(m, "analysis-grid", analysisGridsFc);
     setSourceData(m, "sos-alerts", sosAlertsFc);
 
@@ -1341,7 +1311,7 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, blocksFc, blockLabelsFc, boundaryFc, gridsFc, analysisGridsFc, sosAlertsFc]);
+  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, analysisGridsFc, sosAlertsFc, regionHoverFc]);
 
   // Layer checkbox visibility (overlay groups).
   useEffect(() => {
@@ -1355,6 +1325,33 @@ export function MapWorkspace({
       }
     }
   }, [ready, layerState]);
+
+  // Label priority — at most one administrative hierarchy label reads at
+  // a time, always the FINEST layer that is visible: the crowd on a dense map
+  // comes from beat/range/boundary names overlapping compartment numbers.
+  //   • Boundary label — only with boundary ON and none of ranges/beats/
+  //     compartments ON (all three finer layers are hidden anyway).
+  //   • Range label — only with ranges ON and beats/compartments OFF.
+  //   • Beat label — whenever beats OR compartments are ON (compartment
+  //     numbers can leave the beat name blank at zoom-out).
+  //   • Compartment label — whenever compartments are ON.
+  // Labels are NOT in TOGGLE_LAYERS (they never had their own checkbox) and
+  // this effect is deliberately independent of the region filter — filtering
+  // de-duplicates, it never hides a category the user asked for.
+  useEffect(() => {
+    if (!ready) return;
+    const m = mapRef.current!;
+    const rules: { lid: string; on: boolean }[] = [
+      { lid: "gl-boundary-label", on: layerState.boundary && !layerState.ranges && !layerState.beats && !layerState.compartments },
+      { lid: "gl-ranges-label", on: layerState.ranges && !layerState.beats && !layerState.compartments },
+      { lid: "gl-beats-label", on: layerState.beats || layerState.compartments },
+      { lid: "gl-compartments-label", on: layerState.compartments },
+    ];
+    for (const rule of rules) {
+      if (!m.getLayer(rule.lid)) continue;
+      m.setLayoutProperty(rule.lid, "visibility", rule.on ? "visible" : "none");
+    }
+  }, [ready, layerState.boundary, layerState.ranges, layerState.beats, layerState.compartments]);
 
   // Basemap radio — exactly one raster basemap visible; the camera is never
   // touched by a basemap switch.
@@ -1389,6 +1386,26 @@ export function MapWorkspace({
     }
   }, [ready, regionFilter]);
 
+  // Region filter camera fit — selecting a Range / Beat / Compartment from
+  // GIS filters must actually narrow the visible map to that entity (not just
+  // change dropdown values). Re-fits whenever `key` changes so re-selecting
+  // the same bounds still animates; free navigation otherwise untouched.
+  useEffect(() => {
+    if (!ready || !fitRequest) return;
+    const m = mapRef.current!;
+    try {
+      m.fitBounds(
+        [
+          [fitRequest.west, fitRequest.south],
+          [fitRequest.east, fitRequest.north],
+        ],
+        { padding: 64, maxZoom: 14, duration: 900 }
+      );
+    } catch {
+      // ignore degenerate bounds
+    }
+  }, [ready, fitRequest]);
+
   // Feature pick + hover cursor (incl. analysis-grid click/hover).
   useEffect(() => {
     if (!ready) return;
@@ -1404,20 +1421,14 @@ export function MapWorkspace({
       }
     };
     const onMove = (e: MapMouseEvent) => {
-      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
-      if (gridHit) {
-        const id = String(gridHit.properties?.id ?? "");
-        const code = String(gridHit.properties?.gridCode ?? id);
-        hoveredGridId = id || null;
-        setGridTooltip({ x: e.point.x, y: e.point.y, code });
-        onGridHover?.(hoveredGridId);
-        setHoverCard(null);
-        m.getCanvas().style.cursor = "pointer";
-        return;
-      }
-      clearGridHover();
+      // The Analysis Grid is a VISUAL overlay — it must never preempt the
+      // administrative or operations layers, so grid hover/tooltip is only
+      // reached after beat/compartment/range and operations features have had
+      // their turn. Order: operations hover-card → region (beat/compartment)
+      // yellow highlight → grid tooltip last.
       const hoverHit = m.queryRenderedFeatures(e.point, { layers: HOVER_LAYERS })[0];
       if (hoverHit) {
+        clearGridHover();
         const rect = m.getContainer().getBoundingClientRect();
         setHoverCard(
           hoverCardFromProps(hoverHit.properties ?? {}, {
@@ -1431,26 +1442,95 @@ export function MapWorkspace({
         return;
       }
       setHoverCard(null);
+      const regionHit = m.queryRenderedFeatures(e.point, {
+        layers: ["gl-beats-fill", "gl-compartments-fill"],
+      });
+      let nextBeatId: string | undefined;
+      let nextCompId: string | undefined;
+      for (const f of regionHit) {
+        const props = f.properties ?? {};
+        if (!nextBeatId && typeof props.beatId === "string" && props.beatId) {
+          nextBeatId = props.beatId;
+        }
+        if (!nextCompId && f.layer?.id === "gl-compartments-fill" && typeof props.compId === "string" && props.compId) {
+          nextCompId = props.compId;
+        }
+      }
+      if (nextBeatId || nextCompId) {
+        clearGridHover();
+        applyRegionHover({ beatId: nextBeatId, compId: nextCompId });
+        m.getCanvas().style.cursor = "pointer";
+        return;
+      }
+      applyRegionHover({});
+      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
+      if (gridHit) {
+        const id = String(gridHit.properties?.id ?? "");
+        const code = String(gridHit.properties?.gridCode ?? id);
+        hoveredGridId = id || null;
+        setGridTooltip({ x: e.point.x, y: e.point.y, code });
+        onGridHover?.(hoveredGridId);
+        m.getCanvas().style.cursor = "pointer";
+        return;
+      }
+      clearGridHover();
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable });
       m.getCanvas().style.cursor = hit.length > 0 ? "pointer" : "";
     };
     const onClick = (e: MapMouseEvent) => {
-      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
-      if (gridHit) {
-        const id = String(gridHit.properties?.id ?? "");
-        if (id) onGridClick?.(id);
-        return;
-      }
       setGridTooltip(null);
       setHoverCard(null);
       onGridHover?.(null);
+      // Fine-first selection — every administrative entity is individually
+      // selectable and finer entities win:
+      //   1) compartment (finest) → 2) beat → 3) range → 4) route/marker/SOS.
+      // A compartment always sits geometrically inside a beat, and the beat /
+      // range fills are painted ON TOP of the compartment fill — so a single
+      // combined query returns the coarser beat/range first and a click inside
+      // a compartment would select a whole beat ("a bunch of compartments
+      // treated as one group"). Each layer is queried explicitly by its own
+      // fill and its exact hit preferred; every compartment feature keeps its
+      // own unique id, so only the clicked compartment is selected.
+      const compHit = m.queryRenderedFeatures(e.point, { layers: ["gl-compartments-fill"] })[0];
+      const compSel = compHit?.properties?.compId ?? compHit?.properties?.id;
+      if (compSel) {
+        onSelect?.(String(compSel));
+        return;
+      }
+      const beatHit = m.queryRenderedFeatures(e.point, { layers: ["gl-beats-fill"] })[0];
+      if (beatHit?.properties?.id) {
+        onSelect?.(String(beatHit.properties.id));
+        return;
+      }
+      const rangeHit = m.queryRenderedFeatures(e.point, {
+        layers: ["gl-ranges-fill", "gl-ranges-outline"],
+      })[0];
+      if (rangeHit?.properties?.id) {
+        onSelect?.(String(rangeHit.properties.id));
+        return;
+      }
       const hit = m.queryRenderedFeatures(e.point, { layers: clickable })[0];
       const id = hit?.properties?.id;
-      onSelect?.(typeof id === "string" ? id : null);
+      if (typeof id === "string") {
+        onSelect?.(id);
+        return;
+      }
+      // Analysis Grid is a VISUAL overlay — it must never consume clicks meant
+      // for forest/range/beat/compartment or operations features, so it is
+      // only reached when NOTHING else was hit (e.g. sparse grid margins).
+      // Grid polygons covering a real feature always let that feature win.
+      const gridHit = m.queryRenderedFeatures(e.point, { layers: gridLayers })[0];
+      if (gridHit) {
+        const gridId = String(gridHit.properties?.id ?? "");
+        if (gridId) onGridClick?.(gridId);
+        return;
+      }
+      onSelect?.(null);
     };
     const onLeave = () => {
       clearGridHover();
       setHoverCard(null);
+      applyRegionHover({});
       m.getCanvas().style.cursor = "";
     };
     const canvas = m.getCanvas();
@@ -1462,7 +1542,7 @@ export function MapWorkspace({
       m.off("click", onClick);
       canvas.removeEventListener("pointerleave", onLeave);
     };
-  }, [ready, onSelect, onGridClick, onGridHover]);
+  }, [ready, onSelect, onGridClick, onGridHover, applyRegionHover]);
 
   // Replay model (real GIS route or synthesized from real lat/lng points).
   const replayRoute = useMemo<ReplayModel | undefined>(() => {
@@ -1549,9 +1629,7 @@ export function MapWorkspace({
             NSTR Forest — operational view · {FOREST_CONTEXT.divisionName}
             {analysisGrids && analysisGrids.length > 0
               ? ` · ${analysisGrids.length} ${gridSizeLabel(gridSize)} grid cells`
-              : grids && grids.length > 0
-                ? ` · ${grids.length} reference cells`
-                : ""}
+              : ""}
           </span>
         </div>
         <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
@@ -1757,11 +1835,10 @@ const BASEMAP_LABELS: Record<BasemapKey, string> = {
  *  the GL paint exactly, so the legend never describes a hidden layer. */
 function activeLegendRows(s: ForestLayerState): { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] {
   const rows: { color: string; label: string; dashed?: boolean; isPoint?: boolean }[] = [];
-  if (s.boundary) rows.push({ color: "#1B4332", label: "Forest boundary" });
-  if (s.ranges) rows.push({ color: "#0E4C92", label: "Range boundary" });
+  if (s.boundary) rows.push({ color: "#DC2626", label: "Forest boundary" });
+  if (s.ranges) rows.push({ color: "#FF1493", label: "Range boundary" });
   if (s.beats) rows.push({ color: "#E65100", label: "Beat boundary" });
-  if (s.blocks) rows.push({ color: "#5B2C6F", label: "Block (Facing)" });
-  if (s.compartments) rows.push({ color: "#B3261E", label: "Compartment boundary", dashed: true });
+  if (s.compartments) rows.push({ color: "#38BDF8", label: "Compartment boundary", dashed: true });
   if (s.routes) {
     rows.push({ color: "#FF8F00", label: "Live patrol route (active patrol)" });
     rows.push({ color: "#2E7D32", label: "Patrol route" });
@@ -1777,14 +1854,12 @@ function activeLegendRows(s: ForestLayerState): { color: string; label: string; 
   if (s.sos) rows.push({ color: "#B3261E", label: "SOS alert (live feed)", isPoint: true });
   if (s.zeropatrol) rows.push({ color: "#B3261E", label: "Zero patrol zone", dashed: true });
   if (s.coverage) {
-    rows.push({ color: "#2E7D32", label: "Coverage — patrolled cell" });
-    rows.push({ color: "#B3261E", label: "Coverage — unpatrolled cell" });
+    rows.push({ color: "#2E7D32", label: "Patrol coverage (per-beat tint)" });
   }
   if (s.analysisGrid) {
     rows.push({ color: "#8a8f98", label: "Analysis grid cell" });
     rows.push({ color: "#0E4C92", label: "Analysis grid — selected" });
   }
-  if (s.grids) rows.push({ color: "#8a8f98", label: "Reference grid (backend)" });
   if (s.heat) rows.push({ color: "#B3261E", label: "Danger heat block" });
   return rows;
 }

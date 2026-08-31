@@ -113,7 +113,6 @@ export default function PatrolDetailPage() {
                   liveBeats={spatial.data.beats}
                   compartments={spatial.data.compartments}
                   boundary={spatial.data.boundary}
-                  grids={spatial.data.grids}
                   onSelect={() => undefined}
                 />
               ) : (

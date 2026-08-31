@@ -695,7 +695,6 @@ export const gis = {
   compartments: () => request<GeoJsonFeatureCollection>("/api/gis/compartments", { auth: false }),
   boundary: () => request<GeoJsonFeatureCollection>("/api/gis/boundary", { auth: false }),
   grids: () => request<GeoJsonFeatureCollection>("/api/gis/grids", { auth: false }),
-  blocks: () => request<GeoJsonFeatureCollection>("/api/gis/blocks", { auth: false }),
   assets: () => request<ApiMapAsset[]>("/api/gis/assets", { auth: false }),
   asset: (resourceKey: string) => `${API_BASE}/api/gis/assets/${encodeURIComponent(resourceKey)}`,
 };

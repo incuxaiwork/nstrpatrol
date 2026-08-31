@@ -132,7 +132,7 @@ export function tagCompartments(
     const rangeId = beatId
       ? beats.find((b) => b.beatId === beatId)?.rangeId ?? c.rangeId
       : c.rangeId;
-    return { ...c, rangeId, beatId, compId: c.compId ?? c.id };
+    return { ...c, rangeId, beatId, compId: c.compId ?? (c.id.replace(/-p\d+$/, "")) };
   });
 }
 

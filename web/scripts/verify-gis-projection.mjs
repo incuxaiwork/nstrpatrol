@@ -9,14 +9,14 @@
  *   1. The shared SVG_MAP_SPACE box IS the real union extent of the survey.
  *   2. Every compartment survives the forward+inverse pipeline exactly
  *      (round-trip ≤ 1e-9 km — the old code lost 26.07 km here).
- *   3. The largest compartment (compNo 63, beat SIRIGIRIPADU, block MUTUKURU)
- *      reproduces the audited centroid exactly (79.33173340575463,
- *      16.264677603689186) instead of the old displaced point.
+ *   3. The largest compartment (compNo 63, beat SIRIGIRIPADU) reproduces the
+ *      audited centroid exactly (79.33173340575463, 16.264677603689186)
+ *      instead of the old displaced point.
  *   4. Inverting the SAME projected ring against the OLD hardcoded box
  *      (78.6–79.7 / 15.4–16.4) reproduces the 26.07 km displacement
  *      (79.36450079118896, 16.0453618530395) — the bug being fixed.
  *   5. Point (marker) round-trips stay exact.
- *   6. Edge-dissolve (blocksToFeatures) still produces clean unions.
+ *   6. The real beat polygons dissolve to exactly one clean forest outline.
  *
  * Run: node scripts/verify-gis-projection.mjs   (or: npm run verify:gis)
  */
@@ -200,8 +200,16 @@ check(
   `${comps.length} polygons`
 );
 
-const missingBlock = comps.filter((c) => !c.block);
-check(missingBlock.length === 0, "every compartment carries a BLOCK property");
+/* Every REAL compartment must carry a beat name — the hierarchy worksheet
+ * is beat-keyed (no block level). The only exceptions are the two Enclosure
+ * features (COMP_NO "0", no beat/range) which are intentionally not part of
+ * the beat-keyed compartment census. */
+const beatless = comps.filter((c) => !c.beat);
+check(
+  beatless.length === 2 && beatless.every((c) => c.compNo === "0"),
+  "every real compartment carries a BEAT property",
+  `${beatless.length} beatless, all Enclosure (compNo 0)`
+);
 
 /* Pair each adapter polygon with its source outer ring (same flatten order). */
 let idx = 0;
@@ -232,12 +240,12 @@ console.log("\n3. Largest compartment (the audit anchor)");
 check(
   largest.n === 436 && String(L.properties.COMP_NO) === "63",
   "largest compartment selected",
-  `compNo ${L.properties.COMP_NO}, beat ${L.properties.BEAT}, block ${L.properties.BLOCK}, ${largest.n} vertices`
+  `compNo ${L.properties.COMP_NO}, beat ${L.properties.BEAT}, ${largest.n} vertices`
 );
 check(
-  largestComp?.block === "MUTUKURU" && largestComp?.beat === "SIRIGIRIPADU",
-  "backend adapter preserves block/beat",
-  largestComp ? `${largestComp.block} / ${largestComp.beat}` : "missing"
+  largestComp?.beat === "SIRIGIRIPADU",
+  "backend adapter preserves the beat",
+  largestComp ? `${largestComp.beat}` : "missing"
 );
 
 const srcMean = ringMean(L.geometry.coordinates[0]);
@@ -305,72 +313,10 @@ check(
 );
 
 /* ------------------------------------------------------------------ */
-/* 6. Edge-dissolve still yields clean unions                         */
+/* 6. The real forest boundary dissolves to ONE outline                */
 /* ------------------------------------------------------------------ */
 
-console.log("\n6. blocksToFeatures edge-dissolve");
-
-const adjacency = {
-  id: "b-test",
-  name: "T",
-  compartmentCount: 2,
-  areaHa: 1,
-  parts: [
-    "60,60 100,60 100,100 60,100 60,60",
-    "100,60 140,60 140,100 100,100 100,60",
-  ],
-};
-const dissolved = mapSpace.blocksToFeatures([adjacency]).features;
-check(
-  dissolved.length === 1 && dissolved[0].geometry.type === "Polygon",
-  "two adjacent squares dissolve into one Polygon",
-  `${dissolved.length} feature, ${dissolved[0].geometry.type}`
-);
-
-/* Opposite-direction digitization: a shared divider traced in opposite
- * directions by the two neighbours must still dissolve (canonical undirected
- * edge keys — the OLD directed-key counting kept the divider as boundary). */
-const oppositeDir = mapSpace.blocksToFeatures([
-  {
-    ...adjacency,
-    parts: [
-      "60,60 100,60 100,100 60,100 60,60",
-      "100,100 140,100 140,60 100,60 100,100",
-    ],
-  },
-]).features;
-check(
-  oppositeDir.length === 1 && oppositeDir[0].geometry.type === "Polygon",
-  "shared edge digitized in opposite directions dissolves too",
-  `${oppositeDir.length} feature, ${oppositeDir[0].geometry.type}`
-);
-
-/* Same polygons but with a small gap between them must NOT merge. A single
- * block still renders as one Feature — as a MultiPolygon with two parts. */
-const gapped = mapSpace.blocksToFeatures([
-  {
-    ...adjacency,
-    parts: [
-      "60,60 99,60 99,100 60,100 60,60",
-      "101,60 140,60 140,100 101,100 101,60",
-    ],
-  },
-]).features;
-check(
-  gapped.length === 1 &&
-    gapped[0].geometry.type === "MultiPolygon" &&
-    gapped[0].geometry.coordinates.length === 2 &&
-    dissolved[0].geometry.type === "Polygon" &&
-    dissolved[0].geometry.coordinates.length === 1,
-  "polygons with a real gap stay separate (2 parts), touching ones merge (1 part)",
-  `gap → ${gapped[0]?.geometry.type}(${gapped[0]?.geometry.coordinates?.length}), touch → ${dissolved[0].geometry.type}`
-);
-
-/* ------------------------------------------------------------------ */
-/* 7. The real forest boundary dissolves to ONE outline                */
-/* ------------------------------------------------------------------ */
-
-console.log("\n7. Real mark_beat.json dissolves to a single clean outline");
+console.log("\n6. Real mark_beat.json dissolves to a single clean outline");
 
 const beats = adapters.beatsFromGeoJson(beatsFc, realExtent);
 const boundary = mapSpace.boundaryFromBeats(beats);

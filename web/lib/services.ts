@@ -36,7 +36,6 @@ import {
 import {
   alertFromApi,
   beatsFromGeoJson,
-  blocksFromGeoJson,
   boundariesFromGeoJson,
   compartmentsFromGeoJson,
   gridsFromGeoJson,
@@ -45,7 +44,6 @@ import {
   observationFromApi,
   patrolFromApi,
   rangerFromApi,
-  type BlockPolygon,
   type BoundaryPolygon,
   type CompartmentPolygon,
   type GeoExtent,
@@ -711,7 +709,6 @@ export const gis = {
         compartments: CompartmentPolygon[];
         boundary: BoundaryPolygon[];
         grids: GridPolygon[];
-        blocks: BlockPolygon[];
         extent: GeoExtent | null;
       };
       at: number;
@@ -721,17 +718,15 @@ export const gis = {
       compartments: CompartmentPolygon[];
       boundary: BoundaryPolygon[];
       grids: GridPolygon[];
-      blocks: BlockPolygon[];
       extent: GeoExtent | null;
     }> | null = null;
 
     async function fetchSpatial() {
-      const [beatFc, compFc, boundaryFc, gridFc, blockFc] = await Promise.all([
+      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
         api.gis.beats(),
         api.gis.compartments(),
         api.gis.boundary(),
         api.gis.grids(),
-        api.gis.blocks(),
       ]);
       // EVERY layer projects through the single shared render box
       // (SVG_MAP_SPACE). The map-space inverse (svgToLngLat) uses the exact
@@ -745,7 +740,6 @@ export const gis = {
         compartments: compartmentsFromGeoJson(compFc, extent),
         boundary: boundariesFromGeoJson(boundaryFc, extent),
         grids: gridsFromGeoJson(gridFc, extent),
-        blocks: blocksFromGeoJson(blockFc, extent),
         extent,
       };
     }
@@ -755,7 +749,6 @@ export const gis = {
       compartments: CompartmentPolygon[];
       boundary: BoundaryPolygon[];
       grids: GridPolygon[];
-      blocks: BlockPolygon[];
       extent: GeoExtent | null;
     }> => {
       if (cached && Date.now() - cached.at < TTL_MS) return cached.data;
@@ -782,9 +775,6 @@ export const gis = {
   boundary: async (): Promise<BoundaryPolygon[]> => (await gis.spatial()).boundary,
   /** Reference grid cells (GeoJSON → SVG polygons). */
   grids: async (): Promise<GridPolygon[]> => (await gis.spatial()).grids,
-  /** Facing blocks — the dissolve of compartments by canonical block name
-   *  (GeoJSON → SVG polygons). */
-  blocks: async (): Promise<BlockPolygon[]> => (await gis.spatial()).blocks,
   /** The single render box the shared GIS projection anchors to — identical
    *  to the inverse map-space constants, so the SVG round trip is exact. */
   extent: async (): Promise<GeoExtent | null> => (await gis.spatial()).extent,

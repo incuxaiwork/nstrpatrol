@@ -23,10 +23,7 @@ export interface ForestLayerState {
   beats: boolean;
   ranges: boolean;
   compartments: boolean;
-  /** Facing dissolve — compartments grouped into blocks by canonical name. */
-  blocks: boolean;
   analysisGrid: boolean;
-  grids: boolean;
   routes: boolean;
   rangers: boolean;
   markers: boolean;
@@ -47,9 +44,7 @@ export const DEFAULT_LAYER_STATE: ForestLayerState = {
   beats: false,
   ranges: false,
   compartments: false,
-  blocks: false,
   analysisGrid: false,
-  grids: false,
   routes: false,
   rangers: false,
   markers: false,
@@ -88,18 +83,16 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
     {
       label: "Forest & administrative",
       rows: [
-        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid deep-green reserve outline & label" },
-        { key: "ranges", title: "Range Boundaries", subtitle: "Solid blue range hulls & labels" },
+        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid red reserve outline & label" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Vivid pink range hulls & labels" },
         { key: "beats", title: "Beat Boundaries", subtitle: "Orange beat outlines & labels — no fill" },
-        { key: "blocks", title: "Blocks", subtitle: "Facing dissolve — compartments grouped by canonical block, medium purple outlines & labels" },
-        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin red dashed internal lines (zoom in) & labels" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Bright sky-blue dashed internal lines (zoom in) & labels" },
       ],
     },
     {
       label: "Grid",
       rows: [
         { key: "analysisGrid", title: `Analysis Grid — ${gridSizeLabelStr}`, subtitle: "Configurable cells over the forest area" },
-        { key: "grids", title: "Reference ForestGrid", subtitle: "Backend survey cells (~3.3 km) — authoritative coverage grid" },
       ],
     },
     {
@@ -110,7 +103,7 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
         { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
         { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
         { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled grid cells + per-beat coverage tint" },
+        { key: "coverage", title: "Patrol Coverage", subtitle: "Per-beat coverage tint" },
         { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
       ],
     },

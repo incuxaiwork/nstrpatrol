@@ -141,8 +141,6 @@ export interface CompartmentPolygon {
    *  genuine cut-outs instead of solidly filled compartments. */
   holes?: string[];
   areaHa: number;
-  /** Facing block this compartment belongs to (backend BLOCK property). */
-  block?: string;
   /** Region tags (client-side spatial resolution over real polygons). */
   rangeId?: string;
   beatId?: string;
@@ -270,7 +268,6 @@ export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: G
   return features.flatMap((f, i) => {
     const compNo = String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`);
     const beat = String(f.properties.BEAT ?? "");
-    const block = String(f.properties.BLOCK ?? "") || undefined;
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
     const areaHa = Number.isFinite(area) ? area : 0;
     const baseId = String(f.id ?? `api-comp-${i}`);
@@ -279,51 +276,10 @@ export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: G
         id: partIdx === 0 ? baseId : `${baseId}-p${partIdx + 1}`,
         compNo,
         beat,
-        block,
         points: part.outer.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
         ...(part.holes.length ? { holes: part.holes.map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")) } : {}),
         areaHa,
       }));
-  });
-}
-
-/** One Facing block — the dissolve group of its compartments' outer rings. */
-export interface BlockPolygon {
-  id: string;
-  /** Canonical block name (the backend BLOCK property). */
-  name: string;
-  compartmentCount: number;
-  areaHa: number;
-  /** One SVG ring per compartment outer ring in this block; the renderer
-   *  edge-dissolves them into the clean block outline (ST_Union-equivalent). */
-  parts: string[];
-}
-
-export function blocksFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BlockPolygon[] {
-  const features = fc.features.filter(
-    (f) =>
-      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
-      Array.isArray((f.geometry.coordinates as unknown[])[0])
-  );
-  if (features.length === 0) return [];
-
-  const proj = makeProjector(extentOf(fc, extent ?? null));
-
-  return features.map((f, i) => {
-    const name = String(f.properties.BLOCK ?? f.properties.name ?? `Block ${i + 1}`);
-    const count = Number(f.properties.COMPARTMENT_COUNT);
-    const area = Number(f.properties.AREA_HA);
-    return {
-      id: String(f.id ?? `api-block-${i}`),
-      name,
-      compartmentCount: Number.isFinite(count) ? count : 0,
-      areaHa: Number.isFinite(area) ? area : 0,
-      // Every outer ring across the (Multi)Polygon — MultiPolygon-safe, one
-      // part per ring, so no part of a fragmented block ever disappears.
-      parts: ringsOf(f)
-        .filter((ring) => ring.length > 0)
-        .map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")),
-    };
   });
 }
 
@@ -360,6 +316,10 @@ function slugify(raw: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+export function compartmentIdFor(beatId: string, compNo: string): string {
+  return `${beatId}-c-${slugify(compNo)}`;
 }
 
 /** Deterministic id/name mapping for the known Markapur hierarchy. */
@@ -470,24 +430,30 @@ export function hierarchyFromGeoJson(
     }
   }
 
-  const compartments: HierarchyCompartment[] = (compsFc?.features ?? []).flatMap((f) => {
+  const compartments: HierarchyCompartment[] = (compsFc?.features ?? []).flatMap((f, i) => {
+    const featureId = String(f.id ?? `comp-${i}`);
     const beatName = String(f.properties.BEAT ?? "");
     const compNo = String(f.properties.COMP_NO ?? "");
+    const rawRange = String(f.properties.RANGE ?? "");
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
-    const beatId = beatIdsByName.get(beatName);
-    if (!beatName || !compNo || !beatId) return [];
-    const rangeId = Object.entries(beats)
-      .find(([, list]) => list.some((b) => b.id === beatId))?.[0];
-    if (!rangeId) return [];
-    return [
-      {
-        id: `${beatId}-c-${slugify(compNo)}`,
-        compNo,
-        beat: beatId,
-        range: rangeId,
-        areaHa: Number.isFinite(area) ? area : 0,
-      },
-    ];
+    const areaHa = Number.isFinite(area) ? area : 0;
+    // The backend feature id (OBJECTID_1 ≡ Compartment.id) is the SINGLE
+    // unique compartment identity — (BEAT, COMP_NO) is NOT unique (many
+    // ENCLOSURE polygons share COMP_NO "0" within one beat). Use it so every
+    // compartment stays an individual, distinct selectable feature.
+    const beatId = beatName ? beatIdsByName.get(beatName) : undefined;
+    // No artificial validation rule assuming every feature has a Beat: the
+    // legitimate ENCLOSURE features (COMP_NO "0") with no Beat/Range are
+    // retained as individually selectable compartments, keyed by their own
+    // stable feature id, so they are never silently dropped from the filter.
+    if (beatId) {
+      const rangeId = Object.entries(beats)
+        .find(([, list]) => list.some((b) => b.id === beatId))?.[0];
+      if (rangeId) {
+        return [{ id: featureId, compNo, beat: beatId, range: rangeId, areaHa }];
+      }
+    }
+    return [{ id: featureId, compNo, beat: "", range: rangeIdFor(rawRange) ?? "", areaHa }];
   });
 
   return { divisions, ranges, beats, compartments };

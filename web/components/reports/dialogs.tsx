@@ -804,7 +804,6 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
                   beatsShown.some((b) => b.id === c.beat)
                 )}
                 boundary={spatialData.data?.boundary ?? []}
-                grids={spatialData.data?.grids ?? []}
                 onSelect={() => undefined}
               />
             </div>

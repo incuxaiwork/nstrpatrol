@@ -548,7 +548,15 @@ gisRouter.get('/blocks', async (_req, res) => {
       .map(([block, entry]) => ({
         type: 'Feature',
         id: `block-${block}`,
-        geometry: { type: 'MultiPolygon', coordinates: entry.rings },
+        // Valid MultiPolygon coordinates: every compartment outer ring is one
+        // polygon part (array-of-arrays). The flat `rings` array would be
+        // read as a single degenerate polygon and dissolve to nothing.
+        geometry: {
+          type: 'MultiPolygon',
+          coordinates: entry.rings
+            .filter((ring) => ring.length >= 4)
+            .map((ring) => [ring]),
+        },
         properties: {
           BLOCK: block,
           COMPARTMENT_COUNT: entry.count,

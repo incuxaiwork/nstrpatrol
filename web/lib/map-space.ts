@@ -7,7 +7,7 @@
  */
 
 import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
-import type { BoundaryPolygon, BlockPolygon, CompartmentPolygon, GridPolygon } from "@/lib/backend-adapters";
+import type { BoundaryPolygon, CompartmentPolygon } from "@/lib/backend-adapters";
 import type { TaggedGrid } from "@/lib/grid-regions";
 
 /**
@@ -95,7 +95,9 @@ function flatProps(
 
 export function beatsToFeatures(
   beats: BeatPolygon[],
-  selectedId?: string | null
+  selectedId?: string | null,
+  hoveredBeatId?: string | null,
+  filteredBeatId?: string | null
 ): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
@@ -120,6 +122,8 @@ export function beatsToFeatures(
           isZero: b.isZeroPatrol === true,
           isAuth: false,
           selected: selectedId === b.id,
+          hovered: hoveredBeatId != null && hoveredBeatId === b.beatId,
+          filtered: filteredBeatId != null && filteredBeatId === b.beatId,
         }),
         geometry:
           coordinates.length > 1
@@ -164,39 +168,6 @@ export interface GridCoverageInfo {
   covered: boolean;
   pointCount: number;
   lastPatrolledAt: string | null;
-}
-
-/**
- * Reference grid cells. Coverage fields are populated by joining the
- * authoritative coverage API response (GET /api/coverage/grids) onto the
- * layer features by ForestGrid id (never by index / label / position). Cells
- * without a coverage record stay coverageStatus: null → "no data" styling.
- */
-export function gridsToFeatures(
-  grids: GridPolygon[],
-  coverageById?: Record<string, GridCoverageInfo> | null
-): GeoFeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: grids.map((g) => {
-      const cov = coverageById?.[g.id];
-      return {
-        type: "Feature",
-        id: g.id,
-        properties: flatProps({
-          id: g.id,
-          gridCode: g.gridCode,
-          rangeId: g.rangeId ?? null,
-          beatId: g.beatId ?? null,
-          compId: g.compId ?? null,
-          coverageStatus: cov ? (cov.covered ? "covered" : "uncovered") : null,
-          lastPatrolAt: cov?.lastPatrolledAt ?? null,
-          patrolCount: cov?.pointCount ?? null,
-        }),
-        geometry: { type: "Polygon", coordinates: [svgRingToLngLat(g.points)] },
-      };
-    }),
-  };
 }
 
 export function markersToFeatures(markers: GisMarker[]): GeoFeatureCollection {
@@ -740,7 +711,11 @@ export function rangeLabelsToFeatures(ranges: RangePolygon[]): GeoFeatureCollect
   };
 }
 
-export function compartmentsToFeatures(comps: CompartmentPolygon[]): GeoFeatureCollection {
+export function compartmentsToFeatures(
+  comps: CompartmentPolygon[],
+  hoveredCompId?: string | null,
+  filteredCompId?: string | null
+): GeoFeatureCollection {
   return {
     type: "FeatureCollection",
     features: comps.map((c) => {
@@ -752,11 +727,12 @@ export function compartmentsToFeatures(comps: CompartmentPolygon[]): GeoFeatureC
           id: c.id,
           compNo: c.compNo,
           beat: c.beat,
-          block: c.block ?? null,
           areaHa: c.areaHa,
           rangeId: c.rangeId ?? null,
           beatId: c.beatId ?? null,
           compId: c.compId ?? c.id,
+          hovered: hoveredCompId != null && hoveredCompId === (c.compId ?? c.id),
+          filtered: filteredCompId != null && filteredCompId === (c.compId ?? c.id),
         }),
         geometry: {
           type: "Polygon",
@@ -787,60 +763,60 @@ export function compartmentLabelsToFeatures(comps: CompartmentPolygon[]): GeoFea
   };
 }
 
-/* ------------------------------------------------------------------ */
-/* Blocks — the Facing dissolve                                        */
-/* ------------------------------------------------------------------ */
-
 /**
- * Render the Facing blocks. Each block's `parts` are the outer rings of the
- * compartments that share the block's canonical name; they are edge-dissolved
- * here (same ST_Union-equivalent dissolve as the forest boundary) so block
- * boundaries follow the real contour outlines instead of showing the
- * interior compartment lines. Fragmented blocks yield multiple parts →
- * MultiPolygon. A block with nothing to dissolve stays honestly empty.
+ * Build the topmost region-hover highlight geometry for the currently hovered
+ * Beat or Compartment. Returns the entity's COMPLETE boundary so the yellow
+ * highlight draws the whole 360° outline (all outer rings; compartments keep
+ * their interior holes as-is). Empty features when nothing is hovered.
  */
-export function blocksToFeatures(blocks: BlockPolygon[]): GeoFeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: blocks.flatMap((b) => {
-      const parts = dissolveRings(b.parts.map(parsePoly));
-      if (parts.length === 0) return [];
-      const coordinates = parts.map((part) => [svgRingToLngLat(part)]);
-      return [
-        {
-          type: "Feature",
-          id: b.id,
-          properties: flatProps({
-            id: b.id,
-            name: b.name,
-            block: b.name,
-            compartmentCount: b.compartmentCount,
-            areaHa: b.areaHa,
-          }),
-          geometry:
-            coordinates.length > 1
-              ? { type: "MultiPolygon", coordinates }
-              : ({ type: "Polygon", coordinates: coordinates[0] } as GeoJSON.Polygon),
-        },
-      ];
-    }),
-  };
-}
-
-export function blockLabelsToFeatures(blocks: BlockPolygon[]): GeoFeatureCollection {
-  return {
-    type: "FeatureCollection",
-    features: blocks.map((b) => {
-      // Anchor the label on the largest ring so fragmented blocks get one
-      // readable centroid instead of a midpoint floating between parts.
-      const rings = b.parts.map(parsePoly).sort((a, b) => b.length - a.length);
-      const [x, y] = ringCentroid(rings[0]?.length ? rings[0] : []);
+export function regionHoverToFeatures(
+  beatId: string | null | undefined,
+  compId: string | null | undefined,
+  beats: BeatPolygon[],
+  comps: CompartmentPolygon[],
+  compIdOf: (c: CompartmentPolygon) => string | null | undefined
+): GeoFeatureCollection {
+  // Compartment hover wins — the finest entity under the cursor. Only one
+  // highlight at a time so we never stack overlapping yellow geometries.
+  if (compId) {
+    const c = comps.find((x) => (compIdOf(x) ?? x.id) === compId);
+    if (c) {
+      const rings = [c.points, ...(c.holes ?? [])].map(svgRingToLngLat).filter((r) => r.length >= 4);
       return {
-        type: "Feature",
-        id: `${b.id}-label`,
-        properties: flatProps({ name: b.name, block: b.name }),
-        geometry: { type: "Point", coordinates: svgToLngLat(x, y) },
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: c.id,
+            properties: { kind: "compartment", id: c.id },
+            geometry:
+              rings.length > 1
+                ? { type: "MultiPolygon", coordinates: rings.map((r) => [r]) }
+                : { type: "Polygon", coordinates: rings[0] ? [rings[0]] : [] },
+          },
+        ],
       };
-    }),
-  };
+    }
+  }
+  if (beatId) {
+    const b = beats.find((x) => x.beatId === beatId);
+    if (b) {
+      const rings = [b.points, ...(b.parts ?? [])].map(svgRingToLngLat).filter((r) => r.length >= 4);
+      return {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            id: b.id,
+            properties: { kind: "beat", id: b.id },
+            geometry:
+              rings.length > 1
+                ? { type: "MultiPolygon", coordinates: rings.map((r) => [r]) }
+                : { type: "Polygon", coordinates: rings[0] ? [rings[0]] : [] },
+          },
+        ],
+      };
+    }
+  }
+  return emptyFc();
 }
