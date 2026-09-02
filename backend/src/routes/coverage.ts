@@ -166,8 +166,36 @@ interface GridCoverageRow {
   covered: boolean;
 }
 
+/**
+ * PostGIS capability probe (cached per process). The coverage queries join
+ * patrol points to ForestGrid geometry with native PostGIS operators; on
+ * deployments without the extension / geometry columns (the non-PostGIS
+ * fallback databases) those queries fail with an opaque 500. Degrade to an
+ * empty result instead — same posture the GIS routes take with their bundled
+ * fallback assets.
+ */
+let postgisCapable: boolean | null = null;
+
+async function coverageGeomAvailable(): Promise<boolean> {
+  if (postgisCapable !== null) return postgisCapable;
+  try {
+    const rows = await prisma.$queryRaw<{ ok: boolean }[]>`
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_attribute a
+        WHERE a.attrelid = to_regclass('"ForestGrid"')::oid
+          AND a.attname = 'geom'
+      ) AS ok`;
+    postgisCapable = rows[0]?.ok ?? false;
+  } catch {
+    postgisCapable = false;
+  }
+  return postgisCapable;
+}
+
 /** Derive per-cell patrolled/unpatrolled status in a single PostGIS pass. */
 export async function runGridCoverage(ctx: CoverageRequestContext, q: GridCoverageQuery): Promise<GridCoverageRow[]> {
+  if (!(await coverageGeomAvailable())) return [];
   const visibleCond: Prisma.Sql[] = [];
   if (ctx.ownOnly) {
     visibleCond.push(Prisma.sql`p."userId" = ${ctx.user.id}`);
@@ -245,6 +273,7 @@ export interface BeatCoverageRow {
  * Cells intersecting several beats count under each of them.
  */
 export async function runBeatCoverage(ctx: CoverageRequestContext, q: GridCoverageQuery): Promise<BeatCoverageRow[]> {
+  if (!(await coverageGeomAvailable())) return [];
   const visibleCond: Prisma.Sql[] = [];
   if (ctx.ownOnly) {
     visibleCond.push(Prisma.sql`p."userId" = ${ctx.user.id}`);

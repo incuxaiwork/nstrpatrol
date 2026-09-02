@@ -144,9 +144,18 @@ describe('GET /api/coverage/beats', () => {
     };
   }
 
+  /** Raw mock that short-circuits the coverage capability probe query. */
+  function mockCoverageRaw(rows: unknown[]) {
+    prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = renderSql({ strings, values });
+      if (/pg_attribute/.test(sql)) return Promise.resolve([{ ok: true }]);
+      return Promise.resolve(rows);
+    });
+  }
+
   it('DFO sees every beat with per-beat coverage and zero-patrol summary', async () => {
     prisma.user.findUnique.mockResolvedValue(dfoUser());
-    prisma.$queryRaw.mockResolvedValue([
+    mockCoverageRaw([
       beatRow(),
       beatRow({ beat: 'BURUGUNDALA', patrolledCells: 0, pointCount: 0n, lastPatrolledAt: null }),
     ]);
@@ -175,7 +184,7 @@ describe('GET /api/coverage/beats', () => {
 
   it('beat with no intersecting cells has null coveragePercent (no fabricated 0%)', async () => {
     prisma.user.findUnique.mockResolvedValue(dfoUser());
-    prisma.$queryRaw.mockResolvedValue([beatRow({ totalCells: 0, patrolledCells: 0, pointCount: 0n })]);
+    mockCoverageRaw([beatRow({ totalCells: 0, patrolledCells: 0, pointCount: 0n })]);
     const res = await request(app).get('/api/coverage/beats').set('Authorization', 'Bearer tok');
     expect(res.body.rows[0].coveragePercent).toBeNull();
     expect(res.body.summary.zeroPatrolBeats).toBe(0);
@@ -183,14 +192,15 @@ describe('GET /api/coverage/beats', () => {
 
   it('OPERATIONAL users only see beats their own patrols touched', async () => {
     prisma.user.findUnique.mockResolvedValue(fsoUser());
-    prisma.$queryRaw.mockResolvedValue([
+    mockCoverageRaw([
       beatRow({ beat: 'TOUCHED', patrolledCells: 2 }),
       beatRow({ beat: 'UNTOUCHED', patrolledCells: 0, pointCount: 0n, lastPatrolledAt: null }),
     ]);
     const res = await request(app).get('/api/coverage/beats').set('Authorization', 'Bearer tok');
     expect(res.status).toBe(200);
     expect(res.body.rows.map((r: { beat: string }) => r.beat)).toEqual(['TOUCHED']);
-    const call = prisma.$queryRaw.mock.calls[0];
+    const calls = prisma.$queryRaw.mock.calls;
+    const call = calls[calls.length - 1];
     const sql = renderSql({ strings: call[0], values: call.slice(1) });
     expect(sql).toContain('p."userId" =');
   });
@@ -199,11 +209,12 @@ describe('GET /api/coverage/beats', () => {
     prisma.user.findUnique.mockResolvedValue(dfoUser());
     prisma.range.findUnique.mockResolvedValue({ id: 'r-1', name: 'Y.PALEM' });
     prisma.beat.findMany.mockResolvedValue([{ name: 'AKKAPALEM' }]);
-    prisma.$queryRaw.mockResolvedValue([]);
+    mockCoverageRaw([]);
     const res = await request(app).get('/api/coverage/beats?rangeId=r-1').set('Authorization', 'Bearer tok');
     expect(res.status).toBe(200);
     expect(res.body.rows).toEqual([]);
-    const call = prisma.$queryRaw.mock.calls[0];
+    const calls = prisma.$queryRaw.mock.calls;
+    const call = calls[calls.length - 1];
     const flat = JSON.stringify(call);
     expect(flat).toContain('AKKAPALEM');
   });

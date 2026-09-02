@@ -117,7 +117,10 @@ function mockRaw(rows: unknown[], ...subsequent: unknown[][]) {
   capturedRaw = null;
   rawQueue = [rows, ...subsequent];
   prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
-    capturedRaw = renderSql({ strings, values });
+    const raw = renderSql({ strings, values });
+    // Coverage capability probe (PostGIS/geom check) — short-circuit.
+    if (/pg_attribute/.test(raw.text)) return Promise.resolve([{ ok: true }]);
+    capturedRaw = raw;
     return Promise.resolve(rawQueue.length > 1 ? (rawQueue.shift() as unknown[]) : rawQueue[0]);
   });
 }
@@ -130,9 +133,13 @@ function lastRawCall() {
 beforeEach(() => {
   jest.clearAllMocks();
   invalidateUserScope();
-  // Default: $queryRaw returns empty array (list endpoint stats query).
-  // Tests that need specific SQL results override via mockRaw().
-  prisma.$queryRaw.mockResolvedValue([]);
+  // Default: $queryRaw returns empty array (list endpoint stats query) —
+  // except the coverage capability probe, which must report PostGIS present.
+  prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
+    const raw = renderSql({ strings, values });
+    if (/pg_attribute/.test(raw.text)) return Promise.resolve([{ ok: true }]);
+    return Promise.resolve([]);
+  });
 });
 
 describe('patrol geography enrichment (GET /api/patrols)', () => {

@@ -116,6 +116,9 @@ function mockRaw(rows: unknown[]) {
   capturedRaw = null;
   prisma.$queryRaw.mockImplementation((strings: TemplateStringsArray, ...values: unknown[]) => {
     const raw = renderSql({ strings, values });
+    // Coverage capability probe (PostGIS/geom check) — short-circuit instead of
+    // overwriting the captured payload the assertions below inspect.
+    if (/pg_attribute/.test(raw.text)) return Promise.resolve([{ ok: true }]);
     capturedRaw = { text: raw.text, values: raw.values };
     return Promise.resolve(rows);
   });
