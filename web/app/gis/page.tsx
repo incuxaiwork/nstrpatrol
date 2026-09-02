@@ -30,7 +30,7 @@ import { FOREST_CONTEXT, GRID_SIZES, DEFAULT_GRID_SIZE, gridSizeLabel, type Grid
 import { tagBeats, tagCompartments, tagGrids, type TaggedGrid } from "@/lib/grid-regions";
 import { buildAnalysisGrid } from "@/lib/gis/grid";
 import type { GridCoverageInfo, LivePathFeature, LiveRangerFeature } from "@/lib/map-space";
-import { rangesFromBeats, svgRingToLngLat } from "@/lib/map-space";
+import { boundaryFromBeats, rangesFromBeats, svgRingToLngLat } from "@/lib/map-space";
 import type { GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 
 function beatIsZero(b: { id: string; isZeroPatrol?: boolean }): boolean {
@@ -244,7 +244,12 @@ function GisWorkspace() {
   // Beats come from the backend GIS API (GeoJSON → GL layers).
   // Spatial layers — single consolidated fetch (was 5 separate useAsyncData hooks,
   // each triggering re-renders independently even though they shared one network call).
-  const spatialData = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
+  // GIS spatial data is served by the module-level `gis.spatial()` cache (which
+  // now only pins non-empty geometry) plus the browser HTTP cache. We deliberately
+  // SKIP the route cache here: it could otherwise restore a stale EMPTY result on
+  // mount and render `beats = []` → an invisible derived Forest Boundary until the
+  // background revalidation happened to succeed.
+  const spatialData = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial", skipCache: true });
   const beatsData = { data: spatialData.data?.beats ?? null, loading: spatialData.loading, error: spatialData.error, reload: spatialData.reload };
   const compartmentsData = { data: spatialData.data?.compartments ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
   const boundaryData = { data: spatialData.data?.boundary ?? null, loading: spatialData.loading, error: null, reload: spatialData.reload };
@@ -461,7 +466,14 @@ function GisWorkspace() {
   const spatialReady = Boolean(spatialData.data);
   const beats = beatsData.data ?? [];
   const compartments = compartmentsData.data ?? [];
-  const boundary = boundaryData.data ?? [];
+  // Forest Boundary: prefer the explicit backend boundary geometry when it has
+  // features; when it is empty (the DB carries no geometry, /api/gis/boundary
+  // returns []), derive the boundary from the loaded beat polygons so the map
+  // ALWAYS has a boundary line to draw.
+  const boundary =
+    boundaryData.data && boundaryData.data.length > 0
+      ? boundaryData.data
+      : boundaryFromBeats(taggedBeats);
   const markers = markersData.data ?? [];
   const routes = routesData.data ?? [];
   const heat: HeatBlock[] = [];

@@ -70,7 +70,7 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage, GeoJsonFeatureCollection } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg, SVG_MAP_SPACE } from "@/lib/map-space";
 
 /* Mock paths resolve on the next microtask — no artificial latency. */
@@ -721,13 +721,20 @@ export const gis = {
       extent: GeoExtent | null;
     }> | null = null;
 
+    const EMPTY_FEATURES: GeoJsonFeatureCollection = { type: "FeatureCollection", features: [] };
+
     async function fetchSpatial() {
-      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.all([
+      // Each layer fetched independently so a failure on a NON-essential layer
+      // (boundary/grids are empty while the DB has no geometry) can never
+      // block the beats that the Forest Boundary is derived from.
+      const [beatFc, compFc, boundaryFc, gridFc] = await Promise.allSettled([
         api.gis.beats(),
         api.gis.compartments(),
         api.gis.boundary(),
         api.gis.grids(),
       ]);
+      const settled = (r: PromiseSettledResult<GeoJsonFeatureCollection>): GeoJsonFeatureCollection =>
+        r.status === "fulfilled" ? (r.value ?? EMPTY_FEATURES) : EMPTY_FEATURES;
       // EVERY layer projects through the single shared render box
       // (SVG_MAP_SPACE). The map-space inverse (svgToLngLat) uses the exact
       // same constants, so the forward/inverse round trip is an affine
@@ -736,10 +743,10 @@ export const gis = {
       // and silently shift every polygon by up to ~1 km).
       const extent: GeoExtent | null = SVG_MAP_SPACE;
       return {
-        beats: beatsFromGeoJson(beatFc, extent),
-        compartments: compartmentsFromGeoJson(compFc, extent),
-        boundary: boundariesFromGeoJson(boundaryFc, extent),
-        grids: gridsFromGeoJson(gridFc, extent),
+        beats: beatsFromGeoJson(settled(beatFc), extent),
+        compartments: compartmentsFromGeoJson(settled(compFc), extent),
+        boundary: boundariesFromGeoJson(settled(boundaryFc), extent),
+        grids: gridsFromGeoJson(settled(gridFc), extent),
         extent,
       };
     }
@@ -756,7 +763,12 @@ export const gis = {
       if (inflight) return inflight;
       inflight = fetchSpatial().then(
         (data) => {
-          cached = { data, at: Date.now() };
+          // Cache only a result that actually holds geometry. An EMPTY result
+          // (e.g. backend momentarily down) must NOT be pinned for the 5-min
+          // TTL — otherwise a stale empty beats array would override the fresh
+          // geometry once the backend recovers and the Forest Boundary would
+          // silently stay missing.
+          if (data.beats.length > 0) cached = { data, at: Date.now() };
           inflight = null;
           return data;
         },

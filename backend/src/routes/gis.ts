@@ -45,6 +45,21 @@ function isEmptyFeatureCollection(geojson: string): boolean {
   }
 }
 
+/**
+ * Send a GeoJSON GIS response with cache policy that never lets an EMPTY (or
+ * unparseable) collection be held for the long 24 h TTL. A stale empty layer
+ * used to be browser-cached for a day and override fresh geometry returned
+ * after the backend recovered (the root cause of the vanished Forest
+ * Boundary). Empty responses are intentionally not cached; populated geometry
+ * (which is the large, expensive and effectively static payload) may still be
+ * cached for a day.
+ */
+function sendGeoResponse(res: import('express').Response, body: string): void {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.setHeader('Cache-Control', isEmptyFeatureCollection(body) ? 'no-store' : 'public, max-age=86400');
+  res.send(body);
+}
+
 /* ------------------------------------------------------------------ *
  * Non-PostGIS fallback.
  *
@@ -411,9 +426,7 @@ gisRouter.get('/beats', async (_req, res) => {
     if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
     return fallbackBeats();
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /**
@@ -471,9 +484,7 @@ gisRouter.get('/compartments', async (_req, res) => {
     if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
     return fallbackCompartments();
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /** One outer ring from a Polygon/MultiPolygon feature ([lng,lat][] pairs). */
@@ -565,9 +576,7 @@ gisRouter.get('/blocks', async (_req, res) => {
       }));
     return JSON.stringify({ type: 'FeatureCollection', features });
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /**
@@ -610,9 +619,7 @@ gisRouter.get('/ranges', async (_req, res) => {
     `;
     return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /**
@@ -669,9 +676,7 @@ gisRouter.get('/boundary', async (_req, res) => {
     `;
     return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /**
@@ -704,9 +709,7 @@ gisRouter.get('/grids', async (_req, res) => {
     `;
     return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
   });
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.setHeader('Cache-Control', 'public, max-age=86400');
-  res.send(body);
+  sendGeoResponse(res, body);
 });
 
 /**
