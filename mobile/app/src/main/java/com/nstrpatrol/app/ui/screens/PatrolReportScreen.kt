@@ -646,33 +646,9 @@ private fun MovementMismatchBanner(detectedLabel: String, selectedMethod: String
     }
 }
 
-private fun computeReportDistance(points: List<PatrolPointEntity>): Double {
-    if (points.size < 2) return 0.0
-    var total = 0.0
-    for (i in 1 until points.size) {
-        val p1 = points[i - 1]
-        val p2 = points[i]
-        val dLat = Math.toRadians(p2.latitude - p1.latitude)
-        val dLon = Math.toRadians(p2.longitude - p1.longitude)
-        val a = kotlin.math.sin(dLat / 2).let { it * it } +
-            kotlin.math.cos(Math.toRadians(p1.latitude)) *
-            kotlin.math.cos(Math.toRadians(p2.latitude)) *
-            kotlin.math.sin(dLon / 2).let { it * it }
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        val dist = 6_371_000.0 * c
-        // Same stationary-jitter filter as the recorder and ActivitySummary:
-        // a shaking-but-stationary phone leaves GPS jitter points behind;
-        // never let sub-accuracy shuffles inflate the live distance.
-        val dt = p2.timestamp - p1.timestamp
-        val speedKmh = if (dt > 0) (dist / 1000.0) / (dt / 3_600_000.0) else 0.0
-        if (dist < 3.0 && speedKmh < 1.0) continue
-        if (dist < 5.0 && speedKmh < 0.5) continue
-        val acc = minOf(p1.accuracy ?: Float.MAX_VALUE, p2.accuracy ?: Float.MAX_VALUE).toDouble()
-        if (dist < acc * 0.5 && speedKmh < 2.0 && dist < 8.0) continue
-        total += dist
-    }
-    return total
-}
+/** Shared hardened track computation (jitter/teleport/plausibility filtered). */
+private fun computeReportDistance(points: List<PatrolPointEntity>): Double =
+    com.nstrpatrol.app.time.ActivitySummary.haversineDistance(points)
 
 /** Builds a display-only session from a backend patrol detail payload. */
 private fun patrolSessionFromBackend(o: org.json.JSONObject): PatrolSessionEntity {

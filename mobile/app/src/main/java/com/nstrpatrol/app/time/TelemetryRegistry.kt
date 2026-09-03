@@ -38,6 +38,10 @@ object TelemetryRegistry {
         if (pid != null) finalized.add(pid)
     }
 
+    /** True once [pid] completed locally — no more points may be recorded into it. */
+    @Synchronized
+    fun isFinalized(pid: String): Boolean = pid in finalized
+
     /**
      * Marks [pid] as completed (called by the single completion writer right
      * after the Room status flip). Any straggler sampler for this patrol is

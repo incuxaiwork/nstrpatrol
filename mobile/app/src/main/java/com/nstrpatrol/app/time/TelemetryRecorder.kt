@@ -227,8 +227,17 @@ class TelemetryRecorder(
         val pid = patrolId
         if (pid != null) {
             scope.launch {
-                // Final forced point so the trace ends at the true stop moment.
-                tryRecordPoint(pid, timeManager.trustedUtcNow(), force = true)
+                // Final forced point so the trace ends at the true stop
+                // moment — but only if the last fix is actually stale.
+                // Without this the end-point duplicates the last recorded
+                // fix (same-timestamp twin rows), and if completion already
+                // flipped the session it becomes an uncounted ghost row that
+                // card fallbacks then display as phantom distance.
+                // (tryRecordPoint additionally refuses finalized ids.)
+                val now = timeManager.trustedUtcNow()
+                if (now - lastPointTime > AppConfig.DEFAULT_SAMPLE_INTERVAL_MS) {
+                    tryRecordPoint(pid, now, force = true)
+                }
             }
         }
         // NOTE: session completion (endTime, metrics, status flip) is written
@@ -407,6 +416,10 @@ class TelemetryRecorder(
     }
 
     private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean, gpsMoving: Boolean = true): Boolean {
+        // Post-completion ghost guard: an in-flight sample or a late forced
+        // end-point must never write into a COMPLETED session (their distance
+        // was already finalized; late rows only corrupt cards/reports).
+        if (TelemetryRegistry.isFinalized(pid)) return false
         val telemetry = telemetryManager.telemetry.value
         val lat = telemetry.latitude ?: return false
         val lon = telemetry.longitude ?: return false
