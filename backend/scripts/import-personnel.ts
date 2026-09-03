@@ -265,9 +265,9 @@ async function main(): Promise<void> {
 
     if (!apply) continue;
 
+    // Never clobber a manually granted admin elevation on re-import:
+    // role/isAdmin are set only when the row is created.
     const data = {
-      role: Role.RANGER,
-      isAdmin: false,
       cader,
       fullName,
       isActive: true,
@@ -275,7 +275,11 @@ async function main(): Promise<void> {
       ...scope,
     };
 
-    await prisma.user.upsert({ where: { email }, update: data, create: { email, ...data } });
+    await prisma.user.upsert({
+      where: { email },
+      update: data,
+      create: { email, role: Role.RANGER, isAdmin: false, ...data },
+    });
     if (existing) updated++;
     else created++;
   }

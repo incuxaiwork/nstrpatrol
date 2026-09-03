@@ -115,6 +115,8 @@ class AuthSession(context: Context) {
         // so A -> logout -> B is detected — the old currentUser check missed
         // it because logout had already cleared the cached user.
         val previousUserId = prefs.getString("lastUserId", null) ?: currentUser?.id
+        // Snapshot before the prefs below are overwritten with the new user.
+        val hadCachedSession = currentUser != null
         val body = JSONObject()
             .put("email", email.trim())
             .put("password", password)
@@ -136,11 +138,13 @@ class AuthSession(context: Context) {
             Log.i("AuthSession", "User switch ($previousUserId -> ${user.id}) — clearing local data")
             PhotoStore.clearAll()
             db.clearAllTables()
-        } else if (previousUserId == null && db != null) {
-            // One-time heal for devices mixed before lastUserId existed: rows
-            // with no recorded owner can't be attributed to this login, so
-            // drop them instead of showing/syncing them under a wrong name.
-            // Skipped when the DB is already empty (normal first login).
+        } else if (previousUserId == null && !hadCachedSession && db != null) {
+            // One-time heal for logged-out devices mixed before lastUserId
+            // existed: rows with no recorded owner and no cached session can't
+            // be attributed to this login, so drop them instead of
+            // showing/syncing them under a wrong name. Skipped when the DB is
+            // already empty (normal first login), and skipped when a session
+            // is cached (single-user phone — rows are theirs).
             val dao = db.telemetryDao()
             if (dao.countSessions() > 0 || dao.countPoints() > 0 ||
                 dao.countIncidents() > 0 || dao.countReadings() > 0
@@ -289,17 +293,19 @@ class AuthSession(context: Context) {
     }
 
     /**
-     * Clears tokens and the cached user but keeps lastUserId (plus per-handset
-     * device/face keys) so the next login can detect an account switch and
-     * wipe the previous owner's local data. Local patrol data is preserved
-     * here so a same-user re-login keeps pending uploads.
+     * Clears tokens and the cached user. Records the outgoing owner's id as
+     * lastUserId so a same-user re-login is recognized (data kept) while a
+     * different account logging in next triggers the ownership wipe.
+     * Per-handset device/face keys are untouched.
      */
     fun logout() {
-        prefs.edit()
+        val outgoingId = currentUser?.id
+        val edit = prefs.edit()
             .remove("accessToken")
             .remove("refreshToken")
             .remove("user")
-            .apply()
+        if (outgoingId != null) edit.putString("lastUserId", outgoingId)
+        edit.apply()
         client.setAccessToken(null)
     }
 
