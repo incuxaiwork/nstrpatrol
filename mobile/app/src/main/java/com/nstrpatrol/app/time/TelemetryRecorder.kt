@@ -92,6 +92,12 @@ class TelemetryRecorder(
     private var lastPointLat: Double? = null
     private var lastPointLon: Double? = null
     private var lastPointTime: Long = 0L
+    // Raw GPS fix seen on the previous sampling tick (updated every tick,
+    // unlike lastPoint* which only move when a point is recorded). Used to
+    // measure per-tick coordinate change so sensor-only motion (shaking the
+    // phone while stationary) never counts as distance or steps.
+    private var lastSeenLat: Double? = null
+    private var lastSeenLon: Double? = null
     private var lastPersistedMode: MovementMode = MovementMode.UNKNOWN
     private var lastIntegrityLogAt: Long = 0L
 
@@ -148,6 +154,8 @@ class TelemetryRecorder(
         lastPointLat = null
         lastPointLon = null
         lastPointTime = 0L
+        lastSeenLat = null
+        lastSeenLon = null
         lastPersistedMode = MovementMode.UNKNOWN
         lastFreshFixElapsed = 0L
         lastForceResyncElapsed = 0L
@@ -223,7 +231,23 @@ class TelemetryRecorder(
         val pid = patrolId ?: return
         val now = timeManager.trustedUtcNow()
 
-        tryRecordPoint(pid, now, force = false)
+        // GPS truth gate: coordinates must actually be changing for any
+        // sensor-detected motion to count. Shaking a stationary phone fires
+        // accelerometer/gyro and can fool Activity Recognition into CYCLING,
+        // but the GPS fix stays put — in that case steps and distance stay 0.
+        val rawTelemetry = telemetryManager.telemetry.value
+        val tickDisp = if (rawTelemetry.latitude != null && rawTelemetry.longitude != null &&
+            lastSeenLat != null && lastSeenLon != null
+        ) {
+            haversine(lastSeenLat!!, lastSeenLon!!, rawTelemetry.latitude!!, rawTelemetry.longitude!!)
+        } else {
+            Double.MAX_VALUE
+        }
+        val gpsMoving = isGpsMoving(rawTelemetry, tickDisp)
+        lastSeenLat = rawTelemetry.latitude
+        lastSeenLon = rawTelemetry.longitude
+
+        tryRecordPoint(pid, now, force = false, gpsMoving = gpsMoving)
 
         // Fix watchdog: if we are mid-patrol but no fresh fix has arrived for
         // a while, drop and re-register the location providers once. Battery
@@ -249,13 +273,13 @@ class TelemetryRecorder(
             lastFreshFixElapsed = elapsedNow
         }
 
-        val readings = buildSensorReadings(pid, now)
+        val readings = buildSensorReadings(pid, now, gpsMoving)
         if (readings.isNotEmpty()) {
             dao.insertReadings(readings)
         }
 
         val telemetry = telemetryManager.telemetry.value
-        val info = computeMovement(telemetry)
+        val info = computeMovement(telemetry, gpsMoving)
         _movement.value = info
         // Persist the detected movement mode (once per change) so the patrol
         // report can surface it and we can alert on method mismatches.
@@ -307,7 +331,32 @@ class TelemetryRecorder(
      * ~10 m displacement, and tiny <3 m jumps are never recorded while speed
      * is ~0.
      */
-    private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean): Boolean {
+    /**
+     * True only when a fresh GPS fix proves the coordinates are really
+     * changing. [tickDisp] is the per-tick displacement of the raw fix.
+     * A shaking-but-stationary phone keeps the fix inside the jitter circle
+     * with ~0 speed — that must never count as movement.
+     */
+    private fun isGpsMoving(telemetry: GpsTelemetry, tickDisp: Double): Boolean {
+        val lat = telemetry.latitude ?: return false
+        val lon = telemetry.longitude ?: return false
+        if (lat == 0.0 && lon == 0.0) return false
+        val maxFixAge = settings?.gpsMaxFixAgeMs?.value ?: AppConfig.DEFAULT_MAX_FIX_AGE_MS
+        if (telemetry.ageMs !in 0..maxFixAge) return false
+        // First fix of the patrol: nothing to compare against yet — allow it
+        // so the track gets its anchor point and initial steps aren't lost.
+        if (tickDisp == Double.MAX_VALUE) return true
+        val speedKmh = telemetry.speedMps?.let { it * 3.6 } ?: 0.0
+        // Coordinate change above the jitter floor is the primary signal.
+        if (tickDisp >= AppConfig.JITTER_DISTANCE_M) return true
+        // Fast GPS speed with a sane fix is secondary evidence (covers the
+        // case where consecutive fixes land close together at speed).
+        val acc = telemetry.horizontalAccuracyMeters?.toDouble() ?: Double.MAX_VALUE
+        if (speedKmh >= 1.5 && acc <= 25.0) return true
+        return false
+    }
+
+    private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean, gpsMoving: Boolean = true): Boolean {
         val telemetry = telemetryManager.telemetry.value
         val lat = telemetry.latitude ?: return false
         val lon = telemetry.longitude ?: return false
@@ -328,7 +377,10 @@ class TelemetryRecorder(
             // When phone is still, GPS wanders 3-8 m every fix. With minDisp=0
             // the old `disp < minDisp && time < interval` never filtered, so
             // every 10 s a jitter point was stored and distance crept up.
-            val isStill = _movement.value.mode == MovementMode.STILL
+            // `gpsMoving` is the per-tick GPS truth: a shake can fool
+            // Activity Recognition into CYCLING while coordinates don't move,
+            // so stale _movement must not override a stationary GPS fix.
+            val isStill = _movement.value.mode == MovementMode.STILL || !gpsMoving
             val acc = telemetry.horizontalAccuracyMeters?.toDouble() ?: Double.MAX_VALUE
             val speedKmh = telemetry.speedMps?.let { it * 3.6 } ?: 0.0
             if (isStill && disp < maxOf(minDisp, AppConfig.STILL_MIN_DISPLACEMENT_M)) {
@@ -378,8 +430,8 @@ class TelemetryRecorder(
         return 6_371_000.0 * c
     }
 
-    private fun buildSensorReadings(pid: String, now: Long): List<SensorReadingEntity> {
-        stepSample()
+    private fun buildSensorReadings(pid: String, now: Long, gpsMoving: Boolean = true): List<SensorReadingEntity> {
+        stepSample(gpsMoving)
         val readings = mutableListOf<SensorReadingEntity>()
         readings += SensorReadingEntity(
             id = "acc-${UUID.randomUUID()}", patrolId = pid, timestamp = now,
@@ -408,8 +460,14 @@ class TelemetryRecorder(
         return readings
     }
 
-    /** Updates the rolling step delta/cadence from the cumulative step counter. */
-    private fun stepSample() {
+    /**
+     * Updates the rolling step delta/cadence from the cumulative step
+     * counter — but only when GPS proves the coordinates are changing.
+     * Shaking a stationary phone can nudge the hardware counter; those
+     * phantom steps are swallowed (prevSteps still advances so they can
+     * never flush out later as a lump when real walking starts).
+     */
+    private fun stepSample(gpsMoving: Boolean = true) {
         if (stepsValue < 0) {
             // No counter events yet — the sensor may have become registrable
             // mid-patrol (permission grant raced the start). Retry each tick;
@@ -418,6 +476,13 @@ class TelemetryRecorder(
             return
         }
         val now = SystemClock.elapsedRealtime()
+        if (!gpsMoving) {
+            prevSteps = stepsValue
+            prevStepsElapsed = now
+            lastStepDelta = 0L
+            lastCadence = 0f
+            return
+        }
         if (prevSteps >= 0 && now > prevStepsElapsed) {
             lastStepDelta = stepsValue - prevSteps
             val minutes = (now - prevStepsElapsed) / 60_000f
@@ -427,7 +492,7 @@ class TelemetryRecorder(
         prevStepsElapsed = now
     }
 
-    private fun computeMovement(telemetry: GpsTelemetry): MovementInfo {
+    private fun computeMovement(telemetry: GpsTelemetry, gpsMoving: Boolean = true): MovementInfo {
         val speedKmh = telemetry.speedMps?.let { it * 3.6f }
         val cadence = lastCadence.takeIf { it > 0f }
 
@@ -438,6 +503,19 @@ class TelemetryRecorder(
             val best = result.mostProbableActivity
             val mode = MovementMode.fromGoogleDetectedActivity(best, result.probableActivities)
             if (mode != MovementMode.UNKNOWN && best.confidence >= AppConfig.AR_MIN_CONFIDENCE) {
+                // GPS cross-check: Activity Recognition works off inertial
+                // sensors, so shaking a stationary phone reports CYCLING with
+                // high confidence. GPS coordinates don't lie — when they are
+                // static, force STILL no matter what the inertial sensors say.
+                if (!gpsMoving && mode != MovementMode.STILL) {
+                    return MovementInfo(
+                        mode = MovementMode.STILL,
+                        confidence = 0.6f,
+                        source = ModeSource.HEURISTIC,
+                        speedKmh = speedKmh,
+                        stepCadence = null
+                    )
+                }
                 return MovementInfo(
                     mode = mode,
                     // GMS DetectedActivity confidence is 0..100; normalize to
