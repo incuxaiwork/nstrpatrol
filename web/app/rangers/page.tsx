@@ -5,13 +5,14 @@
  * table/grid views, KPIs and team overview.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { rangers } from "@/lib/services";
+import { api } from "@/lib/api";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, Avatar, SearchInput } from "@/components/ui";
-import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, type ViewMode } from "@/components/data";
+import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, Pagination, type ViewMode } from "@/components/data";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -23,11 +24,16 @@ import type { DutyStatus } from "@/lib/types";
 export default function RangersPage() {
   const router = useRouter();
   const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  // Backend per-ranger coverage aggregate (#27) powers the Avg Coverage KPI.
+  const cov = useAsyncData(() => api.coverage.rangers().catch(() => null), [], { cacheKey: "rangers:coverage" });
 
   const [status, setStatus] = useState("");
   const [division, setDivision] = useState("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ViewMode>("table");
+  const [page, setPage] = useState(1);
+
+  const PAGE_SIZE = 12;
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -40,21 +46,27 @@ export default function RangersPage() {
     );
   }, [data, status, division, query]);
 
+  // Reset to first page whenever the filter/search roster changes.
+  useEffect(() => { setPage(1); }, [filtered]);
+
+  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+
   if (loading || !data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   const inField = data.filter((r) => r.dutyStatus === "field").length;
   const onDuty = data.filter((r) => r.dutyStatus === "on-duty").length;
-  // Per-ranger coverage has no backend aggregate — average only what exists.
+  // Avg Coverage KPI: prefer the backend coverage/rangers aggregate (#27) so
+  // the number reflects real GPS/PostGIS attribution; fall back to averaging
+  // whatever per-ranger coverage the roster carries, else "—".
+  const backendAvg = cov.data?.summary?.avgCoverage ?? null;
   const coverageValues = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
-  const avgCoverage = coverageValues.length
-    ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
-    : null;
-
-  const dutySeg = data.reduce<Record<string, number>>((acc, r) => {
-    acc[r.dutyStatus] = (acc[r.dutyStatus] ?? 0) + 1;
-    return acc;
-  }, {});
+  const avgCoverage =
+    backendAvg != null
+      ? backendAvg
+      : coverageValues.length
+        ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
+        : null;
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `rangers-${stamp()}`, filtered.map((r) => ({
@@ -124,9 +136,10 @@ export default function RangersPage() {
               options={[...new Set(data.map((r) => r.division).filter(Boolean))].map((d) => ({ value: d, label: d }))} />
           </FilterBar>
           {view === "table" && (
-            <DataTable
-              rows={filtered}
-              loading={loading}
+            <>
+              <DataTable
+                rows={pageRows}
+                loading={loading}
               onRowClick={(r) => router.push(`/rangers/${r.id}`)}
               columns={[
                 {
@@ -167,37 +180,37 @@ export default function RangersPage() {
                 },
               ]}
               empty={<p className="py-8 text-center text-sm text-ink-soft">No rangers match the filters.</p>}
-            />
+              />
+              {filtered.length > PAGE_SIZE && (
+                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
+              )}
+            </>
           )}
-          {view === "cards" && <RangerCards rangers={filtered} onOpen={(r) => router.push(`/rangers/${r.id}`)} />}
+          {view === "cards" && (
+            <>
+              <RangerCards rangers={pageRows} onOpen={(r) => router.push(`/rangers/${r.id}`)} />
+              {filtered.length > PAGE_SIZE && (
+                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
+              )}
+            </>
+          )}
           {view === "map" && (
             <p className="px-4 py-8 text-center text-sm text-ink-soft">
               Map view for ranger positions links into the GIS workspace — see{" "}
               <Link href="/gis" className="text-forest-700 hover:underline">GIS Intelligence</Link>.
             </p>
           )}
-          {view === "gallery" && <RangerGrid rangers={filtered} onOpen={(r) => router.push(`/rangers/${r.id}`)} />}
+          {view === "gallery" && (
+            <>
+              <RangerGrid rangers={pageRows} onOpen={(r) => router.push(`/rangers/${r.id}`)} />
+              {filtered.length > PAGE_SIZE && (
+                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
+              )}
+            </>
+          )}
         </Card>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader title="Duty distribution" icon="chart" />
-            <div className="space-y-2.5 p-4">
-              {(Object.keys(dutyStatusLabel) as DutyStatus[]).map((s) => (
-                <div key={s} className="flex items-center gap-2">
-                  <span className="w-20 text-xs text-ink-soft">{dutyStatusLabel[s]}</span>
-                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-100">
-                    <div
-                      className={cn("h-full rounded-full", dutyBar(s))}
-                      style={{ width: `${(dutySeg[s] ?? 0) / (data.length || 1) * 100}%` }}
-                    />
-                  </div>
-                  <span className="w-6 text-right text-xs font-medium text-ink">{dutySeg[s] ?? 0}</span>
-                </div>
-              ))}
-            </div>
-          </Card>
-
           <Card>
             <CardHeader title="Top performers" icon="star" subtitle="By field coverage this quarter" />
             <div className="divide-y divide-line">
@@ -230,16 +243,6 @@ export default function RangersPage() {
 // -- helpers -----------------------------------------------------------
 
 function cn(...args: unknown[]) { return args.filter(Boolean).join(" "); }
-
-function dutyBar(s: string): string {
-  switch (s) {
-    case "field": return "bg-success";
-    case "on-duty": return "bg-forest-600";
-    case "off-duty": return "bg-zinc-300";
-    case "leave": return "bg-warning";
-    default: return "bg-danger";
-  }
-}
 
 function isStale(lastSync?: string): boolean {
   if (!lastSync) return false;

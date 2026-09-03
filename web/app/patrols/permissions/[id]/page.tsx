@@ -17,14 +17,13 @@ import { Card, CardHeader, Badge, PageHeader, Avatar } from "@/components/ui";
 import { DataTable, Timeline } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { AuthAreaMap } from "@/components/jurisdiction";
-import { ConfirmDialog } from "@/components/overlays";
+import { ConfirmDialog, ExportButton } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
-import { downloadJson } from "@/lib/export";
 
 const CURRENT_ROLE = "super-admin";
 
@@ -62,12 +61,13 @@ export default function AuthorizationDetailPage() {
           <>
             <Badge tone={authStatusTone[auth.status]} dot>{authStatusLabel[auth.status]}</Badge>
             <Badge tone={priorityTone[auth.priority]}>{auth.priority[0].toUpperCase() + auth.priority.slice(1)} priority</Badge>
-            <button
-              onClick={() =>
-                downloadJson(`authorization-${auth.id}.json`, {
+            <ExportButton
+              filename={`authorization-${auth.id}`}
+              rows={[
+                {
                   id: auth.id,
                   ranger: ranger?.name ?? auth.rangerId,
-                  rangerCode: ranger?.code,
+                  rangerCode: ranger?.code ?? "",
                   homeDivision: auth.homeDivision,
                   homeRange: auth.homeRange,
                   homeBeat: auth.homeBeat,
@@ -76,29 +76,38 @@ export default function AuthorizationDetailPage() {
                   authBeat: auth.authBeat,
                   reason: auth.reason,
                   instruction: auth.instruction,
-                  objective: auth.objective,
+                  objective: auth.objective ?? "",
                   patrolType: auth.patrolType,
                   validFrom: auth.validFrom,
                   validUntil: auth.validUntil,
                   priority: auth.priority,
-                  restrictions: auth.restrictions,
-                  notes: auth.notes,
+                  restrictions: auth.restrictions ?? "",
+                  notes: auth.notes ?? "",
                   status: auth.status,
-                  approvedBy: auth.approvedBy,
-                  approvalDate: auth.approvalDate,
-                })
-              }
-              className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
-            >
-              <Icon name="export" size={15} /> Export record
-            </button>
+                  approvedBy: auth.approvedBy ?? "",
+                  approvalDate: auth.approvalDate ?? "",
+                },
+              ]}
+            />
             {canManage && auth.status === "draft" && (
-              <Link
-                href={`/patrols/permissions/new?edit=${auth.id}`}
-                className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
-              >
-                <Icon name="edit" size={14} /> Continue draft
-              </Link>
+              <>
+                <Link
+                  href={`/patrols/permissions/new?edit=${auth.id}`}
+                  className="inline-flex h-9 items-center gap-2 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+                >
+                  <Icon name="edit" size={14} /> Continue draft
+                </Link>
+                <button
+                  onClick={async () => {
+                    await authorizations.approve(auth.id);
+                    pushToast("success", "Authorization approved", `${auth.id} is now active.`);
+                    reload();
+                  }}
+                  className="inline-flex h-9 items-center gap-2 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+                >
+                  <Icon name="check" size={15} /> Approve
+                </button>
+              </>
             )}
             {canManage && auth.status === "pending" && (
               <>

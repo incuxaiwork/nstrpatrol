@@ -242,14 +242,24 @@ export default function PatrolPermissionsPage() {
                     </>
                   )}
                   {canManage && a.status === "draft" && (
-                    <Link
-                      href={`/patrols/permissions/new?edit=${a.id}`}
-                      title="Continue draft"
-                      aria-label={`Continue draft ${a.id}`}
-                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
-                    >
-                      <Icon name="edit" size={13} />
-                    </Link>
+                    <>
+                      <Link
+                        href={`/patrols/permissions/new?edit=${a.id}`}
+                        title="Continue draft"
+                        aria-label={`Continue draft ${a.id}`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                      >
+                        <Icon name="edit" size={13} />
+                      </Link>
+                      <button
+                        onClick={() => setConfirming({ id: a.id, kind: "approve" })}
+                        title="Quick approve draft"
+                        aria-label={`Quick approve draft ${a.id}`}
+                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-forest-700 transition-colors hover:border-forest-600"
+                      >
+                        <Icon name="check" size={13} />
+                      </button>
+                    </>
                   )}
                   {canManage && a.status === "active" && (
                     <>

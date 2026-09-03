@@ -14,6 +14,20 @@ export class HttpError extends Error {
   }
 }
 
+/** True when an error indicates the database is unreachable — an externally
+ *  hosted Postgres (Railway) is intentionally transient, so instead of leaking
+ *  a raw driver stack we surface a clean 503 the client can act on. */
+function isDatabaseUnavailable(err: unknown): boolean {
+  const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  return (
+    err instanceof Prisma.PrismaClientInitializationError ||
+    (err instanceof Prisma.PrismaClientKnownRequestError &&
+      ['P1001', 'P1002', 'P1003'].includes(err.code)) ||
+    /\bCan't reach database server\b/i.test(msg) ||
+    /\b(ECONNREFUSED|ENOTFOUND|EHOSTUNREACH|connection refused|connect ETIMEDOUT)\b/i.test(msg)
+  );
+}
+
 export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
   if (res.headersSent) {
     next(err);
@@ -37,6 +51,17 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, next) => {
 
   if (err instanceof HttpError) {
     res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    return;
+  }
+
+  if (isDatabaseUnavailable(err)) {
+    logger.warn(`database unreachable — returning 503: ${err instanceof Error ? err.message : String(err)}`);
+    res.status(503).json({
+      error: {
+        code: 'database_unavailable',
+        message: 'The database is temporarily unavailable. Please try again in a moment.',
+      },
+    });
     return;
   }
 

@@ -1,0 +1,970 @@
+{
+ "stage": "fit",
+ "zoom": 9.02398491940928,
+ "layers": [
+  {
+   "id": "gl-background",
+   "type": "background",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "background-color": "#e8eaed"
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-basemap-atlas",
+   "source": "tiles",
+   "type": "raster",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "raster-opacity": 1
+   },
+   "layout": {
+    "visibility": "visible"
+   }
+  },
+  {
+   "id": "gl-basemap-street",
+   "source": "tiles",
+   "type": "raster",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "none",
+   "paint": {
+    "raster-opacity": 1
+   },
+   "layout": {
+    "visibility": "none"
+   }
+  },
+  {
+   "id": "gl-basemap-satellite",
+   "source": "tiles",
+   "type": "raster",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "none",
+   "paint": {
+    "raster-opacity": 1
+   },
+   "layout": {
+    "visibility": "none"
+   }
+  },
+  {
+   "id": "gl-basemap-terrain",
+   "source": "tiles",
+   "type": "raster",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "none",
+   "paint": {
+    "raster-opacity": 1
+   },
+   "layout": {
+    "visibility": "none"
+   }
+  },
+  {
+   "id": "gl-grids-fill",
+   "source": "grids",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#8a8f98",
+    "fill-opacity": 0.05
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-grids-line",
+   "source": "grids",
+   "type": "line",
+   "minzoom": 5.5,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#8a8f98",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     7,
+     0.5,
+     13,
+     1.1,
+     16,
+     1.6
+    ],
+    "line-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     0.2,
+     10,
+     0.45,
+     14,
+     0.75
+    ]
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-grids-coverage",
+   "source": "grids",
+   "type": "fill",
+   "minzoom": null,
+   "filter": [
+    "!=",
+    [
+     "get",
+     "coverageStatus"
+    ],
+    null
+   ],
+   "visibility": "visible",
+   "paint": {
+    "fill-color": [
+     "case",
+     [
+      "==",
+      [
+       "get",
+       "coverageStatus"
+      ],
+      "covered"
+     ],
+     "#2E7D32",
+     [
+      "==",
+      [
+       "get",
+       "coverageStatus"
+      ],
+      "uncovered"
+     ],
+     "#B3261E",
+     "#8a8f98"
+    ],
+    "fill-opacity": 0.18
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-beats-coverage",
+   "source": "beats",
+   "type": "fill",
+   "minzoom": null,
+   "filter": [
+    "!=",
+    [
+     "get",
+     "coveragePct"
+    ],
+    null
+   ],
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#2E7D32",
+    "fill-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "get",
+      "coveragePct"
+     ],
+     0,
+     0.05,
+     100,
+     0.3
+    ]
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-heat",
+   "source": "heat",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#B3261E",
+    "fill-opacity": [
+     "*",
+     [
+      "get",
+      "intensity"
+     ],
+     0.32
+    ]
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-compartments-fill",
+   "source": "compartments",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#E65100",
+    "fill-opacity": 0.02
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-compartments-line",
+   "source": "compartments",
+   "type": "line",
+   "minzoom": 9.5,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#B3261E",
+    "line-width": 1,
+    "line-dasharray": [
+     4,
+     3
+    ],
+    "line-opacity": 0.7
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-compartments-label",
+   "source": "compartment-labels",
+   "type": "symbol",
+   "minzoom": 11,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "text-color": "#6A3AB2",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 1.5
+   },
+   "layout": {
+    "text-field": [
+     "get",
+     "compNo"
+    ],
+    "text-size": 10,
+    "text-allow-overlap": false
+   }
+  },
+  {
+   "id": "gl-blocks-fill",
+   "source": "blocks",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#5B2C6F",
+    "fill-opacity": 0.07
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-blocks-outline",
+   "source": "blocks",
+   "type": "line",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#5B2C6F",
+    "line-width": 2,
+    "line-opacity": 0.85
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-blocks-label",
+   "source": "block-labels",
+   "type": "symbol",
+   "minzoom": 7.5,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "text-color": "#5B2C6F",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 2
+   },
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-size": 12,
+    "text-allow-overlap": false
+   }
+  },
+  {
+   "id": "gl-beats-fill",
+   "source": "beats",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#1E4620",
+    "fill-opacity": 0.02
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-auth-fill",
+   "source": "beats",
+   "type": "fill",
+   "minzoom": null,
+   "filter": [
+    "==",
+    [
+     "get",
+     "isAuth"
+    ],
+    true
+   ],
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#B07D12",
+    "fill-opacity": 0.08
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-auth-line",
+   "source": "beats",
+   "type": "line",
+   "minzoom": null,
+   "filter": [
+    "==",
+    [
+     "get",
+     "isAuth"
+    ],
+    true
+   ],
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#B07D12",
+    "line-width": 2.5,
+    "line-dasharray": [
+     7,
+     5
+    ]
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-beats-outline",
+   "source": "beats",
+   "type": "line",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": [
+     "case",
+     [
+      "boolean",
+      [
+       "get",
+       "isZero"
+      ],
+      false
+     ],
+     "#B3261E",
+     [
+      "case",
+      [
+       "boolean",
+       [
+        "get",
+        "selected"
+       ],
+       false
+      ],
+      "#B4450C",
+      "#E65100"
+     ]
+    ],
+    "line-width": [
+     "case",
+     [
+      "boolean",
+      [
+       "get",
+       "selected"
+      ],
+      false
+     ],
+     3,
+     2.2
+    ],
+    "line-opacity": 0.9
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-beats-zero-dash",
+   "source": "beats",
+   "type": "line",
+   "minzoom": null,
+   "filter": [
+    "==",
+    [
+     "get",
+     "isZero"
+    ],
+    true
+   ],
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#B3261E",
+    "line-width": 3,
+    "line-dasharray": [
+     8,
+     6
+    ],
+    "line-opacity": 0.85
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-beats-label",
+   "source": "beats",
+   "type": "symbol",
+   "minzoom": 9,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "text-color": [
+     "case",
+     [
+      "boolean",
+      [
+       "get",
+       "isZero"
+      ],
+      false
+     ],
+     "#B3261E",
+     "#C2410C"
+    ],
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 2
+   },
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-size": 12,
+    "text-allow-overlap": false
+   }
+  },
+  {
+   "id": "gl-ranges-outline",
+   "source": "ranges",
+   "type": "line",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#0E4C92",
+    "line-width": 3,
+    "line-opacity": 0.95
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-ranges-label",
+   "source": "range-labels",
+   "type": "symbol",
+   "minzoom": 7.5,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "text-color": "#0E4C92",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 2
+   },
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-size": 14,
+    "text-allow-overlap": false
+   }
+  },
+  {
+   "id": "gl-boundary-line",
+   "source": "boundary",
+   "type": "line",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#1B4332",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     3.2,
+     14,
+     5.5
+    ],
+    "line-opacity": 0.95
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-boundary-label",
+   "source": "boundary",
+   "type": "symbol",
+   "minzoom": 7,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "text-color": "#143d2b",
+    "text-halo-color": "#ffffff",
+    "text-halo-width": 2
+   },
+   "layout": {
+    "text-field": [
+     "get",
+     "name"
+    ],
+    "text-size": 13,
+    "text-transform": "uppercase",
+    "text-letter-spacing": 0.08,
+    "text-allow-overlap": false
+   }
+  },
+  {
+   "id": "gl-agrid-fill",
+   "source": "analysis-grid",
+   "type": "fill",
+   "minzoom": null,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "fill-color": "#8a8f98",
+    "fill-opacity": 0.07
+   },
+   "layout": {}
+  },
+  {
+   "id": "gl-agrid-line",
+   "source": "analysis-grid",
+   "type": "line",
+   "minzoom": 4.5,
+   "filter": null,
+   "visibility": "visible",
+   "paint": {
+    "line-color": "#8a8f98",
+    "line-width": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     8,
+     0.6,
+     14,
+     1.2
+    ],
+    "line-opacity": [
+     "interpolate",
+     [
+      "linear"
+     ],
+     [
+      "zoom"
+     ],
+     6,
+     0.25,
+     12,
+     0.5
+    ]
+   },
+   "layout": {}
+  }
+ ],
+ "sources": {
+  "beats": {
+   "type": "geojson",
+   "featureCount": 44,
+   "geomTypes": {
+    "Polygon": 44
+   }
+  },
+  "markers": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "routes": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "heat": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "replay-trail": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "replay-head": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "replay-points": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "compartments": {
+   "type": "geojson",
+   "featureCount": 448,
+   "geomTypes": {
+    "Polygon": 448
+   }
+  },
+  "blocks": {
+   "type": "geojson",
+   "featureCount": 38,
+   "geomTypes": {
+    "MultiPolygon": 14,
+    "Polygon": 24
+   }
+  },
+  "block-labels": {
+   "type": "geojson",
+   "featureCount": 39,
+   "geomTypes": {
+    "Point": 39
+   }
+  },
+  "ranges": {
+   "type": "geojson",
+   "featureCount": 7,
+   "geomTypes": {
+    "Polygon": 7
+   }
+  },
+  "range-labels": {
+   "type": "geojson",
+   "featureCount": 7,
+   "geomTypes": {
+    "Point": 7
+   }
+  },
+  "compartment-labels": {
+   "type": "geojson",
+   "featureCount": 448,
+   "geomTypes": {
+    "Point": 448
+   }
+  },
+  "boundary": {
+   "type": "geojson",
+   "featureCount": 1,
+   "geomTypes": {
+    "Polygon": 1
+   }
+  },
+  "grids": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "analysis-grid": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "sos-alerts": {
+   "type": "geojson",
+   "featureCount": 0,
+   "geomTypes": {}
+  },
+  "tiles": {
+   "type": "raster"
+  }
+ },
+ "zoomGates": {
+  "at9_5": [
+   "gl-background",
+   "gl-basemap-atlas",
+   "gl-basemap-street",
+   "gl-basemap-satellite",
+   "gl-basemap-terrain",
+   "gl-grids-fill",
+   "gl-grids-line",
+   "gl-grids-coverage",
+   "gl-beats-coverage",
+   "gl-heat",
+   "gl-compartments-fill",
+   "gl-compartments-line",
+   "gl-blocks-fill",
+   "gl-blocks-outline",
+   "gl-blocks-label",
+   "gl-beats-fill",
+   "gl-auth-fill",
+   "gl-auth-line",
+   "gl-beats-outline",
+   "gl-beats-zero-dash",
+   "gl-beats-label",
+   "gl-ranges-outline",
+   "gl-ranges-label",
+   "gl-boundary-line",
+   "gl-boundary-label",
+   "gl-agrid-fill",
+   "gl-agrid-line"
+  ],
+  "at10": [
+   "gl-background",
+   "gl-basemap-atlas",
+   "gl-basemap-street",
+   "gl-basemap-satellite",
+   "gl-basemap-terrain",
+   "gl-grids-fill",
+   "gl-grids-line",
+   "gl-grids-coverage",
+   "gl-beats-coverage",
+   "gl-heat",
+   "gl-compartments-fill",
+   "gl-compartments-line",
+   "gl-blocks-fill",
+   "gl-blocks-outline",
+   "gl-blocks-label",
+   "gl-beats-fill",
+   "gl-auth-fill",
+   "gl-auth-line",
+   "gl-beats-outline",
+   "gl-beats-zero-dash",
+   "gl-beats-label",
+   "gl-ranges-outline",
+   "gl-ranges-label",
+   "gl-boundary-line",
+   "gl-boundary-label",
+   "gl-agrid-fill",
+   "gl-agrid-line"
+  ],
+  "at11": [
+   "gl-background",
+   "gl-basemap-atlas",
+   "gl-basemap-street",
+   "gl-basemap-satellite",
+   "gl-basemap-terrain",
+   "gl-grids-fill",
+   "gl-grids-line",
+   "gl-grids-coverage",
+   "gl-beats-coverage",
+   "gl-heat",
+   "gl-compartments-fill",
+   "gl-compartments-line",
+   "gl-compartments-label",
+   "gl-blocks-fill",
+   "gl-blocks-outline",
+   "gl-blocks-label",
+   "gl-beats-fill",
+   "gl-auth-fill",
+   "gl-auth-line",
+   "gl-beats-outline",
+   "gl-beats-zero-dash",
+   "gl-beats-label",
+   "gl-ranges-outline",
+   "gl-ranges-label",
+   "gl-boundary-line",
+   "gl-boundary-label",
+   "gl-agrid-fill",
+   "gl-agrid-line"
+  ]
+ },
+ "labelCounts": {
+  "compartmentLabels": 448,
+  "blockLabels": 39,
+  "rangeLabels": 7,
+  "boundaryLabel": 1,
+  "beatLabels": 44
+ },
+ "thresholds": [
+  {
+   "z": 8.5,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 9,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 9.4,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 9.5,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-compartments-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 9.6,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-compartments-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 10,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-compartments-line",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 11,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-compartments-line",
+    "gl-compartments-label",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  },
+  {
+   "z": 12,
+   "activeIds": [
+    "gl-grids-line",
+    "gl-compartments-line",
+    "gl-compartments-label",
+    "gl-blocks-outline",
+    "gl-blocks-label",
+    "gl-auth-line",
+    "gl-beats-outline",
+    "gl-beats-zero-dash",
+    "gl-beats-label",
+    "gl-ranges-outline",
+    "gl-ranges-label",
+    "gl-boundary-line",
+    "gl-boundary-label",
+    "gl-agrid-line"
+   ]
+  }
+ ]
+}

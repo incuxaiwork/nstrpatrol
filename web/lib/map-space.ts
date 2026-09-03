@@ -81,9 +81,9 @@ export function emptyFc(): GeoFeatureCollection {
 
 const markerColor: Record<GisMarker["kind"], string> = {
   ranger: "#1B365D",
-  observation: "#B3261E",
+  observation: "#EAB308",
   patrol: "#2E7D32",
-  incident: "#FF8F00",
+  incident: "#EAB308",
   sos: "#B3261E",
 };
 
@@ -358,20 +358,25 @@ export function routeToTimed(r: GisRoute): TimedPoint[] {
   });
 }
 
-/** Playback geometry at `progress` (0..1) — trail polyline + head point. */
+/**
+ * Playback geometry at `progress` (0..1) — trail polyline, head point, and the
+ * GPS dots played so far. `dots` holds only the points up to the current
+ * playhead so the replayed patrol's markers animate in alongside the trail
+ * instead of flashing every fix at once.
+ */
 export function replayFeatures(
   timed: TimedPoint[],
   progress: number
-): { trail: GeoFeatureCollection; head: GeoFeatureCollection } {
-  const idx = Math.floor(progress * Math.max(timed.length - 1, 0));
-  const shown = timed.slice(0, idx + 1).map((p) => [p.lon, p.lat] as [number, number]);
-  const last = shown[shown.length - 1];
+): { trail: GeoFeatureCollection; head: GeoFeatureCollection; dots: GeoFeatureCollection } {
+  const shown = timed.slice(0, Math.floor(progress * Math.max(timed.length - 1, 0)) + 1);
+  const points = shown.map((p) => [p.lon, p.lat] as [number, number]);
+  const last = points[points.length - 1];
   return {
     trail: {
       type: "FeatureCollection",
       features:
-        shown.length >= 2
-          ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: shown } }]
+        points.length >= 2
+          ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: points } }]
           : [],
     },
     head: {
@@ -379,6 +384,14 @@ export function replayFeatures(
       features: last
         ? [{ type: "Feature", properties: {}, geometry: { type: "Point", coordinates: last } }]
         : [],
+    },
+    dots: {
+      type: "FeatureCollection",
+      features: points.map((p) => ({
+        type: "Feature" as const,
+        properties: {},
+        geometry: { type: "Point" as const, coordinates: p },
+      })),
     },
   };
 }

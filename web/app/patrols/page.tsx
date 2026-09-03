@@ -17,7 +17,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState, useCallback } from "react";
 import { patrols, rangers, hierarchy } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
-import { Card, Badge, PageHeader } from "@/components/ui";
+import { Card, Badge, PageHeader, SearchInput } from "@/components/ui";
 import { DataTable, FilterBar, FilterSelect, Pagination } from "@/components/data";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -69,6 +69,7 @@ export default function PatrolsPage() {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [ranger, setRanger] = useState("");
+  const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
 
   /* ── Derive ranges from authoritative hierarchy (not patrol data) ── */
@@ -141,19 +142,26 @@ export default function PatrolsPage() {
   /* ── Client-side filtering (AND semantics) ── */
   const filtered = useMemo(() => {
     if (!data) return [];
+    const q = search.trim().toLowerCase();
     return data.filter((p) => {
       if (status && p.status !== status) return false;
       if (range && p.range !== range) return false;
       if (effectiveBeat && p.beat !== effectiveBeat) return false;
       if (ranger && p.rangerId !== ranger && p.leader !== ranger) return false;
+      if (q && !`${p.code} ${p.title ?? ""} ${p.leader ?? ""}`.toLowerCase().includes(q)) return false;
       if (dateFilter) {
-        const patrolDate = p.startScheduled?.slice(0, 10);
+        // Convert patrol start to IST so date comparison is apples-to-apples
+        // with the IST-derived dateFilter bounds (#18).
+        const cfg = new Date(p.startScheduled).getTimezoneOffset() * 60_000;
+        const patrolDate = new Date(new Date(p.startScheduled).getTime() + cfg + IST_OFFSET_MS)
+          .toISOString()
+          .slice(0, 10);
         if (!patrolDate) return false;
         if (patrolDate < dateFilter.from || patrolDate > dateFilter.to) return false;
       }
       return true;
     });
-  }, [data, status, range, effectiveBeat, ranger, dateFilter]);
+  }, [data, status, range, effectiveBeat, ranger, dateFilter, search]);
 
   /* ── Pagination ── */
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
@@ -171,6 +179,7 @@ export default function PatrolsPage() {
     setDateFrom("");
     setDateTo("");
     setRanger("");
+    setSearch("");
     setPage(1);
   }, []);
 
@@ -196,17 +205,23 @@ export default function PatrolsPage() {
       <Card>
         {/* Search + record count */}
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            placeholder="Search by patrol, title, or ranger…"
+            className="w-72"
+          />
           <div className="flex items-center gap-3">
             {activeFilters > 0 && (
               <button onClick={clearFilters} className="text-xs text-forest-700 hover:underline">
                 Clear all ({activeFilters})
               </button>
             )}
+            <p className="text-xs text-ink-soft">
+              {filtered.length} patrol{filtered.length === 1 ? "" : "s"}
+              {filtered.length !== data.length && ` of ${data.length}`}
+            </p>
           </div>
-          <p className="text-xs text-ink-soft">
-            {filtered.length} patrol{filtered.length === 1 ? "" : "s"}
-            {filtered.length !== data.length && ` of ${data.length}`}
-          </p>
         </div>
 
         {/* Filters — order: Status → Range → Beat → Date → Ranger */}
@@ -337,27 +352,21 @@ export default function PatrolsPage() {
               sortValue: (r) => r.status,
               render: (r) => <Badge tone={patrolStatusTone[r.status]} dot>{patrolStatusLabel[r.status]}</Badge>,
             },
-            {
-              key: "actions", header: "",
-              render: (r) => (
-                <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-                  <Link
-                    href={`/patrols/${r.id}`}
-                    title="View patrol"
-                    className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
-                  >
-                    <Icon name="eye" size={13} />
-                  </Link>
-                  <Link
-                    href={`/patrols/${r.id}/replay`}
-                    title="Replay"
-                    className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
-                  >
-                    <Icon name="play" size={13} />
-                  </Link>
-                </span>
-              ),
-            },
+{
+                key: "actions", header: "",
+                render: (r) => (
+                  <span className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                    <Link
+                      href={`/patrols/${r.id}`}
+                      title="View patrol"
+                      aria-label={`View patrol ${r.code}`}
+                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                    >
+                      <Icon name="eye" size={13} />
+                    </Link>
+                  </span>
+                ),
+              },
           ]}
           empty={
             <div className="py-12 text-center">

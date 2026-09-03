@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../db/prisma';
+import { prisma, withDbRetry } from '../db/prisma';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import { validateBody } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
@@ -19,10 +19,17 @@ const registerSchema = z.object({
   fullName: z.string().trim().min(1).max(120),
   cader: z.enum(['DFO', 'DyDFO', 'FRO', 'DyRO', 'FSO', 'FBO', 'ABO']).default('FBO'),
   phone: z.string().trim().max(30).nullish(),
+  // Optional organizational scope persisted on the new account (Provision
+  // User Account workflow). The User model already carries these nullable
+  // columns — no schema migration is required.
+  divisionId: z.string().trim().max(80).nullish(),
+  subDivisionId: z.string().trim().max(80).nullish(),
+  rangeId: z.string().trim().max(80).nullish(),
+  beatId: z.string().trim().max(80).nullish(),
 });
 
 authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (req, res) => {
-  const { email, password, fullName, cader, phone } = req.body;
+  const { email, password, fullName, cader, phone, divisionId, subDivisionId, rangeId, beatId } = req.body;
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new HttpError(409, 'conflict', 'A user with that email already exists');
 
@@ -48,6 +55,12 @@ authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (
       cader,
       phone: phone ?? null,
       isAdmin: effectiveRole === 'ADMIN',
+      // Persist the admin-provisioned organizational scope made available so
+      // login /me can geofence the new account by Range/Beat immediately.
+      divisionId: divisionId ?? undefined,
+      subDivisionId: subDivisionId ?? undefined,
+      rangeId: rangeId ?? undefined,
+      beatId: beatId ?? undefined,
     },
     select: userSelect,
   });
@@ -61,17 +74,21 @@ const loginSchema = z.object({
 
 authRouter.post('/login', validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
-  const user = await prisma.user.findUnique({ where: { email } });
+  // Retried on transient connectivity so a brief Postgres blip on login does
+  // not surface as a raw driver error to the admin.
+  const user = await withDbRetry(() => prisma.user.findUnique({ where: { email } }));
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     throw new HttpError(401, 'invalid_credentials', 'Invalid email or password');
   }
   if (!user.isActive) throw new HttpError(403, 'account_disabled', 'This account is disabled');
 
   const refresh = generateRefreshToken();
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { refreshTokenHash: refresh.hash },
-  });
+  await withDbRetry(() =>
+    prisma.user.update({
+      where: { id: user.id },
+      data: { refreshTokenHash: refresh.hash },
+    })
+  );
 
   // Look up range and beat names for geofencing
   let rangeName: string | null = null;

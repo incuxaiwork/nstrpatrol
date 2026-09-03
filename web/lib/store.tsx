@@ -20,6 +20,7 @@ import { ApiError, type ApiUser } from "@/lib/api";
 import type { NotificationItem, SearchResult, Scope } from "@/lib/types";
 
 const STORAGE_USER = "nstr.auth.user";
+const STORAGE_READ = "nstr.notificationsRead";
 
 function readStoredUser(): ApiUser | null {
   if (typeof window === "undefined") return null;
@@ -29,6 +30,26 @@ function readStoredUser(): ApiUser | null {
   } catch {
     return null;
   }
+}
+
+/** Persisted set of read notification ids — survives a page reload even though
+ *  the backend /api/alerts feed has no read-tracking of its own (#21). */
+function readStoredReadIds(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(STORAGE_READ);
+    const arr = raw ? (JSON.parse(raw) as unknown[]) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function persistReadIds(ids: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(STORAGE_READ, JSON.stringify([...ids]));
+  } catch { /* ignore */ }
 }
 
 export interface ToastItem {
@@ -121,7 +142,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const markAllRead = useCallback(() => {
-    setNotifications((ns) => ns.map((n) => ({ ...n, read: true })));
+    setNotifications((ns) => {
+      persistReadIds(new Set(ns.map((n) => n.id)));
+      return ns.map((n) => ({ ...n, read: true }));
+    });
   }, []);
 
   // Load the admin alert feed on mount (backend /api/alerts, mock fallback).
@@ -130,11 +154,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   // exactly why the feed is empty instead of pretending "no notifications".
   useEffect(() => {
     let active = true;
+    const storedRead = readStoredReadIds();
     api
       .notifications()
       .then((ns) => {
         if (!active) return;
-        setNotifications(ns);
+        // Fold the persisted read set back in (backend items always arrive
+        // read:false) and keep only ids that still exist in the feed.
+        const alive = new Set(ns.map((n) => n.id));
+        const kept = new Set([...storedRead].filter((id) => alive.has(id)));
+        if (kept.size !== storedRead.size) persistReadIds(kept);
+        const merged = ns.map((n) => (kept.has(n.id) ? { ...n, read: true } : n));
+        setNotifications(merged);
         setNotificationsError(null);
       })
       .catch((err: unknown) => {

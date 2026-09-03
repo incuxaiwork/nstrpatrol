@@ -1,0 +1,967 @@
+{
+ "beats": 44,
+ "boundary": [
+  {
+   "part": 0,
+   "verts": 630,
+   "closed": true,
+   "longest": [
+    {
+     "i": 628,
+     "km": 33.4,
+     "midDepth": 1
+    },
+    {
+     "i": 390,
+     "km": 0.3,
+     "midDepth": 0
+    },
+    {
+     "i": 386,
+     "km": 0.3,
+     "midDepth": 0
+    },
+    {
+     "i": 279,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 372,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 273,
+     "km": 0.3,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 1,
+   "verts": 4156,
+   "closed": true,
+   "longest": [
+    {
+     "i": 4154,
+     "km": 93.1,
+     "midDepth": 0
+    },
+    {
+     "i": 4108,
+     "km": 3.5,
+     "midDepth": 0
+    },
+    {
+     "i": 4100,
+     "km": 1.2,
+     "midDepth": 1
+    },
+    {
+     "i": 954,
+     "km": 1.1,
+     "midDepth": 0
+    },
+    {
+     "i": 4141,
+     "km": 1,
+     "midDepth": 1
+    },
+    {
+     "i": 926,
+     "km": 1,
+     "midDepth": 0
+    }
+   ]
+  },
+  {
+   "part": 2,
+   "verts": 14,
+   "closed": true,
+   "longest": [
+    {
+     "i": 12,
+     "km": 1.1,
+     "midDepth": 1
+    },
+    {
+     "i": 8,
+     "km": 0.2,
+     "midDepth": 1
+    },
+    {
+     "i": 5,
+     "km": 0.2,
+     "midDepth": 0
+    },
+    {
+     "i": 7,
+     "km": 0.2,
+     "midDepth": 1
+    },
+    {
+     "i": 9,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 4,
+     "km": 0.1,
+     "midDepth": 0
+    }
+   ]
+  },
+  {
+   "part": 3,
+   "verts": 11,
+   "closed": true,
+   "longest": [
+    {
+     "i": 9,
+     "km": 0.6,
+     "midDepth": 1
+    },
+    {
+     "i": 1,
+     "km": 0.2,
+     "midDepth": 2
+    },
+    {
+     "i": 0,
+     "km": 0.2,
+     "midDepth": 2
+    },
+    {
+     "i": 4,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 5,
+     "km": 0.1,
+     "midDepth": 1
+    },
+    {
+     "i": 3,
+     "km": 0.1,
+     "midDepth": 2
+    }
+   ]
+  },
+  {
+   "part": 4,
+   "verts": 172,
+   "closed": true,
+   "longest": [
+    {
+     "i": 170,
+     "km": 12.4,
+     "midDepth": 1
+    },
+    {
+     "i": 56,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 134,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 54,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 55,
+     "km": 0.2,
+     "midDepth": 1
+    },
+    {
+     "i": 131,
+     "km": 0.2,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 5,
+   "verts": 63,
+   "closed": true,
+   "longest": [
+    {
+     "i": 61,
+     "km": 8,
+     "midDepth": 0
+    },
+    {
+     "i": 28,
+     "km": 0.5,
+     "midDepth": 0
+    },
+    {
+     "i": 19,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 5,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 20,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 35,
+     "km": 0.4,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 6,
+   "verts": 46,
+   "closed": true,
+   "longest": [
+    {
+     "i": 44,
+     "km": 5.6,
+     "midDepth": 0
+    },
+    {
+     "i": 29,
+     "km": 0.5,
+     "midDepth": 1
+    },
+    {
+     "i": 17,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 16,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 28,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 18,
+     "km": 0.3,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 7,
+   "verts": 193,
+   "closed": true,
+   "longest": [
+    {
+     "i": 191,
+     "km": 20.9,
+     "midDepth": 0
+    },
+    {
+     "i": 25,
+     "km": 0.4,
+     "midDepth": 0
+    },
+    {
+     "i": 165,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 190,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 68,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 166,
+     "km": 0.4,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 8,
+   "verts": 189,
+   "closed": true,
+   "longest": [
+    {
+     "i": 187,
+     "km": 15,
+     "midDepth": 1
+    },
+    {
+     "i": 119,
+     "km": 0.4,
+     "midDepth": 1
+    },
+    {
+     "i": 117,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 183,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 120,
+     "km": 0.3,
+     "midDepth": 1
+    },
+    {
+     "i": 186,
+     "km": 0.3,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 9,
+   "verts": 83,
+   "closed": true,
+   "longest": [
+    {
+     "i": 81,
+     "km": 9.7,
+     "midDepth": 0
+    },
+    {
+     "i": 7,
+     "km": 1.8,
+     "midDepth": 0
+    },
+    {
+     "i": 5,
+     "km": 0.9,
+     "midDepth": 1
+    },
+    {
+     "i": 4,
+     "km": 0.7,
+     "midDepth": 1
+    },
+    {
+     "i": 11,
+     "km": 0.6,
+     "midDepth": 1
+    },
+    {
+     "i": 12,
+     "km": 0.5,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 10,
+   "verts": 58,
+   "closed": true,
+   "longest": [
+    {
+     "i": 56,
+     "km": 1.6,
+     "midDepth": 1
+    },
+    {
+     "i": 7,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 16,
+     "km": 0.1,
+     "midDepth": 1
+    },
+    {
+     "i": 21,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 19,
+     "km": 0.1,
+     "midDepth": 1
+    },
+    {
+     "i": 17,
+     "km": 0.1,
+     "midDepth": 1
+    }
+   ]
+  },
+  {
+   "part": 11,
+   "verts": 44,
+   "closed": true,
+   "longest": [
+    {
+     "i": 42,
+     "km": 1.6,
+     "midDepth": 1
+    },
+    {
+     "i": 37,
+     "km": 0.1,
+     "midDepth": 1
+    },
+    {
+     "i": 28,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 22,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 23,
+     "km": 0.1,
+     "midDepth": 2
+    },
+    {
+     "i": 25,
+     "km": 0.1,
+     "midDepth": 2
+    }
+   ]
+  }
+ ],
+ "ranges": [
+  {
+   "name": "V.P.SOUTH",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 1387,
+     "closed": true,
+     "longest": [
+      {
+       "i": 1385,
+       "km": 33.5,
+       "midDepth": 1
+      },
+      {
+       "i": 867,
+       "km": 1.7,
+       "midDepth": 1
+      },
+      {
+       "i": 889,
+       "km": 0.5,
+       "midDepth": 1
+      },
+      {
+       "i": 1181,
+       "km": 0.5,
+       "midDepth": 0
+      },
+      {
+       "i": 630,
+       "km": 0.5,
+       "midDepth": 0
+      },
+      {
+       "i": 1137,
+       "km": 0.5,
+       "midDepth": 1
+      }
+     ]
+    },
+    {
+     "part": 1,
+     "verts": 630,
+     "closed": true,
+     "longest": [
+      {
+       "i": 628,
+       "km": 33.4,
+       "midDepth": 1
+      },
+      {
+       "i": 390,
+       "km": 0.3,
+       "midDepth": 0
+      },
+      {
+       "i": 386,
+       "km": 0.3,
+       "midDepth": 0
+      },
+      {
+       "i": 279,
+       "km": 0.3,
+       "midDepth": 1
+      },
+      {
+       "i": 372,
+       "km": 0.3,
+       "midDepth": 1
+      },
+      {
+       "i": 273,
+       "km": 0.3,
+       "midDepth": 1
+      }
+     ]
+    },
+    {
+     "part": 2,
+     "verts": 14,
+     "closed": true,
+     "longest": [
+      {
+       "i": 12,
+       "km": 1.1,
+       "midDepth": 1
+      },
+      {
+       "i": 8,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 5,
+       "km": 0.2,
+       "midDepth": 0
+      },
+      {
+       "i": 7,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 9,
+       "km": 0.1,
+       "midDepth": 2
+      },
+      {
+       "i": 4,
+       "km": 0.1,
+       "midDepth": 0
+      }
+     ]
+    },
+    {
+     "part": 3,
+     "verts": 11,
+     "closed": true,
+     "longest": [
+      {
+       "i": 9,
+       "km": 0.6,
+       "midDepth": 1
+      },
+      {
+       "i": 1,
+       "km": 0.2,
+       "midDepth": 2
+      },
+      {
+       "i": 0,
+       "km": 0.2,
+       "midDepth": 2
+      },
+      {
+       "i": 4,
+       "km": 0.1,
+       "midDepth": 2
+      },
+      {
+       "i": 5,
+       "km": 0.1,
+       "midDepth": 1
+      },
+      {
+       "i": 3,
+       "km": 0.1,
+       "midDepth": 2
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "Y.PALEM",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 2712,
+     "closed": true,
+     "longest": [
+      {
+       "i": 2541,
+       "km": 1.7,
+       "midDepth": 1
+      },
+      {
+       "i": 2679,
+       "km": 1.1,
+       "midDepth": 0
+      },
+      {
+       "i": 2651,
+       "km": 1,
+       "midDepth": 0
+      },
+      {
+       "i": 2623,
+       "km": 0.8,
+       "midDepth": 1
+      },
+      {
+       "i": 2152,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 2519,
+       "km": 0.5,
+       "midDepth": 1
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "NEKKANTI",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 532,
+     "closed": true,
+     "longest": [
+      {
+       "i": 530,
+       "km": 9.3,
+       "midDepth": 1
+      },
+      {
+       "i": 19,
+       "km": 2.2,
+       "midDepth": 1
+      },
+      {
+       "i": 18,
+       "km": 1,
+       "midDepth": 1
+      },
+      {
+       "i": 20,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 319,
+       "km": 0.1,
+       "midDepth": 1
+      },
+      {
+       "i": 292,
+       "km": 0.1,
+       "midDepth": 1
+      }
+     ]
+    },
+    {
+     "part": 1,
+     "verts": 358,
+     "closed": true,
+     "longest": [
+      {
+       "i": 356,
+       "km": 22.2,
+       "midDepth": 1
+      },
+      {
+       "i": 25,
+       "km": 0.4,
+       "midDepth": 0
+      },
+      {
+       "i": 68,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 75,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 47,
+       "km": 0.4,
+       "midDepth": 0
+      },
+      {
+       "i": 270,
+       "km": 0.4,
+       "midDepth": 1
+      }
+     ]
+    },
+    {
+     "part": 2,
+     "verts": 189,
+     "closed": true,
+     "longest": [
+      {
+       "i": 187,
+       "km": 15,
+       "midDepth": 1
+      },
+      {
+       "i": 119,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 117,
+       "km": 0.3,
+       "midDepth": 1
+      },
+      {
+       "i": 183,
+       "km": 0.3,
+       "midDepth": 1
+      },
+      {
+       "i": 120,
+       "km": 0.3,
+       "midDepth": 1
+      },
+      {
+       "i": 186,
+       "km": 0.3,
+       "midDepth": 1
+      }
+     ]
+    },
+    {
+     "part": 3,
+     "verts": 83,
+     "closed": true,
+     "longest": [
+      {
+       "i": 81,
+       "km": 9.7,
+       "midDepth": 0
+      },
+      {
+       "i": 7,
+       "km": 1.8,
+       "midDepth": 0
+      },
+      {
+       "i": 5,
+       "km": 0.9,
+       "midDepth": 1
+      },
+      {
+       "i": 4,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 11,
+       "km": 0.6,
+       "midDepth": 1
+      },
+      {
+       "i": 12,
+       "km": 0.5,
+       "midDepth": 1
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "G.V.PALLI",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 1166,
+     "closed": true,
+     "longest": [
+      {
+       "i": 802,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 1095,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 24,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 1164,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 23,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 34,
+       "km": 0.4,
+       "midDepth": 1
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "DORNAL",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 1540,
+     "closed": true,
+     "longest": [
+      {
+       "i": 1283,
+       "km": 1,
+       "midDepth": 1
+      },
+      {
+       "i": 1284,
+       "km": 0.9,
+       "midDepth": 1
+      },
+      {
+       "i": 1287,
+       "km": 0.5,
+       "midDepth": 1
+      },
+      {
+       "i": 1252,
+       "km": 0.2,
+       "midDepth": 0
+      },
+      {
+       "i": 312,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 1288,
+       "km": 0.2,
+       "midDepth": 1
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "KORRAPROLU",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 1047,
+     "closed": true,
+     "longest": [
+      {
+       "i": 931,
+       "km": 3.5,
+       "midDepth": 0
+      },
+      {
+       "i": 923,
+       "km": 1.2,
+       "midDepth": 1
+      },
+      {
+       "i": 846,
+       "km": 0.9,
+       "midDepth": 1
+      },
+      {
+       "i": 930,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 917,
+       "km": 0.7,
+       "midDepth": 1
+      },
+      {
+       "i": 921,
+       "km": 0.6,
+       "midDepth": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "name": "MARKAPUR",
+   "parts": [
+    {
+     "part": 0,
+     "verts": 2721,
+     "closed": true,
+     "longest": [
+      {
+       "i": 690,
+       "km": 0.4,
+       "midDepth": 1
+      },
+      {
+       "i": 2407,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 2404,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 2676,
+       "km": 0.2,
+       "midDepth": 1
+      },
+      {
+       "i": 2310,
+       "km": 0.2,
+       "midDepth": 0
+      },
+      {
+       "i": 2306,
+       "km": 0.2,
+       "midDepth": 0
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

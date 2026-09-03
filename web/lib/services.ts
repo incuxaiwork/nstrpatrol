@@ -121,8 +121,11 @@ export const patrols = (() => {
   let rawInflight: Promise<ApiPatrol[]> | null = null;
 
   async function fetchList(): Promise<Patrol[]> {
-    const rows = await api.patrols.list();
-    return rows.map((p) => patrolFromApi(p));
+    const [rows, incidents] = await Promise.all([
+      api.patrols.list(),
+      api.incidents.list().catch(() => []),
+    ]);
+    return rows.map((p) => patrolFromApi(p, [], incidents));
   }
 
   /** Expose raw API rows so rangers.list() can reuse the same network call.
@@ -206,11 +209,49 @@ export const patrols = (() => {
 // API GAP: no backend endpoints for special patrol permissions/instructions
 // (no route in backend/src/routes/). Entire block is in-session mock so the
 // UI stays fully functional; nothing persists across reloads.
+//
+// Durability (#8): the store is mirrored to localStorage on every mutation and
+// rehydrated on module load, so drafts/edits survive a page refresh / session
+// restart. This is a frontend-only persistence layer — a future backend
+// PatrolAuthorization API should replace it so drafts are shared across admins.
+
+const AUTH_STORE_KEY = "nstr.patrolAuthorizations";
+const AUTH_SEQ_KEY = "nstr.patrolAuthorizationSeq";
 
 /** In-session store so create / approve / revoke work without a backend. */
-let authStore: PatrolAuthorization[] = [...mockAuthorizations];
+let authStore: PatrolAuthorization[] = loadAuthStore();
 
-let authSeq = 125;
+let authSeq = loadAuthSeq();
+
+function loadAuthStore(): PatrolAuthorization[] {
+  if (typeof window === "undefined") return [...mockAuthorizations];
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as PatrolAuthorization[];
+      if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+    }
+  } catch { /* corrupt / private mode — fall through to mock seed */ }
+  return [...mockAuthorizations];
+}
+
+function loadAuthSeq(): number {
+  if (typeof window === "undefined") return 125;
+  try {
+    const raw = window.localStorage.getItem(AUTH_SEQ_KEY);
+    const n = raw ? Number.parseInt(raw, 10) : NaN;
+    if (Number.isFinite(n) && n >= 125) return n;
+  } catch { /* ignore */ }
+  return 125;
+}
+
+function persistAuthStore(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(AUTH_STORE_KEY, JSON.stringify(authStore));
+    window.localStorage.setItem(AUTH_SEQ_KEY, String(authSeq));
+  } catch { /* storage full / disabled — best-effort only */ }
+}
 
 export const authorizations = {
   list: async (): Promise<PatrolAuthorization[]> => {
@@ -255,12 +296,16 @@ export const authorizations = {
       });
     }
     authStore = [auth, ...authStore];
+    persistAuthStore();
     return auth;
   },
   approve: async (id: string): Promise<PatrolAuthorization | undefined> => {
     await delay();
     const auth = authStore.find((a) => a.id === id);
-    if (!auth || auth.status !== "pending") return auth;
+    // Approve requires a realistically-submitted candidate: pending (awaiting
+    // approval) OR draft (approving a saved draft directly) — the "Quick
+    // Approve" path (#10). Other statuses are unaffected.
+    if (!auth || (auth.status !== "pending" && auth.status !== "draft")) return auth;
     auth.status = "active";
     auth.approvedBy = "V. Kulkarni · Super Admin";
     auth.approvalDate = new Date().toISOString();
@@ -270,6 +315,7 @@ export const authorizations = {
       action: "Approved",
       description: "Approved by Super Admin; authorization activated",
     });
+    persistAuthStore();
     return { ...auth };
   },
   revoke: async (id: string): Promise<PatrolAuthorization | undefined> => {
@@ -283,6 +329,7 @@ export const authorizations = {
       action: "Revoked",
       description: "Revoked by Super Admin",
     });
+    persistAuthStore();
     return { ...auth };
   },
   reject: async (id: string): Promise<PatrolAuthorization | undefined> => {
@@ -296,6 +343,7 @@ export const authorizations = {
       action: "Rejected",
       description: "Rejected by Super Admin — authorization not granted",
     });
+    persistAuthStore();
     return { ...auth };
   },
   complete: async (id: string): Promise<PatrolAuthorization | undefined> => {
@@ -309,6 +357,7 @@ export const authorizations = {
       action: "Completed",
       description: "Marked complete — all patrols under it concluded",
     });
+    persistAuthStore();
     return { ...auth };
   },
   update: async (
@@ -325,6 +374,7 @@ export const authorizations = {
       action: "Updated",
       description: "Authorization details amended by Super Admin",
     });
+    persistAuthStore();
     return { ...auth };
   },
   extend: async (id: string, validUntil: string): Promise<PatrolAuthorization | undefined> => {
@@ -338,6 +388,7 @@ export const authorizations = {
       action: "Validity extended",
       description: `Valid until extended to ${new Date(validUntil).toLocaleDateString()}`,
     });
+    persistAuthStore();
     return { ...auth };
   },
 };
@@ -347,6 +398,18 @@ export const authorizations = {
 /* ------------------------------------------------------------------ */
 
 const createdRangers: Ranger[] = [];
+
+/** Map a personnel designation to the backend cader enum used when
+ *  provisioning a user account (#15). Field-staff roles all resolve to FBO
+ *  (RANGER); officers who hold a range/beat will be mapped when the form
+ *  offers those designations. */
+function caderForDesignation(designation: string): string {
+  const d = designation.toLowerCase();
+  if (d.includes("forest guard") || d.includes("watchman")) return "FBO";
+  if (d.includes("deputy range")) return "DyRO";
+  if (d.includes("assistant forest range") || d.includes("range officer")) return "FRO";
+  return "FBO";
+}
 
 /**
  * Rangers backed by the users API (GET /api/users?role=RANGER), enriched
@@ -371,10 +434,28 @@ export const rangers = {
     const all = await rangers.list();
     return all.find((r) => r.id === id);
   },
-  create: async (input: Omit<Ranger, "id"> & { id?: string }): Promise<Ranger> => {
-    // API GAP: creating a ranger needs /api/auth/register (email + password),
-    // which the intake form does not collect yet. Creating stays mock-local
-    // until that form work lands.
+  create: async (input: Omit<Ranger, "id"> & { id?: string; email?: string; password?: string }): Promise<Ranger> => {
+    // Provision User Account workflow (#15): when an email+password are
+    // supplied the record is created as a REAL backend user via /api/auth/register
+    // (role derived server-side from `designation`→cader), so the account survives
+    // reloads and can log into the platform. Fall back to the mock-local store
+    // only when no credentials are given (legacy early-edit paths).
+    if (input.email && input.password) {
+      // Provision a REAL persistent account. Only identity fields are sent:
+      // the backend derives the role from `designation`→cader. The form's
+      // division/range/beat are GIS-hierarchy ids that do NOT match the
+      // backend's Prisma Range/Beat record ids — sending them would corrupt
+      // geofence scope, so area assignment stays form-side until a real
+      // id-resolution endpoint exists (see scope.ts id-space).
+      const created = await api.auth.register({
+        email: input.email,
+        password: input.password,
+        fullName: input.name,
+        cader: caderForDesignation(input.designation),
+        phone: input.phone,
+      });
+      return rangerFromApi(created, await livePatrolSet());
+    }
     await delay();
     const id = input.id ?? `r-created-${String(createdRangers.length + 1).padStart(3, "0")}`;
     const record: Ranger = { ...input, id, code: input.code ?? `NEW-${id.slice(-3).toUpperCase()}` };
@@ -822,18 +903,37 @@ export const gis = {
         };
       });
   },
-  /** Real patrol tracks (recent patrols with ≥2 GPS fixes), projected to SVG.
+  /** Real patrol tracks (patrols with ≥2 GPS fixes), projected to SVG.
    *  Duration/distance are DERIVED FROM THE RECORDED TRACE ONLY (point
-   *  timestamps / haversine over recorded fixes) — never fabricated. */
+   *  timestamps / haversine over recorded fixes) — never fabricated.
+   *
+   *  Point fetches are N+1, so they are capped (MAX_ROUTE_POINT_FETCHES)
+   *  to bound cost on large datasets — but the patrol ORDER returned by the
+   *  backend is not a reliable marker of which patrols actually carry GPS
+   *  fixes (recent patrols are often started without tracking), so we scan
+   *  patrols IN LIST ORDER and only stop fetching once we have collected a
+   *  full window of routes that actually have tracks. This avoids the old
+   *  hard `slice(0, 10)` which silently dropped every GPS-bearing patrol
+   *  (e.g. all of them sitting past index 10) and rendered 0 routes. */
   routes: async (): Promise<GisRoute[]> => {
     const patrols = await api.patrols.list();
-    const recent = patrols.slice(0, 10);
+    const MAX_ROUTE_POINT_FETCHES = 30;
     const pointSets = await Promise.all(
-      recent.map((p) =>
-        api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number; t?: string | null }[])
-      )
+      patrols
+        .slice(0, MAX_ROUTE_POINT_FETCHES)
+        .map((p) =>
+          api.patrols.points(p.id).catch(() => [] as { lat: number; lng: number; t?: string | null }[])
+        )
     );
-    return recent.flatMap((p, i) => {
+    // Distinct per-patrol palette so overlapping / co-located tracks remain
+    // distinguishable instead of every completed patrol sharing one grey (they
+    // are often recorded at the same spot, which stacks into a single line).
+    const ROUTE_COLORS = [
+      "#0B66C3", "#0E8A71", "#C2480B", "#7B2CBF", "#B01E5E", "#2E7D32", "#C77400",
+      "#1565C0", "#4C8C2B", "#8E44AD", "#C62828", "#00695C",
+    ];
+    let colorIndex = 0;
+    return patrols.slice(0, MAX_ROUTE_POINT_FETCHES).flatMap((p, i) => {
       const pts = pointSets[i].filter((pt) => pt.lat != null && pt.lng != null && !(pt.lat === 0 && pt.lng === 0));
       if (pts.length < 2) return [];
       const projected = pts.map((pt) => lngLatToSvg(pt.lng, pt.lat));
@@ -841,6 +941,7 @@ export const gis = {
       const last = pts[pts.length - 1];
       const durationMinutes = traceDurationMinutes(first.t ?? p.startedAt ?? null, last.t ?? p.endedAt ?? null);
       const distanceKm = haversineKm(pts);
+      const color = ROUTE_COLORS[colorIndex++ % ROUTE_COLORS.length];
       return [
         {
           id: `rt-${p.id}`,
@@ -848,7 +949,7 @@ export const gis = {
           label: p.name ?? `Patrol ${p.id.slice(0, 8)}`,
           status: p.status.toLowerCase(),
           points: projected.map((pt) => `${Math.round(pt.x)},${Math.round(pt.y)}`).join(" "),
-          color: p.status === "ACTIVE" ? "#2E7D32" : "#4A6572",
+          color,
           timedPoints: projected.map((pt, idx) => ({ ...pt, t: idx / Math.max(pts.length - 1, 1) })),
           patrolType: p.type ?? null,
           rangerName: p.user?.fullName ?? null,

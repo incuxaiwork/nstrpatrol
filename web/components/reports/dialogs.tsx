@@ -15,6 +15,7 @@ import { jurisdictionLabel as jurisdictionLabelOf, resolveJurisdiction } from "@
 import { Badge, Field, Select } from "@/components/ui";
 import { DataTable, StatRow, Timeline } from "@/components/data";
 import { MapWorkspace } from "@/components/map-loader";
+import { DEFAULT_LAYER_STATE } from "@/lib/map-layers";
 import { LoadingState } from "@/components/ui/loading";
 import { ReportDialog } from "@/components/reports/ReportDialog";
 import { ReportButton } from "@/components/reports/ReportButton";
@@ -804,6 +805,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
                   beatsShown.some((b) => b.id === c.beat)
                 )}
                 boundary={spatialData.data?.boundary ?? []}
+                layerState={{ ...DEFAULT_LAYER_STATE, beats: true, boundary: true }}
                 onSelect={() => undefined}
               />
             </div>

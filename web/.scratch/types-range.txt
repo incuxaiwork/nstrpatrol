@@ -1,0 +1,29 @@
+/**
+ * NSTR Patrol Admin Portal — domain types.
+ * Frontend-only types mirroring the PRD (docs/web-admin-prd.md). Swappable with
+ * real backend types once the API exists.
+ */
+
+export type ScopeLevel = "forest" | "division" | "range" | "beat";
+
+/** Operational scope selected in the global scope picker. */
+export interface Scope {
+  forest: string;
+  division: string;
+  range: string;
+  beat: string;
+}
+
+export interface Unit {
+  id: string;
+  name: string;
+  level: ScopeLevel;
+  parentId?: string;
+  code: string;
+  areaKm2: number;
+  children?: Unit[];
+}
+
+export type PatrolStatus =
+  | "planned"
+  | "assigned"

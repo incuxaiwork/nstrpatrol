@@ -424,6 +424,124 @@ export async function runPatrolCoverageSummary(
   }
 }
 
+export interface RangerCoverageRow {
+  userId: string;
+  rangerName: string | null;
+  totalCells: number;
+  patrolledCells: number;
+  patrolCount: number;
+  pointCount: number;
+  coveragePercent: number | null;
+}
+
+/**
+ * Per-ranger coverage grouped over the scoped cell universe (#27). Every
+ * ranger who can see the scope sees the SAME cell universe as GET
+ * /api/coverage/grids for that scope, so an "Avg Coverage" KPI is a genuine,
+ * comparable aggregate — never a per-beat percentage mix.
+ *
+ * Attribution: a cell counts toward a ranger when one of their patrol points
+ * intersects it (PostGIS), within the optional date window. Rangers with no
+ * patrols report coveragePercent null (no data) rather than a fabricated 0%.
+ */
+export async function runRangerCoverage(
+  ctx: CoverageRequestContext,
+  q: GridCoverageQuery,
+): Promise<RangerCoverageRow[]> {
+  if (!(await coverageGeomAvailable())) return [];
+
+  const visibleCond: Prisma.Sql[] = [];
+  if (ctx.ownOnly) {
+    visibleCond.push(Prisma.sql`p."userId" = ${ctx.user.id}`);
+  } else if (ctx.visibleUserIds.length > 0 || ctx.visibleBeatNames.length > 0) {
+    const parts: Prisma.Sql[] = [];
+    if (ctx.visibleUserIds.length > 0) parts.push(Prisma.sql`p."userId" = ANY(${ctx.visibleUserIds})`);
+    if (ctx.visibleBeatNames.length > 0) parts.push(Prisma.sql`p."beat" = ANY(${ctx.visibleBeatNames})`);
+    visibleCond.push(Prisma.sql`(${Prisma.join(parts, ' OR ')})`);
+  }
+
+  const cellConds: Prisma.Sql[] = [Prisma.sql`fg.geom IS NOT NULL`];
+  if (ctx.forestId) cellConds.push(Prisma.sql`fg."forestId" = ${ctx.forestId}`);
+  if (!ctx.ownOnly && ctx.cellBeatNames.length > 0) {
+    cellConds.push(
+      Prisma.sql`EXISTS (SELECT 1 FROM "Beat" b WHERE b.name = ANY(${ctx.cellBeatNames}) AND ST_Intersects(fg.geom, b.geom))`,
+    );
+  }
+
+  const visibleSql =
+    visibleCond.length > 0 ? Prisma.sql`WHERE ${Prisma.join(visibleCond, ' AND ')}` : Prisma.empty;
+
+  // A ranger's coverage reads against the SAME scoped cell universe as
+  // GET /api/coverage/grids, so every entry is directly comparable — a
+  // division-wide "Avg Coverage" is a genuine average of comparable %s.
+  const rows = await prisma.$queryRaw<RangerCoverageRow[]>`
+    WITH visible AS (
+      SELECT p.id AS "patrolId", p."userId" FROM "Patrol" p
+      ${visibleSql}
+    ),
+    universe AS (
+      SELECT fg.id AS "cellId", fg.geom FROM "ForestGrid" fg
+      WHERE ${Prisma.join(cellConds, ' AND ')}
+    ),
+    cells_hit AS (
+      SELECT DISTINCT v."userId", u."cellId"
+      FROM visible v
+      JOIN "PatrolPoint" pp ON pp."patrolId" = v."patrolId"
+      JOIN universe u ON ST_Intersects(u.geom, pp.geom)
+      ${q.from || q.to ? pointDateSql(q) : Prisma.empty}
+    ),
+    patrol_stats AS (
+      SELECT v."userId", COUNT(DISTINCT v."patrolId")::int AS "patrolCount"
+      FROM visible v
+      GROUP BY v."userId"
+    ),
+    points_hit AS (
+      SELECT v."userId", COUNT(DISTINCT pp.id)::int AS "pointCount"
+      FROM visible v
+      JOIN "PatrolPoint" pp ON pp."patrolId" = v."patrolId"
+      JOIN universe u ON ST_Intersects(u.geom, pp.geom)
+      ${q.from || q.to ? pointDateSql(q) : Prisma.empty}
+      GROUP BY v."userId"
+    )
+    SELECT u."id" AS "userId",
+           u."fullName" AS "rangerName",
+           (SELECT COUNT(*)::int FROM universe) AS "totalCells",
+           COALESCE(h.cells, 0)::int AS "patrolledCells",
+           COALESCE(ps."patrolCount", 0)::int AS "patrolCount",
+           COALESCE(pc."pointCount", 0)::int AS "pointCount"
+    FROM "User" u
+    JOIN visible v ON v."userId" = u."id"
+    LEFT JOIN (SELECT "userId", COUNT(DISTINCT "cellId")::int AS cells FROM cells_hit GROUP BY "userId") h ON h."userId" = u."id"
+    LEFT JOIN patrol_stats ps ON ps."userId" = u."id"
+    LEFT JOIN points_hit pc ON pc."userId" = u."id"
+    GROUP BY u."id", u."fullName", h.cells, ps."patrolCount", pc."pointCount"
+    ORDER BY u."fullName"
+  `;
+  return rows.map((r) => {
+    const coveragePercent =
+      r.totalCells > 0 && r.patrolCount > 0
+        ? Math.round((r.patrolledCells / r.totalCells) * 1000) / 10
+        : null;
+    return {
+      userId: r.userId,
+      rangerName: r.rangerName,
+      totalCells: r.totalCells,
+      patrolledCells: r.patrolledCells,
+      patrolCount: r.patrolCount,
+      pointCount: r.pointCount,
+      coveragePercent,
+    };
+  });
+}
+
+/** Date-window predicate for the per-ranger point attribution (JOIN-side). */
+function pointDateSql(q: GridCoverageQuery): Prisma.Sql {
+  const conds: Prisma.Sql[] = [];
+  if (q.from) conds.push(Prisma.sql`pp."timestamp" >= ${q.from.toISOString()}::timestamp`);
+  if (q.to) conds.push(Prisma.sql`pp."timestamp" <= ${q.to.toISOString()}::timestamp`);
+  return conds.length > 0 ? Prisma.sql`AND ${Prisma.join(conds, ' AND ')}` : Prisma.empty;
+}
+
 /** GET /api/coverage/grids?forestId=&rangeId=&beatId=&from=&to= */
 coverageRouter.get('/grids', async (req, res) => {
   // Parse here (not via the query-validation middleware): Express 5 exposes
@@ -505,6 +623,49 @@ coverageRouter.get('/beats', async (req, res) => {
         r.totalCells > 0 ? Math.round((r.patrolledCells / r.totalCells) * 1000) / 10 : null,
       pointCount: r.pointCount,
       lastPatrolledAt: r.lastPatrolledAt ? r.lastPatrolledAt.toISOString() : null,
+    })),
+  });
+});
+
+/** GET /api/coverage/rangers?rangeId=&beatId=&from=&to= */
+coverageRouter.get('/rangers', async (req, res) => {
+  const q = gridCoverageQuery.parse(req.query) as GridCoverageQuery;
+  const ctx = await resolveCoverageContext(req.user!, q);
+
+  const rows = await runRangerCoverage(ctx, q);
+
+  const withData = rows.filter((r) => r.coveragePercent != null);
+  const avgCoverage = withData.length
+    ? Math.round((withData.reduce((sum, r) => sum + (r.coveragePercent ?? 0), 0) / withData.length) * 10) / 10
+    : null;
+  const totalCells = rows.reduce((sum, r) => sum + r.totalCells, 0);
+  const patrolledCells = rows.reduce((sum, r) => sum + r.patrolledCells, 0);
+
+  res.json({
+    generatedAt: new Date().toISOString(),
+    scope: {
+      kind: ctx.scope.kind,
+      subDivisionId: ctx.scope.subDivisionId ?? null,
+      rangeId: ctx.scope.rangeId ?? null,
+      beatId: ctx.scope.beatId ?? null,
+    },
+    summary: {
+      rangers: rows.length,
+      rangersWithData: withData.length,
+      avgCoverage,
+      totalCells,
+      patrolledCells,
+      coveragePercent: totalCells > 0 ? Math.round((patrolledCells / totalCells) * 1000) / 10 : null,
+      pointCount: rows.reduce((sum, r) => sum + r.pointCount, 0),
+    },
+    rows: rows.map((r) => ({
+      userId: r.userId,
+      rangerName: r.rangerName,
+      totalCells: r.totalCells,
+      patrolledCells: r.patrolledCells,
+      patrolCount: r.patrolCount,
+      pointCount: r.pointCount,
+      coveragePercent: r.coveragePercent,
     })),
   });
 });

@@ -17,6 +17,7 @@ import { Card, CardHeader, Badge, PageHeader } from "@/components/ui";
 import { StatRow } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map-loader";
+import { DEFAULT_LAYER_STATE } from "@/lib/map-layers";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels } from "@/lib/mock/patrols";
@@ -110,13 +111,14 @@ export default function PatrolReplayPage() {
             <div className="p-3">
               {spatial.data ? (
                 <MapWorkspace
-                  mode="overview"
+                  mode="focus"
                   heightClass="h-[420px]"
                   replayPatrolId={patrol.id}
                   replayPoints={patrol.route}
                   liveBeats={spatial.data.beats}
                   compartments={spatial.data.compartments}
                   boundary={spatial.data.boundary}
+                  layerState={{ ...DEFAULT_LAYER_STATE, routes: true }}
                   onProgress={(p) => setPlayback(p)}
                   seekSignal={seek}
                   onSelect={() => undefined}

@@ -17,6 +17,14 @@ import type { DutyStatus, Ranger } from "@/lib/types";
 
 const designations = ["Forest Guard", "Assistant Forest Ranger", "Deputy Ranger", "Watchman"];
 
+/** Credential fields are only collected when provisioning a NEW account
+ *  (no `initial`). For edits (initial set) they are omitted — the existing
+ *  account keeps its credentials and the backend owns password changes. */
+export interface RangerProfileValues extends Omit<Ranger, "id"> {
+  email?: string;
+  password?: string;
+}
+
 export default function RangerForm({
   initial,
   submitLabel,
@@ -25,10 +33,12 @@ export default function RangerForm({
 }: {
   initial?: Ranger;
   submitLabel: string;
-  onSubmit(values: Omit<Ranger, "id">): void;
+  onSubmit(values: Omit<Ranger, "id"> & { email?: string; password?: string }): void;
   submitting?: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState(initial?.code ?? "");
   const [designation, setDesignation] = useState(initial?.designation ?? "Forest Guard");
   const [dutyStatus, setDutyStatus] = useState<DutyStatus>(initial?.dutyStatus ?? "on-duty");
@@ -53,11 +63,16 @@ export default function RangerForm({
       .filter(Boolean)
       .join(" / ") || "—";
   const teamLabel = teams.data?.find((t) => t.id === teamId)?.name || "—";
-  const valid = useMemo(() => name.trim().length >= 3, [name]);
+  // A new account must carry a valid email + strong password so it can be
+  // provisioned against the backend (Provision User Account workflow).
+  const emailOk = initial || /\S+@\S+\.\S+/.test(email);
+  const passwordOk = initial || password.length >= 8;
+  const valid = useMemo(() => name.trim().length >= 3 && emailOk && passwordOk, [name, emailOk, passwordOk]);
 
   const submit = () => {
     if (!valid) return;
     onSubmit({
+      ...(initial ? {} : { email: email.trim(), password }),
       code,
       name: name.trim(),
       designation,
@@ -86,6 +101,16 @@ export default function RangerForm({
             <Field label="Full name" required hint="As per service record">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kavita Joshi" />
             </Field>
+            {!initial && (
+              <>
+                <Field label="Email" required hint="Used to sign in">
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. kavita.joshi@forest.gov.in" />
+                </Field>
+                <Field label="Temporary password" required hint="Min. 8 characters">
+                  <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Set a sign-in password" />
+                </Field>
+              </>
+            )}
             <Field label="Service code" hint="Leave blank to auto-generate">
               <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={initial ? "Keep current" : "e.g. R-012"} />
             </Field>
@@ -190,7 +215,11 @@ export default function RangerForm({
               <Icon name="check" size={16} />
               {submitting ? "Saving…" : submitLabel}
             </button>
-            {!valid && <p className="mt-2 text-center text-xs text-ink-soft">Name is required.</p>}
+            {!valid && (
+              <p className="mt-2 text-center text-xs text-ink-soft">
+                {!name.trim() ? "A name is required." : initial ? "Fix the fields above." : "A valid email and a password of 8+ characters are required to provision the account."}
+              </p>
+            )}
           </div>
         </Card>
       </div>

@@ -96,7 +96,15 @@ export default function ObservationDetailPage() {
           <Card>
             <CardHeader title="Location" icon="map" subtitle="Coordinates recorded from the field device" />
             <div className="p-3">
-              <MapWorkspace mode="overview" heightClass="h-[240px]" liveBeats={spatial.data.beats} compartments={spatial.data.compartments} boundary={spatial.data.boundary} onSelect={() => undefined} />
+              <MapWorkspace
+                mode="focus"
+                heightClass="h-[240px]"
+                liveBeats={spatial.data.beats}
+                compartments={spatial.data.compartments}
+                boundary={spatial.data.boundary}
+                focusedPoint={obs.lat != null && obs.lng != null ? { lat: obs.lat, lng: obs.lng } : null}
+                onSelect={() => undefined}
+              />
             </div>
             <p className="px-4 pb-4 font-mono text-xs text-ink-soft">
               {obs.lat != null && obs.lng != null

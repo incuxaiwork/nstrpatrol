@@ -609,6 +609,38 @@ export interface ApiGridCoverage {
   cells: ApiGridCoverageCell[];
 }
 
+export interface ApiRangerCoverageRow {
+  userId: string;
+  rangerName: string | null;
+  totalCells: number;
+  patrolledCells: number;
+  patrolCount: number;
+  pointCount: number;
+  /** Server-round1 decimal (e.g. 0.2 = 0.2%); null when the ranger has no
+   *  spatial data (no coverage to average). */
+  coveragePercent: number | null;
+}
+
+export interface ApiRangerCoverage {
+  generatedAt: string;
+  scope: {
+    kind: string;
+    subDivisionId: string | null;
+    rangeId: string | null;
+    beatId: string | null;
+  };
+  summary: {
+    rangers: number;
+    rangersWithData: number;
+    avgCoverage: number | null;
+    totalCells: number;
+    patrolledCells: number;
+    coveragePercent: number | null;
+    pointCount: number;
+  };
+  rows: ApiRangerCoverageRow[];
+}
+
 /* ------------------------------------------------------------------ */
 /* Endpoint groups (mirror backend/src/routes)                         */
 /* ------------------------------------------------------------------ */
@@ -621,8 +653,17 @@ export const auth = {
   // account. Sending auth:false here produced 403 for every post-bootstrap
   // invite. With a token attached the backend enforces its own ADMIN check.
   // The role is derived server-side from the cader — never sent by clients.
-  register: (input: { email: string; password: string; fullName: string; cader?: string; phone?: string }) =>
-    request<ApiUser>("/api/auth/register", { method: "POST", body: input }),
+  register: (input: {
+    email: string;
+    password: string;
+    fullName: string;
+    cader?: string;
+    phone?: string;
+    divisionId?: string;
+    subDivisionId?: string;
+    rangeId?: string;
+    beatId?: string;
+  }) => request<ApiUser>("/api/auth/register", { method: "POST", body: input }),
   refresh: () =>
     request<{ accessToken: string; refreshToken: string }>("/api/auth/refresh", {
       method: "POST",
@@ -739,6 +780,8 @@ export const forests = {
 export const coverage = {
   grids: (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
     request<ApiGridCoverage>("/api/coverage/grids", { query }),
+  rangers: (query: { rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
+    request<ApiRangerCoverage>("/api/coverage/rangers", { query }),
 };
 
 export const analytics = {

@@ -5,7 +5,7 @@
  * live markers, patrol route playback, and the zero-patrol-zone board.
  */
 
-import { useMemo, useState, Suspense } from "react";
+import { useEffect, useMemo, useState, Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { gis, hierarchy as hierarchyService, sos as sosService } from "@/lib/services";
@@ -228,6 +228,30 @@ function selectedDetail(
   };
 }
 
+// Layer-state persistence key — restores the admin's checkbox choices across
+// page refreshes (boundaries/grid/routes/etc. remember their toggles).
+const LAYER_STATE_KEY = "nstr.gis.layerState";
+
+function loadLayerState(): ForestLayerState {
+  if (typeof window === "undefined") return DEFAULT_LAYER_STATE;
+  try {
+    const raw = window.localStorage.getItem(LAYER_STATE_KEY);
+    if (!raw) return DEFAULT_LAYER_STATE;
+    const parsed = JSON.parse(raw) as Partial<ForestLayerState>;
+    // Merge over defaults so any newly added fields keep their default even if
+    // an older persisted payload predates them.
+    const base = { ...DEFAULT_LAYER_STATE };
+    for (const k of Object.keys(base) as (keyof ForestLayerState)[]) {
+      if (typeof parsed[k] === "boolean" || k === "basemap") {
+        (base as Record<string, unknown>)[k] = parsed[k];
+      }
+    }
+    return base;
+  } catch {
+    return DEFAULT_LAYER_STATE;
+  }
+}
+
 export default function GisPage() {
   // ?sos=<incidentId> deep link ("View on Map") — read inside Suspense per
   // the Next.js useSearchParams contract.
@@ -262,7 +286,18 @@ function GisWorkspace() {
   const [reportOpen, setReportOpen] = useState(false);
   // Layer control state lives HERE (outside the canvas) and is passed down
   // controlled; checkboxes map to real MapLibre visibility switches.
-  const [layerState, setLayerState] = useState<ForestLayerState>(DEFAULT_LAYER_STATE);
+  // Hydrated from localStorage so the admin's checkbox choices survive a page
+  // refresh; defaults apply only on the very first visit.
+  const [layerState, setLayerState] = useState<ForestLayerState>(loadLayerState);
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        window.localStorage.setItem(LAYER_STATE_KEY, JSON.stringify(layerState));
+      } catch {
+        // storage full / disabled — persistence is best-effort only
+      }
+    }
+  }, [layerState]);
   // Range → Beat → Compartment filter (division is the fixed context).
   const [regionFilter, setRegionFilter] = useState<GridRegionFilter>({});
   // Analysis grid state — configurable size + deterministic cell selection.

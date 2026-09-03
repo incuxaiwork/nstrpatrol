@@ -1,0 +1,61 @@
+{
+ "beats": 44,
+ "multipartBeats": [],
+ "comps": 448,
+ "ranges": [
+  {
+   "name": "V.P.SOUTH",
+   "parts": 15,
+   "verts": 1387
+  },
+  {
+   "name": "Y.PALEM",
+   "parts": 1,
+   "verts": 2712
+  },
+  {
+   "name": "NEKKANTI",
+   "parts": 10,
+   "verts": 532
+  },
+  {
+   "name": "G.V.PALLI",
+   "parts": 1,
+   "verts": 1166
+  },
+  {
+   "name": "DORNAL",
+   "parts": 2,
+   "verts": 1540
+  },
+  {
+   "name": "KORRAPROLU",
+   "parts": 1,
+   "verts": 1047
+  },
+  {
+   "name": "MARKAPUR",
+   "parts": 1,
+   "verts": 2721
+  }
+ ],
+ "boundary": [
+  {
+   "name": "Forest boundary",
+   "parts": 40,
+   "totalPts": 5870
+  }
+ ],
+ "roundTripWorstKm": 4.00012418882265,
+ "roundTripChecked": 31759,
+ "worstPt": {
+  "orig": [
+   79.10123929490959,
+   15.591406785794561
+  ],
+  "via": [
+   79.10123929490959,
+   15.627380766888225
+  ]
+ }
+}

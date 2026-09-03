@@ -14,7 +14,7 @@
  */
 
 import { useRouter, useSearchParams } from "next/navigation";
-import { Suspense, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { authorizations, rangers } from "@/lib/services";
 import { useAsyncData } from "@/lib/use-async";
 import { useApp } from "@/lib/store";
@@ -48,9 +48,17 @@ function CreateAuthorizationWizard() {
   const editing = useAsyncData(() => (editId ? authorizations.get(editId) : Promise.resolve(undefined)));
 
   const draft = editId ? editing.data : undefined;
-  const draftStep = draft?.status === "draft" ? 1 : 3;
+  // New authorizations start at STEP 1 (Select Ranger); only when EDITING an
+  // existing record do we resume at the step matching its status (draft → 1,
+  // otherwise → 3). Previously a brand-new wizard (no draft) evaluated to 3
+  // and skipped Ranger + Area selection.
+  const draftStep = editId ? (draft?.status === "draft" ? 1 : 3) : 1;
 
   const [step, setStep] = useState(draftStep);
+  // Highest step the user has reached/validated, so the step pills can jump
+  // directly to any earlier completed step instead of the wizard forcing a
+  // linear re-walk (#5).
+  const [maxCompletedStep, setMaxCompletedStep] = useState(draftStep);
   const [rangerId, setRangerId] = useState(draft?.rangerId ?? "");
   const [authDivision, setAuthDivision] = useState(draft?.authDivision ?? "");
   const [authRange, setAuthRange] = useState(draft?.authRange ?? "");
@@ -64,6 +72,38 @@ function CreateAuthorizationWizard() {
   const [priority, setPriority] = useState<"low" | "medium" | "high" | "critical">(draft?.priority ?? "medium");
   const [restrictions, setRestrictions] = useState(draft?.restrictions ?? "");
   const [notes, setNotes] = useState(draft?.notes ?? "");
+
+  // Hydrate the form once the async `editing.data` resolves — the initial
+  // state above is seeded from `draft` which is undefined while loading, so a
+  // resumed draft (?edit=AUTH-...) would otherwise keep every field blank (#7).
+  useEffect(() => {
+    if (!editing.data) return;
+    setRangerId(editing.data.rangerId ?? "");
+    setAuthDivision(editing.data.authDivision ?? "");
+    setAuthRange(editing.data.authRange ?? "");
+    setAuthBeat(editing.data.authBeat ?? "");
+    setReason(editing.data.reason ?? "");
+    setInstruction(editing.data.instruction ?? "");
+    if (editing.data.patrolType) setPatrolType(editing.data.patrolType);
+    setObjective(editing.data.objective ?? "");
+    if (editing.data.validFrom) setValidFrom(dateInput(new Date(editing.data.validFrom)));
+    if (editing.data.validUntil) setValidUntil(dateInput(new Date(editing.data.validUntil)));
+    if (editing.data.priority) setPriority(editing.data.priority);
+    setRestrictions(editing.data.restrictions ?? "");
+    setNotes(editing.data.notes ?? "");
+  }, [editing.data]);
+
+  // Guard: if a step beyond Step 1 has no ranger selected, push back so the
+  // review/detail steps can never open blank (#4). Skipped while an existing
+  // draft is still hydrating (editing.loading) — the saved ranger is about to
+  // repopulate, so forcing Step 1 would bounce an edit away from its resume step.
+  useEffect(() => {
+    if (editing.loading) return;
+    if (step > 1 && !rangerId) {
+      setStep(1);
+      setMaxCompletedStep((m) => Math.max(m, 1));
+    }
+  }, [step, rangerId, editId, editing.loading]);
 
   const ranger = roster.data?.find((r) => r.id === rangerId);
 
@@ -103,12 +143,17 @@ function CreateAuthorizationWizard() {
   if (editing.error) return <ErrorState message={editing.error.message} onRetry={editing.reload} />;
 
   const submit = async (status: "active" | "draft") => {
-    if (!ranger) return;
+    // Approving requires a ranger; saving a draft is allowed on any step and
+    // does not demand a fully-formed record (#6).
+    if (status === "active" && !ranger) {
+      pushToast("error", "Cannot approve yet", "Select a ranger and complete the authorization first.");
+      return;
+    }
     const payload = {
       rangerId,
-      homeDivision: ranger.division,
-      homeRange: ranger.range,
-      homeBeat: ranger.beat,
+      homeDivision: ranger?.division ?? "",
+      homeRange: ranger?.range ?? "",
+      homeBeat: ranger?.beat ?? "",
       authDivision,
       authRange,
       authBeat,
@@ -172,27 +217,32 @@ function CreateAuthorizationWizard() {
         }
       />
 
-      {/* Step indicator */}
+      {/* Step indicator — any previously-visited step may be reopened directly (#5) */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {STEP_LABELS.map((label, i) => (
-          <button
-            key={label}
-            onClick={() => i + 1 < step && setStep(i + 1)}
-            className={[
-              "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
-              step === i + 1
-                ? "border-forest-700 bg-forest-800 text-white"
-                : i + 1 < step
-                  ? "border-forest-200 bg-forest-50 text-forest-800 hover:border-forest-600"
-                  : "border-line bg-white text-ink-faint",
-            ].join(" ")}
-          >
-            <span className="flex size-4 items-center justify-center rounded-full text-[10px] font-bold">
-              {i + 1 < step ? "✓" : i + 1}
-            </span>
-            {label}
-          </button>
-        ))}
+        {STEP_LABELS.map((label, i) => {
+          const idx = i + 1;
+          const reachable = idx <= maxCompletedStep || idx === step;
+          return (
+            <button
+              key={label}
+              onClick={() => reachable && setStep(idx)}
+              disabled={!reachable}
+              className={[
+                "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                step === idx
+                  ? "border-forest-700 bg-forest-800 text-white"
+                  : reachable
+                    ? "border-forest-200 bg-forest-50 text-forest-800 hover:border-forest-600"
+                    : "border-line bg-white text-ink-faint",
+              ].join(" ")}
+            >
+              <span className="flex size-4 items-center justify-center rounded-full text-[10px] font-bold">
+                {idx < maxCompletedStep ? "✓" : idx}
+              </span>
+              {label}
+            </button>
+          );
+        })}
       </div>
 
       <div className="mt-4">
@@ -338,7 +388,8 @@ function CreateAuthorizationWizard() {
           </Card>
         )}
 
-        {step === 4 && ranger && (
+        {step === 4 &&
+          (ranger ? (
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
               <CardHeader title="Review" icon="eye" subtitle="Confirm the authorization before approval" />
@@ -365,7 +416,23 @@ function CreateAuthorizationWizard() {
               </Card>
             </div>
           </div>
-        )}
+          ) : (
+            <Card>
+              <div className="p-6 text-center">
+                <Icon name="users" size={28} className="mx-auto text-ink-faint" />
+                <p className="mt-3 text-sm font-medium text-ink">No ranger selected</p>
+                <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
+                  Select a ranger on Step 1 before reviewing this authorization.
+                </p>
+                <button
+                  onClick={() => setStep(1)}
+                  className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
+                >
+                  <Icon name="chevronLeft" size={14} /> Back to ranger selection
+                </button>
+              </div>
+            </Card>
+          ))}
 
         {step === 5 && (
           <Card>
@@ -403,14 +470,32 @@ function CreateAuthorizationWizard() {
 
       {/* Wizard footer */}
       <div className="mt-4 flex items-center justify-between gap-3">
-        <button
-          onClick={() => setStep((s) => Math.max(1, s - 1))}
-          disabled={step === 1}
-          className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800 disabled:opacity-40"
-        >
-          <Icon name="chevronLeft" size={14} /> Back
-        </button>
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setStep((s) => Math.max(1, s - 1))}
+            disabled={step === 1}
+            className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800 disabled:opacity-40"
+          >
+            <Icon name="chevronLeft" size={14} /> Back
+          </button>
+          {step > 1 && (
+            <button
+              onClick={() => setStep(Math.min(step + 1, 5))}
+              disabled={step === 5}
+              className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800 disabled:opacity-40"
+            >
+              Next <Icon name="chevronRight" size={14} />
+            </button>
+          )}
+        </div>
+        <div className="flex items-center gap-3">
+          {/* Save Draft is available on EVERY step with relaxed validation (#6). */}
+          <button
+            onClick={() => submit("draft")}
+            className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-4 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+          >
+            <Icon name="save" size={14} /> Save draft
+          </button>
           {step === 3 && !step3Valid && (
             <p className="text-right text-xs text-danger">
               {detailsErrors.reason ?? detailsErrors.instruction ?? detailsErrors.validity}
@@ -418,7 +503,10 @@ function CreateAuthorizationWizard() {
           )}
           {step < 5 && (
             <button
-              onClick={() => setStep((s) => s + 1)}
+              onClick={() => {
+                setMaxCompletedStep((m) => Math.max(m, step + 1));
+                setStep((s) => s + 1);
+              }}
               disabled={(step === 1 && !rangerId) || (step === 2 && !step2Valid) || (step === 3 && !step3Valid)}
               className="inline-flex h-9 items-center gap-1.5 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700 disabled:cursor-not-allowed disabled:opacity-45"
             >

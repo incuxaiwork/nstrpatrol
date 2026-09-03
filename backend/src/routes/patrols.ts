@@ -118,9 +118,14 @@ function geographyFor(
  * carries distance/duration without N+1. PostGIS fall-back: when
  * ST_Length fails the whole query is caught and re-run without the
  * spatial column (duration still available via pure EXTRACT).
+ *
+ * Patrols with no GPS points get a timestamp-derived duration fallback
+ * from startedAt/endedAt (real device-recorded timestamps, not fabricated).
+ * Distance stays null for those — GPS coordinates are required.
  */
 async function loadPatrolStats(
   ids: string[],
+  patrols?: { id: string; startedAt: Date | null; endedAt: Date | null }[],
 ): Promise<Map<string, { distanceKm: number; durationSeconds: number }>> {
   const statsMap = new Map<string, { distanceKm: number; durationSeconds: number }>();
   if (ids.length === 0) return statsMap;
@@ -188,6 +193,25 @@ async function loadPatrolStats(
       });
     }
   }
+
+  // Timestamp fallback — patrols without GPS points still have device-recorded
+  // startedAt/endedAt which give a legitimate duration estimate. Distance cannot
+  // be derived without coordinates so it stays null.
+  if (patrols) {
+    for (const p of patrols) {
+      if (statsMap.has(p.id)) continue;
+      if (p.startedAt && p.endedAt) {
+        const spanMs = new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime();
+        if (spanMs >= 0) {
+          statsMap.set(p.id, {
+            distanceKm: 0,
+            durationSeconds: Math.round(spanMs / 1000),
+          });
+        }
+      }
+    }
+  }
+
   return statsMap;
 }
 
@@ -293,7 +317,7 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
   const ids = patrols.map((p) => p.id);
   const [geoIndex, statsMap] = await Promise.all([
     resolvePatrolGeographyIndex(patrols),
-    loadPatrolStats(ids),
+    loadPatrolStats(ids, patrols),
   ]);
 
   const body = JSON.stringify(patrols.map((p) => {

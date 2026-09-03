@@ -18,6 +18,7 @@ import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone }
 import { StatRow, Timeline } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map-loader";
+import { DEFAULT_LAYER_STATE, type ForestLayerState } from "@/lib/map-layers";
 import { JurisdictionBanner } from "@/components/jurisdiction";
 import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
@@ -106,13 +107,14 @@ export default function PatrolDetailPage() {
             <div className="p-3">
               {spatial.data ? (
                 <MapWorkspace
-                  mode="overview"
+                  mode="focus"
                   heightClass="h-[300px]"
                   replayPatrolId={patrol.id}
                   replayPoints={patrol.route}
                   liveBeats={spatial.data.beats}
                   compartments={spatial.data.compartments}
                   boundary={spatial.data.boundary}
+                  layerState={{ ...DEFAULT_LAYER_STATE, routes: true }}
                   onSelect={() => undefined}
                 />
               ) : (

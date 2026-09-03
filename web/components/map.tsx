@@ -4,10 +4,9 @@
  * Forest MapWorkspace — the single interactive GIS map of the admin portal,
  * modeled on the Android app's MapsScreen (mobile/.../ui/screens/MapsScreen.kt):
  *
- *   • selectable raster basemaps — the offline MBTiles atlas (served by the
- *     portal /api/tiles proxy), OpenStreetMap street tiles, Esri World
- *     Imagery satellite and OpenTopoMap terrain — switched without moving
- *     the camera,
+ *   • selectable online basemaps — the default OpenFreeMap vector style
+ *     (tiles.openfreemap.org) with street / terrain / satellite as raster
+ *     overlays — switched without moving the camera,
  *   • a free viewport: pan/zoom is NOT clamped to the forest bounds,
  *   • the same GeoJSON layer model — reserve boundary, forest beats,
  *     ranges, compartments, the analysis grid, patrol routes, ranger /
@@ -32,6 +31,7 @@ import {
   type MapMouseEvent,
   type ExpressionSpecification,
   type FilterSpecification,
+  type StyleSpecification,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 
@@ -46,7 +46,16 @@ import { Icon } from "@/components/icons";
 import { MapLayersPanel } from "@/components/map-layers-panel";
 import { cn } from "@/lib/utils";
 import { DEFAULT_GRID_SIZE, FOREST_CONTEXT, gridSizeLabel, type GridSizeKey } from "@/lib/forest-context";
-import { DEFAULT_LAYER_STATE, type BasemapKey, type ForestLayerState } from "@/lib/map-layers";
+import {
+  BASEMAPS,
+  RASTER_BASEMAPS,
+  BASEMAP_TILE_HOSTS,
+  basemapKeyForHost,
+  DEFAULT_BASEMAP_KEY,
+  basemapStyleUrl,
+  type BasemapKey,
+} from "@/lib/basemaps";
+import { DEFAULT_LAYER_STATE, type ForestLayerState } from "@/lib/map-layers";
 import { type BeatPolygon, type GisMarker, type GisRoute, type HeatBlock } from "@/lib/mock/gis";
 import type { TaggedGrid } from "@/lib/grid-regions";
 import { unitName } from "@/lib/mock/hierarchy";
@@ -72,30 +81,21 @@ import {
   replayFeatures,
   routeToTimed,
   routesToFeatures,
+  type GeoFeatureCollection,
   type LivePathFeature,
   type LiveRangerFeature,
   type TimedPoint,
 } from "@/lib/map-space";
 
-const ATLAS_TILE_URL = "/api/tiles/{z}/{x}/{y}";
-const STREET_TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
-const ESRI_SAT_URL =
-  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}";
-const TERRAIN_TILE_URL = "https://a.tile.opentopomap.org/{z}/{x}/{y}.png";
-
-/** Online rasters that back the street / satellite / terrain basemap radio —
- *  endpoints the browser hits directly (the atlas is served via /api/tiles).
- *  Esri's ArcGIS has been observed refusing these networks with HTTP 403 (bodies
- *  carry no CORS header, so MapLibre surfaces them as "Failed to fetch (0)")
- *  — see the AJAXError handling below; OSM/OpenTopoMap are listed so their
- *  tile failures are also throttled instead of spamming the console. */
-const ESRI_TILE_HOSTS = [
-  "server.arcgisonline.com",
-  "services.arcgisonline.com",
-  "basemaps.arcgis.com",
-];
-const EXTERNAL_TILE_HOSTS = [...ESRI_TILE_HOSTS, "tile.openstreetmap.org", "tile.opentopomap.org"];
 const DIVISION_CENTER: [number, number] = [79.15, 15.92];
+
+/** Neutral offline fallback swapped in only when the Atlas style fails
+ *  to load (the operational overlay layers are (re)built on its "load"). */
+const FALLBACK_BASE_STYLE: StyleSpecification = {
+  version: 8,
+  sources: {},
+  layers: [{ id: "gl-bg", type: "background", paint: { "background-color": "#e8eaed" } }],
+};
 
 /** One point of the live SOS alert feed rendered as its own map layer. */
 export interface SosAlertPoint {
@@ -112,8 +112,11 @@ export interface SosAlertPoint {
 /* ------------------------------------------------------------------ */
 
 export interface MapProps {
-  /** "workspace" shows the full control suite (GIS page); "overview" a lighter header. */
-  mode?: "overview" | "workspace";
+  /** "workspace" shows the full control suite (GIS page); "overview" a lighter
+   *  header but still every admin overlay; "focus" is a stripped detail mini-map
+   *  that renders ONLY the focused content (a single patrol replay trail or a
+   *  single incident point) with no admin overlays / controls. */
+  mode?: "focus" | "overview" | "workspace";
   heightClass?: string;
   liveBeats?: BeatPolygon[];
   compartments?: CompartmentPolygon[];
@@ -181,6 +184,12 @@ export interface MapProps {
    */
    focus?: { lng: number; lat: number; zoom?: number } | null;
   /**
+   * Focused single-point content for detail mini-maps (incident / sighting
+   * detail pages). When set in "focus" mode a single pin is drawn at this
+   * real-world location and the camera fits to it — nothing else is shown.
+   */
+  focusedPoint?: { lng: number; lat: number } | null;
+  /**
    * Camera fit request when the region filter narrows to a specific
    * Range / Beat / Compartment. Applied via fitBounds whenever the bounds
    * change. Null/omitted fits nothing (clears back to the free camera).
@@ -223,6 +232,7 @@ const CLICKABLE = [
   "gl-beats-outline",
   "gl-compartments-fill",
   "gl-routes",
+  "gl-routes-endpoints",
   "gl-live-path",
   "gl-live-ranger-dot",
   "gl-markers-ranger",
@@ -257,6 +267,7 @@ boundary: ["gl-boundary-line"],
   ],
   routes: [
     "gl-routes",
+    "gl-routes-endpoints",
     "gl-live-path-case",
     "gl-live-path",
     "gl-replay-case",
@@ -281,11 +292,16 @@ boundary: ["gl-boundary-line"],
   heat: ["gl-heat"],
 };
 
+/** Basemap overlay layers — the Atlas vector style is the loaded MapLibre
+ *  style; these raster layers sit above it and exactly one becomes visible
+ *  when the radio selects street / terrain / satellite (all start hidden
+ *  because the default basemap is Atlas). The "atlas" key maps to a layer id
+ *  that never exists — the visibility effect skips it cleanly. */
 const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
   atlas: "gl-basemap-atlas",
   street: "gl-basemap-street",
-  satellite: "gl-basemap-satellite",
   terrain: "gl-basemap-terrain",
+  satellite: "gl-basemap-satellite",
 };
 
 /** Layers whose visibility is constrained by the Range → Beat → Compartment
@@ -312,41 +328,11 @@ const REGION_FILTERED_LAYERS = [
 ];
 
 function buildLayers(m: MapLibreMap) {
-  m.addSource("tiles", {
-    type: "raster",
-    tiles: [ATLAS_TILE_URL],
-    tileSize: 256,
-    minzoom: 1,
-    maxzoom: 16,
-  });
-  m.addSource("street", {
-    type: "raster",
-    tiles: [STREET_TILE_URL],
-    tileSize: 256,
-    minzoom: 1,
-    maxzoom: 19,
-    attribution: "© OpenStreetMap contributors",
-  });
-  m.addSource("satellite", {
-    type: "raster",
-    tiles: [ESRI_SAT_URL],
-    tileSize: 256,
-    minzoom: 1,
-    maxzoom: 19,
-    attribution: "Imagery © Esri",
-  });
-  m.addSource("terrain", {
-    type: "raster",
-    tiles: [TERRAIN_TILE_URL],
-    tileSize: 256,
-    minzoom: 1,
-    maxzoom: 17,
-    attribution: "© OpenTopoMap (CC-BY-SA)",
-  });
   for (const id of [
     "beats",
     "markers",
     "routes",
+    "route-endpoints",
     "heat",
     "replay-trail",
     "replay-head",
@@ -358,29 +344,33 @@ function buildLayers(m: MapLibreMap) {
     "boundary",
     "analysis-grid",
     "sos-alerts",
+    "focus-point",
+    "focus-path",
   ]) {
     m.addSource(id, { type: "geojson", data: emptyFc() });
   }
 
-  // 1. Basemaps — single-choice radio (lib/map-layers.ts). All four raster
-  //    layers exist in the style; exactly one is visible at a time and
-  //    switching never moves the camera.
-  m.addLayer({ id: "gl-basemap-atlas", type: "raster", source: "tiles", paint: { "raster-opacity": 0.9 } });
-  m.addLayer({
-    id: "gl-basemap-street",
-    type: "raster",
-    source: "street",
-    paint: { "raster-opacity": 1 },
-    layout: { visibility: "none" },
-  });
-  m.addLayer({ id: "gl-basemap-satellite", type: "raster", source: "satellite", paint: { "raster-opacity": 0.92 } });
-  m.addLayer({
-    id: "gl-basemap-terrain",
-    type: "raster",
-    source: "terrain",
-    paint: { "raster-opacity": 1 },
-    layout: { visibility: "none" },
-  });
+  // 1. Raster basemap overlays — the Atlas vector style (OpenFreeMap) is the
+  //    loaded basemap; these raster layers sit above it and exactly one becomes
+  //    visible when the radio selects street / terrain / satellite (all start
+  //    hidden because the default basemap is Atlas).
+  for (const d of RASTER_BASEMAPS) {
+    m.addSource(d.id, {
+      type: "raster",
+      tiles: d.tileUrls!,
+      tileSize: 256,
+      minzoom: 1,
+      maxzoom: d.maxZoom ?? 19,
+      attribution: d.attribution,
+    });
+    m.addLayer({
+      id: `gl-basemap-${d.id}`,
+      type: "raster",
+      source: d.id,
+      paint: { "raster-opacity": 1 },
+      layout: { visibility: "none" },
+    });
+  }
 
   // 2. Per-beat coverage tint (green ramp where a beat carries a coverage
   //    figure). It is a COVERAGE visualization and follows the Coverage
@@ -673,6 +663,26 @@ function buildLayers(m: MapLibreMap) {
       "line-opacity": 0.85,
     },
   });
+  // Per-patrol endpoint dots — every patrol keeps a visible, distinct marker
+  // at its last GPS fix even when its recorded track is degenerate/co-located
+  // (many routes are logged from a stationary device and collapse to a single
+  // stacked line, so without this several patrols are invisible in one blob).
+  m.addLayer({
+    id: "gl-routes-endpoints",
+    type: "circle",
+    source: "route-endpoints",
+    layout: { visibility: "none" },
+    paint: {
+      "circle-radius": [
+        "interpolate", ["linear"], ["zoom"],
+        9, 5,
+        14, 8,
+      ],
+      "circle-color": ["get", "color"],
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 2,
+    },
+  });
   m.addLayer({
     id: "gl-replay-case",
     type: "line",
@@ -907,6 +917,51 @@ function buildLayers(m: MapLibreMap) {
       "line-opacity": 1,
     },
   });
+
+  // 17. Detail focused point — a single pin used by "focus" mode detail
+  //     mini-maps (incident / sighting pages). Hidden until the component's
+  //     focus effect feeds a point and sets it visible.
+  m.addLayer({
+    id: "gl-focus-point-halo",
+    type: "circle",
+    source: "focus-point",
+    layout: { visibility: "none" },
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 14, 14, 24],
+      "circle-color": "#B3261E",
+      "circle-opacity": 0.22,
+      "circle-stroke-color": "#B3261E",
+      "circle-stroke-width": 1,
+    },
+  });
+  m.addLayer({
+    id: "gl-focus-point",
+    type: "circle",
+    source: "focus-point",
+    layout: { visibility: "none" },
+    paint: {
+      "circle-radius": ["interpolate", ["linear"], ["zoom"], 9, 7, 14, 11],
+      "circle-color": "#B3261E",
+      "circle-stroke-color": "#ffffff",
+      "circle-stroke-width": 3,
+    },
+  });
+
+  // 18. Detail focused patrol path — the FULL route of the selected patrol,
+  //     drawn at rest (independent of playback progress) so the patrol detail
+  //     mini-map shows the complete path immediately. Fed from the
+  //     "replay-points" source, visible only in "focus" mode.
+  m.addLayer({
+    id: "gl-focus-path",
+    type: "line",
+    source: "focus-path",
+    layout: { "line-cap": "round", "line-join": "round", visibility: "none" },
+    paint: {
+      "line-color": "#0B66C3",
+      "line-width": 4,
+      "line-opacity": 0.9,
+    },
+  });
 }
 
 function setSourceData(m: MapLibreMap, id: string, data: GeoJSON.FeatureCollection) {
@@ -1085,17 +1140,24 @@ export function MapWorkspace({
   onLayerStateChange,
   sosAlerts,
   focus,
+  focusedPoint,
   fitRequest,
 }: MapProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const didFit = useRef(false);
+  // Previous ops-toggle state, so we can detect an off→on transition and
+  // recentre onto the newly enabled layer's data (which can sit far from the
+  // default forest view).
+  const didFitOps = useRef<Set<string>>(new Set());
+  const fedLogRef = useRef(false);
   const [ready, setReady] = useState(false);
 
-  /** True once Esri tile loads have failed (403 / "Failed to fetch (0)" on this
-   *  network) — drives the one-time "satellite unreachable" notice. */
-  const [satelliteDown, setSatelliteDown] = useState(false);
+  /** Once a raster basemap's tile host fails (403 / "Failed to fetch (0)"), we
+   *  record the basemap key here so a one-time "unreachable" notice can show
+   *  above the map when that basemap is selected. */
+  const [basemapDown, setBasemapDown] = useState<BasemapKey | null>(null);
   /** Failing external-tile URLs already surfaced, so the console stays quiet
    *  after the first occurrence of each. */
   const seenTileErrors = useRef(new Set<string>());
@@ -1171,41 +1233,66 @@ export function MapWorkspace({
     if (!containerRef.current || mapRef.current) return;
     const map = new MapLibreMap({
       container: containerRef.current,
-      style: {
-        version: 8,
-        sources: {},
-        layers: [{ id: "gl-bg", type: "background", paint: { "background-color": "#e8eaed" } }],
-      },
+      // Default basemap = the online OpenFreeMap vector style (lib/basemaps.ts).
+      style: basemapStyleUrl(DEFAULT_BASEMAP_KEY),
       center: DIVISION_CENTER,
       zoom: 11.8,
+      // Software / virtualized GL (SwiftShader) is accepted out of the box —
+      // MapLibre's WebGL2 context defaults to failIfMajorPerformanceCaveat:
+      // false, so the map renders without a hardware GPU.
       // Free viewport — pan/zoom is NOT clamped to the forest bounds.
       attributionControl: { compact: true },
     });
+    mapRef.current = map;
+    // Dev / verification handle — lets automated checks drive the live map
+    // (single canvas is guaranteed by the mapRef.current double-mount guard).
+    if (typeof window !== "undefined") {
+      (window as unknown as { __gisMap?: MapLibreMap }).__gisMap = map;
+    }
+    // Overlay layers are (re)built once per style load — a fallback .setStyle
+    // below fires "load" again, so the flag must reset alongside it.
+    let overlaysBuilt = false;
+    let styleFailed = false;
     map.on("error", (e) => {
       const err = (e as { error?: unknown }).error;
       if (err instanceof AJAXError) {
         const url = /https?:\/\/[^\s)]+/.exec(err.message)?.[0] ?? err.message;
-        if (EXTERNAL_TILE_HOSTS.some((h) => url.includes(h))) {
-          // Provider-side refusal (Esri 403 without CORS, flaky tile hosts).
+        if (url.includes("tiles.openfreemap.org")) {
+          // The Atlas (OpenFreeMap) style is unreachable (offline / blocked) —
+          // swap once to the neutral inline base so the operational overlays
+          // still render on a flat backdrop instead of a broken map.
+          if (!styleFailed) {
+            styleFailed = true;
+            overlaysBuilt = false;
+            console.warn("Atlas style (OpenFreeMap) unreachable — using fallback base style");
+            void map.setStyle(FALLBACK_BASE_STYLE, { diff: false });
+          }
+          return;
+        }
+        if (BASEMAP_TILE_HOSTS.some((h) => url.includes(h))) {
+          // Provider-side refusal (403 without CORS, flaky tile hosts).
           // Log once per failing URL, then go quiet.
           if (!seenTileErrors.current.has(url)) {
             seenTileErrors.current.add(url);
             console.warn("Basemap tile unreachable:", url);
           }
-          if (ESRI_TILE_HOSTS.some((h) => url.includes(h))) setSatelliteDown(true);
+          try {
+            const host = new URL(url).hostname;
+            const key = basemapKeyForHost(host);
+            if (key) setBasemapDown(key);
+          } catch { /* malformed URL — ignore */ }
           return;
         }
       }
       console.error("GL map error:", err ?? e);
     });
-    map.on("sourcedata", (e) => {
-      if (e.sourceId === "satellite" && e.isSourceLoaded) setSatelliteDown(false);
-    });
     map.on("load", () => {
-      buildLayers(map);
+      if (!overlaysBuilt) {
+        overlaysBuilt = true;
+        buildLayers(map);
+      }
       setReady(true);
     });
-    mapRef.current = map;
     return () => {
       map.remove();
       mapRef.current = null;
@@ -1243,6 +1330,62 @@ export function MapWorkspace({
     [sosAlerts]
   );
   const routesFc = useMemo(() => routesToFeatures(routes ?? []), [routes]);
+  // One Point feature per patrol at its LAST recorded GPS fix, carrying the
+  // same id/color as its route so a degenerate/co-located track still shows a
+  // distinct, clickable marker (see gl-routes-endpoints).
+  const routeEndpointsFc = useMemo<GeoFeatureCollection>(() => {
+    // One Point feature per patrol at its LAST recorded GPS fix. Many routes
+    // are recorded from a stationary device, so several share the same fix and
+    // would stack into a single (topmost) dot. To keep every patrol visible and
+    // individually clickable, co-located endpoints are fanned out into a small
+    // ring around their shared fix (a pure visualization declutter — the markers
+    // still carry the real patrol ids/colors and remain geo-anchored).
+    const pts: {
+      id: string | number | undefined;
+      props: Record<string, unknown>;
+      lng: number;
+      lat: number;
+    }[] = [];
+    for (const f of routesFc.features ?? []) {
+      const cc = (f.geometry as { coordinates?: unknown } | null)?.coordinates;
+      if (!Array.isArray(cc) || cc.length === 0) continue;
+      const coords = Array.isArray(cc[0]) ? (cc as unknown as unknown[][]) : [cc];
+      const last = coords[coords.length - 1];
+      if (!Array.isArray(last) || typeof last[0] !== "number" || typeof last[1] !== "number") continue;
+      pts.push({ id: (f.properties?.id as string | undefined), props: { ...(f.properties ?? {}) }, lng: last[0] as number, lat: last[1] as number });
+    }
+    // Group by shared fix (bucketed), then fan out each multi-point group.
+    const groups = new Map<string, typeof pts>();
+    for (const p of pts) {
+      const key = `${p.lng.toFixed(4)},${p.lat.toFixed(4)}`;
+      const g = groups.get(key) ?? [];
+      g.push(p);
+      groups.set(key, g);
+    }
+    const features: GeoJSON.Feature[] = [];
+    for (const group of groups.values()) {
+      const cx = group.reduce((a, p) => a + p.lng, 0) / group.length;
+      const cy = group.reduce((a, p) => a + p.lat, 0) / group.length;
+      // Ring radius selected so the spread is visible at auto-fit zoom (~0.0006° ≈ 60m
+      // on the ground) while staying tightly regional.
+      const radius = group.length > 1 ? 0.0006 * (group.length > 3 ? 1.6 : 1) : 0;
+      group.forEach((p, idx) => {
+        let lng = p.lng, lat = p.lat;
+        if (group.length > 1) {
+          const ang = (2 * Math.PI * idx) / group.length;
+          lat = cy + radius * Math.cos(ang);
+          lng = cx + radius * Math.sin(ang) / Math.cos((cy * Math.PI) / 180);
+        }
+        features.push({
+          type: "Feature" as const,
+          id: p.id as string | number | undefined,
+          properties: p.props,
+          geometry: { type: "Point" as const, coordinates: [lng, lat] },
+        });
+      });
+    }
+    return { type: "FeatureCollection" as const, features };
+  }, [routesFc]);
   const livePathsFc = useMemo(() => livePathsToFeatures(livePaths ?? []), [livePaths]);
   const liveRangersFc = useMemo(() => liveRangersToFeatures(liveRangers ?? []), [liveRangers]);
   const heatFc = useMemo(() => heatToFeatures(heat ?? []), [heat]);
@@ -1286,6 +1429,7 @@ export function MapWorkspace({
     setSourceData(m, "beats", beatsFc);
     setSourceData(m, "markers", markersFc);
     setSourceData(m, "routes", routesFc);
+    setSourceData(m, "route-endpoints", routeEndpointsFc);
     setSourceData(m, "live-paths", livePathsFc);
     setSourceData(m, "live-rangers", liveRangersFc);
     setSourceData(m, "heat", heatFc);
@@ -1298,7 +1442,7 @@ export function MapWorkspace({
     setSourceData(m, "analysis-grid", analysisGridsFc);
     setSourceData(m, "sos-alerts", sosAlertsFc);
 
-    if (!didFit.current && beatsFc.features.length > 0) {
+    if (!didFit.current && beatsFc.features.length > 0 && mode !== "focus") {
       didFit.current = true;
       const bounds = new LngLatBounds();
       for (const f of beatsFc.features) {
@@ -1311,7 +1455,76 @@ export function MapWorkspace({
         // ignore degenerate bounds
       }
     }
-  }, [ready, beatsFc, markersFc, routesFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, analysisGridsFc, sosAlertsFc, regionHoverFc]);
+
+    // Dev diagnostics — log the fed feature counts once per map so a fresh
+    // browser session can confirm every operational feed reached the GL engine.
+    if (!fedLogRef.current) {
+      fedLogRef.current = true;
+      const feeds: [string, number][] = [
+        ["beats", beatsFc.features.length],
+        ["markers", markersFc.features.length],
+        ["routes", routesFc.features.length],
+        ["compartments", compartmentsFc.features.length],
+        ["ranges", rangesFc.features.length],
+        ["boundary", boundaryFc.features.length],
+        ["analysis-grid", analysisGridsFc.features.length],
+      ];
+      console.info("[gis] fed " + feeds.map(([id, n]) => `${id}:${n}`).join(" "));
+    }
+  }, [ready, beatsFc, markersFc, routesFc, routeEndpointsFc, livePathsFc, liveRangersFc, heatFc, rangesFc, rangeLabelsFc, compartmentsFc, compartmentLabelsFc, boundaryFc, analysisGridsFc, sosAlertsFc, regionHoverFc]);
+
+  // Ops auto-fit — recentre the camera onto real operational data when a
+  // user toggles Patrol Routes / Ranger Positions / Sightings / SOS. Those
+  // feeds can live far from the default forest view, so without this the
+  // newly-enabled layer renders off-screen and looks empty. Fits once per
+  // off→on transition (tracked in didFitOps), to the union of every enabled
+  // ops layer that currently carries geometry.
+  useEffect(() => {
+    if (!ready) return;
+    const m = mapRef.current!;
+    const ops: { key: string; on: boolean; fc: { features: unknown[] } }[] = [
+      { key: "routes", on: layerState.routes, fc: routesFc },
+      { key: "markers", on: layerState.markers, fc: markersFc },
+      { key: "sos", on: layerState.sos, fc: sosAlertsFc },
+      { key: "rangers", on: layerState.rangers, fc: liveRangersFc },
+    ];
+    const enabledWithData = ops.filter((o) => o.on && o.fc.features.length > 0);
+    if (enabledWithData.length === 0) return;
+    if (enabledWithData.every((o) => didFitOps.current.has(o.key))) return;
+
+    const bounds = new LngLatBounds();
+    let extended = false;
+    for (const o of enabledWithData) {
+      for (const f of o.fc.features as {
+        geometry?: { type?: string; coordinates?: unknown };
+      }[]) {
+        const g = f.geometry;
+        if (!g?.coordinates) continue;
+        let coords: [number, number][] = [];
+        if (g.type === "Point") coords = [g.coordinates as [number, number]];
+        else {
+          const c = g.coordinates as unknown[];
+          for (const pt of c as [number, number][]) {
+            if (Array.isArray(pt) && typeof pt[0] === "number" && typeof pt[1] === "number") {
+              coords.push([pt[0] as number, pt[1] as number]);
+            }
+          }
+        }
+        for (const pt of coords) {
+          if (typeof pt[0] !== "number" || typeof pt[1] !== "number") continue;
+          bounds.extend([pt[0], pt[1]]);
+          extended = true;
+        }
+      }
+    }
+    if (!extended) return;
+    for (const o of enabledWithData) didFitOps.current.add(o.key);
+    try {
+      m.fitBounds(bounds, { padding: 72, maxZoom: 14, duration: 700 });
+    } catch {
+      // ignore degenerate bounds (single coincident point)
+    }
+  }, [ready, layerState.routes, layerState.markers, layerState.sos, layerState.rangers, routesFc, markersFc, sosAlertsFc, liveRangersFc]);
 
   // Layer checkbox visibility (overlay groups).
   useEffect(() => {
@@ -1374,6 +1587,44 @@ export function MapWorkspace({
       duration: 1200,
     });
   }, [ready, focus]);
+
+  // Detail mini-map focused point — draws a single pin at the incident /
+  // sighting's real-world location and fits the camera to it. Only active in
+  // "focus" mode; runs once per point (not on every render).
+  const didFitFocus = useRef(false);
+  const prevFocusKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!ready || mode !== "focus") return;
+    const m = mapRef.current!;
+    const key = focusedPoint ? `${focusedPoint.lng},${focusedPoint.lat}` : null;
+    const vis = focusedPoint && key ? "visible" : "none";
+    for (const lid of ["gl-focus-point", "gl-focus-point-halo"]) {
+      if (!m.getLayer(lid)) continue;
+      m.setLayoutProperty(lid, "visibility", vis);
+    }
+    const fc: GeoFeatureCollection = focusedPoint
+      ? {
+          type: "FeatureCollection",
+          features: [
+            {
+              type: "Feature",
+              geometry: { type: "Point", coordinates: [focusedPoint.lng, focusedPoint.lat] },
+              properties: {},
+            },
+          ],
+        }
+      : emptyFc();
+    setSourceData(m, "focus-point", fc);
+    if (
+      key &&
+      key !== prevFocusKeyRef.current &&
+      !didFitFocus.current
+    ) {
+      prevFocusKeyRef.current = key;
+      didFitFocus.current = true;
+      m.easeTo({ center: [focusedPoint!.lng, focusedPoint!.lat], zoom: 14, duration: 700 });
+    }
+  }, [ready, mode, focusedPoint]);
 
   // Region filter (Range → Beat → Compartment; division is fixed context).
   useEffect(() => {
@@ -1598,18 +1849,10 @@ export function MapWorkspace({
     if (!ready) return;
     const m = mapRef.current!;
     if (replayRoute) {
-      const { trail, head } = replayFeatures(replayRoute.timed, progress);
-      const allPoints: GeoJSON.FeatureCollection = {
-        type: "FeatureCollection",
-        features: replayRoute.timed.map((p) => ({
-          type: "Feature" as const,
-          properties: {},
-          geometry: { type: "Point" as const, coordinates: [p.lon, p.lat] as [number, number] },
-        })),
-      };
+      const { trail, head, dots } = replayFeatures(replayRoute.timed, progress);
       setSourceData(m, "replay-trail", trail);
       setSourceData(m, "replay-head", head);
-      setSourceData(m, "replay-points", allPoints);
+      setSourceData(m, "replay-points", dots);
       m.setFilter("gl-routes", ["==", "patrolId", replayRoute.patrolId]);
     } else {
       setSourceData(m, "replay-trail", emptyFc());
@@ -1619,6 +1862,62 @@ export function MapWorkspace({
     }
   }, [ready, replayRoute, progress]);
 
+  // Detail mini-map patrol replay — in "focus" mode the camera fits to the
+  // selected patrol's own replay trail so only that path fills the map box.
+  const didFocusFitPatrol = useRef(false);
+  useEffect(() => {
+    if (!ready || mode !== "focus" || !replayRoute) return;
+    if (didFocusFitPatrol.current) return;
+    const m = mapRef.current!;
+    const coords = replayRoute.timed;
+    if (coords.length < 2) return;
+    let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+    for (const p of coords) {
+      if (p.lon < minLon) minLon = p.lon;
+      if (p.lon > maxLon) maxLon = p.lon;
+      if (p.lat < minLat) minLat = p.lat;
+      if (p.lat > maxLat) maxLat = p.lat;
+    }
+    if (maxLon - minLon === 0 && maxLat - minLat === 0) return;
+    didFocusFitPatrol.current = true;
+    try {
+      m.fitBounds(
+        [
+          [minLon, minLat],
+          [maxLon, maxLat],
+        ],
+        { padding: 48, maxZoom: 16, duration: 800 }
+      );
+    } catch {
+      // ignore degenerate bounds
+    }
+  }, [ready, mode, replayRoute]);
+
+  // Detail focused patrol path — show the full route (gl-focus-path) only in
+  // "focus" mode with a replay route; keep it hidden everywhere else.
+  useEffect(() => {
+    if (!ready) return;
+    const m = mapRef.current!;
+    if (!m.getLayer("gl-focus-path")) return;
+    const on = mode === "focus" && !!replayRoute;
+    m.setLayoutProperty("gl-focus-path", "visibility", on ? "visible" : "none");
+    if (on && replayRoute && replayRoute.timed.length >= 2) {
+      const coords = replayRoute.timed.map((p) => [p.lon, p.lat] as [number, number]);
+      setSourceData(m, "focus-path", {
+        type: "FeatureCollection",
+        features: [
+          {
+            type: "Feature",
+            properties: {},
+            geometry: { type: "LineString", coordinates: coords },
+          },
+        ],
+      });
+    } else {
+      setSourceData(m, "focus-path", emptyFc());
+    }
+  }, [ready, mode, replayRoute]);
+
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-card border border-line bg-[#eef1ea] shadow-card">
       {/* Map header strip */}
@@ -1626,16 +1925,20 @@ export function MapWorkspace({
         <div className="flex min-w-0 items-center gap-2 text-xs text-ink-soft">
           <Icon name="map" size={14} className="shrink-0 text-forest-700" />
           <span className="truncate">
-            NSTR Forest — operational view · {FOREST_CONTEXT.divisionName}
+            {mode === "focus"
+              ? "NSTR Forest — location reference · " + FOREST_CONTEXT.divisionName
+              : `NSTR Forest — operational view · ${FOREST_CONTEXT.divisionName}`}
             {analysisGrids && analysisGrids.length > 0
               ? ` · ${analysisGrids.length} ${gridSizeLabel(gridSize)} grid cells`
               : ""}
           </span>
         </div>
-        <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
-          <Icon name="layers" size={13} className="text-forest-700" />
-          Layer controls in the MAP LAYERS panel (Layers button in fullscreen)
-        </span>
+        {mode !== "focus" && (
+          <span className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface px-2.5 py-1.5 text-[11px] text-ink-soft">
+            <Icon name="layers" size={13} className="text-forest-700" />
+            Layer controls in the MAP LAYERS panel (Layers button in fullscreen)
+          </span>
+        )}
       </div>
 
       <div ref={wrapRef} className={cn("relative overflow-hidden", heightClass)}>
@@ -1644,12 +1947,13 @@ export function MapWorkspace({
         {/* Honest operational status strip (counts / empty states of enabled ops layers) */}
         {statusChip && <div className="absolute left-3 top-3 z-10 max-w-[min(70%,26rem)]">{statusChip}</div>}
 
-        {/* Satellite is Esri-only; when ArcGIS refuses this network, say so
-            instead of silently showing a bare backdrop. */}
-        {satelliteDown && layerState.basemap === "satellite" && (
+        {/* When a raster basemap's tile host refuses this network, show an
+            honest one-line notice instead of silently showing a bare backdrop. */}
+        {basemapDown === layerState.basemap && (
           <div className="absolute left-3 top-14 z-20 max-w-[min(80%,24rem)] rounded-md border border-amber-300 bg-amber-50/95 px-3 py-2 text-[11px] leading-relaxed text-amber-900 shadow-card">
-            Satellite imagery is unreachable from this network — Esri is refusing tile requests (403).
-            Switch to <b>Atlas</b>, <b>Street</b> or <b>Terrain</b> for a working basemap.
+            {BASEMAPS[layerState.basemap].label} imagery is unreachable from this network —
+            {" "}{BASEMAPS[layerState.basemap].provider} refused tile requests.
+            Switch to another basemap in the MAP LAYERS panel for a working map.
           </div>
         )}
 
@@ -1706,7 +2010,9 @@ export function MapWorkspace({
           </div>
         )}
 
-        {/* Legend (collapsible; reflects only the layers currently on) */}
+        {/* Legend (collapsible; reflects only the layers currently on) —
+            hidden on the stripped "focus" detail mini-map. */}
+        {mode !== "focus" && (
         <div className="absolute bottom-3 left-3 z-10 max-w-52 overflow-hidden rounded-md border border-line bg-white/95 shadow-card">
           <button
             onClick={() => setLegendOpen((v) => !v)}
@@ -1739,6 +2045,7 @@ export function MapWorkspace({
             </div>
           )}
         </div>
+        )}
 
         {/* feature detail popup */}
         {detailCard && <div className="absolute bottom-3 right-3 z-10 max-w-72">{detailCard}</div>}
@@ -1825,10 +2132,10 @@ export function MapWorkspace({
 /* ------------------------------------------------------------------ */
 
 const BASEMAP_LABELS: Record<BasemapKey, string> = {
-  atlas: "Atlas (offline)",
-  street: "Street",
-  satellite: "Satellite",
-  terrain: "Terrain",
+  atlas: "Atlas (online)",
+  street: "Street (OSM)",
+  terrain: "Terrain (OpenTopoMap)",
+  satellite: "Satellite (Sentinel-2)",
 };
 
 /** Legend rows for the layers that are currently switched ON — colors match

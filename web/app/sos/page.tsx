@@ -51,21 +51,18 @@ function fmtTime(iso: string): string {
 }
 
 export default function SosControlRoomPage() {
-  const { pushToast, user } = useApp();
+  const { pushToast, user, reloadNotifications } = useApp();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"ALL" | SosStatus>("ALL");
 
   const casesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases" });
   const feedData = useAsyncData(() => sosService.feed(), [], { cacheKey: "sos:feed" });
 
   const cases = casesData.data ?? [];
+  const filteredCases = statusFilter === "ALL"
+    ? cases
+    : cases.filter((c) => c.incident.status === statusFilter);
   const pendingCount = cases.filter((c) => c.incident.status === "SUBMITTED").length;
-
-  // Non-SOS operational alerts (tamper logs, coverage breaches) from the
-  // same division feed the bell menu consumes.
-  const otherAlerts = useMemo(
-    () => (feedData.data ?? []).filter((a) => a.type !== "SOS"),
-    [feedData.data]
-  );
 
   const acknowledge = async (c: SosCase) => {
     setBusyId(c.incident.id);
@@ -73,6 +70,7 @@ export default function SosControlRoomPage() {
       await api.incidents.verify(c.incident.id);
       invalidateCache();
       casesData.reload();
+      reloadNotifications();
       pushToast(
         "success",
         "SOS acknowledged",
@@ -92,6 +90,36 @@ export default function SosControlRoomPage() {
       setBusyId(null);
     }
   };
+
+  const resolve = async (c: SosCase) => {
+    setBusyId(c.incident.id);
+    try {
+      await api.incidents.resolve(c.incident.id);
+      invalidateCache();
+      casesData.reload();
+      reloadNotifications();
+      pushToast(
+        "success",
+        "SOS resolved",
+        `${c.incident.title} marked resolved by ${user?.fullName ?? "you"}`
+      );
+    } catch (err) {
+      pushToast(
+        "error",
+        "Resolve failed",
+        err instanceof Error ? err.message : "Backend rejected the request"
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  // Non-SOS operational alerts (tamper logs, coverage breaches) from the
+  // same division feed the bell menu consumes.
+  const otherAlerts = useMemo(
+    () => (feedData.data ?? []).filter((a) => a.type !== "SOS"),
+    [feedData.data]
+  );
 
   const loadError = casesData.error ?? feedData.error;
   const errorMessage = (() => {
@@ -137,16 +165,37 @@ export default function SosControlRoomPage() {
               ? "No SOS emergencies on record for your scope"
               : `${cases.length} SOS event${cases.length === 1 ? "" : "s"} · ${pendingCount} awaiting acknowledgment`
           }
+          actions={
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as "ALL" | SosStatus)}
+              aria-label="Filter SOS by status"
+              className="h-8 rounded-field border border-line-strong bg-white px-2 text-xs focus:border-forest-600 focus:outline-none"
+            >
+              <option value="ALL">All statuses</option>
+              <option value="SUBMITTED">Needs acknowledgment</option>
+              <option value="VERIFIED">Acknowledged</option>
+              <option value="RESOLVED">Resolved</option>
+              <option value="REJECTED">Rejected</option>
+            </select>
+          }
         />
         <div className="divide-y divide-line">
-          {!casesData.loading && !errorMessage && cases.length === 0 && (
+          {!casesData.loading && !errorMessage && filteredCases.length === 0 && (
             <p className="p-8 text-center text-sm text-ink-soft">
-              No SOS emergencies have been raised in your assigned scope. When a ranger triggers the
-              SOS button, the event appears here as soon as it syncs.
+              {cases.length === 0
+                ? "No SOS emergencies have been raised in your assigned scope. When a ranger triggers the SOS button, the event appears here as soon as it syncs."
+                : `No SOS events match the "${statusFilter === "ALL" ? "all" : statusLabel[statusFilter].toLowerCase()}" filter.`}
             </p>
           )}
-          {cases.map((c) => (
-            <SosCard key={c.incident.id} c={c} busy={busyId === c.incident.id} onAcknowledge={() => acknowledge(c)} />
+          {filteredCases.map((c) => (
+            <SosCard
+              key={c.incident.id}
+              c={c}
+              busy={busyId === c.incident.id}
+              onAcknowledge={() => acknowledge(c)}
+              onResolve={() => resolve(c)}
+            />
           ))}
         </div>
       </Card>
@@ -194,7 +243,7 @@ export default function SosControlRoomPage() {
 /* SOS card                                                            */
 /* ------------------------------------------------------------------ */
 
-function SosCard({ c, busy, onAcknowledge }: { c: SosCase; busy: boolean; onAcknowledge(): void }) {
+function SosCard({ c, busy, onAcknowledge, onResolve }: { c: SosCase; busy: boolean; onAcknowledge(): void; onResolve(): void }) {
   const i = c.incident;
   const hasCoords = i.latitude != null && i.longitude != null;
 
@@ -266,11 +315,22 @@ function SosCard({ c, busy, onAcknowledge }: { c: SosCase; busy: boolean; onAckn
             <Icon name="check" size={13} /> {busy ? "Acknowledging…" : "Acknowledge"}
           </button>
         ) : (
-          <span className="text-xs text-ink-faint">
-            {i.status === "VERIFIED"
-              ? "Acknowledged — no further action required"
-              : `Closed as ${statusLabel[i.status].toLowerCase()}`}
-          </span>
+          <div className="flex items-center gap-2">
+            {i.status === "VERIFIED" && (
+              <button
+                onClick={onResolve}
+                disabled={busy}
+                className="inline-flex h-8 items-center gap-1.5 rounded-field border border-forest-600 bg-white px-3 text-xs font-medium text-forest-800 hover:bg-forest-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Icon name="check" size={13} /> {busy ? "Resolving…" : "Mark Resolved"}
+              </button>
+            )}
+            <span className="text-xs text-ink-faint">
+              {i.status === "VERIFIED"
+                ? "Acknowledged — resolve once the emergency is handled"
+                : `Closed as ${statusLabel[i.status].toLowerCase()}`}
+            </span>
+          </div>
         )}
       </div>
     </div>

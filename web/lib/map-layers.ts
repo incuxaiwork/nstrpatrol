@@ -5,12 +5,17 @@
  *
  * Semantics: every checkbox drives REAL MapLibre layer visibility
  * (setLayoutProperty visibility) — there are no decorative toggles. The
- * basemap is a single-choice radio (atlas / street / satellite / terrain);
+ * basemap is a single-choice radio (atlas / street / terrain / satellite);
  * switching it never moves the camera.
+ *
+ * The basemap registry lives in lib/basemaps.ts; this module re-exports the
+ * shared `BasemapKey` type and the radio `BASEMAP_OPTIONS` so control panels
+ * stay import-light.
  */
 
-/** Single-choice basemap. "atlas" is the offline NSTR.mbtiles raster. */
-export type BasemapKey = "atlas" | "street" | "satellite" | "terrain";
+import type { BasemapKey } from "@/lib/basemaps";
+
+export { BASEMAP_OPTIONS, type BasemapKey } from "@/lib/basemaps";
 
 /**
  * Visibility state of every map layer group. The web counterpart of the
@@ -35,10 +40,11 @@ export interface ForestLayerState {
 }
 
 export const DEFAULT_LAYER_STATE: ForestLayerState = {
-  // Atlas (offline NSTR.mbtiles raster) is the default GIS basemap — Esri
-  // satellite is fully available in the selector but must never be required:
-  // the ArcGIS host returns 403 without CORS on some networks, which degrades
-  // to a bare backdrop.
+  // Atlas (OpenFreeMap online vector basemap) is the default GIS basemap —
+  // it scales cleanly to every zoom. Satellite is EOX Sentinel-2 cloudless
+  // (open-access, keyless — no 403 traps). Administrative boundaries and the
+  // analysis grid ship OFF by default so a fresh GIS page stays clean — the
+  // admin reveals them via the MAP LAYERS panel as needed.
   basemap: "atlas",
   boundary: false,
   beats: false,
@@ -53,13 +59,6 @@ export const DEFAULT_LAYER_STATE: ForestLayerState = {
   coverage: false,
   heat: false,
 };
-
-export const BASEMAP_OPTIONS: { key: BasemapKey; label: string; subtitle: string }[] = [
-  { key: "atlas", label: "Atlas (offline)", subtitle: "NSTR.mbtiles raster atlas via the portal tile proxy" },
-  { key: "street", label: "Street", subtitle: "OpenStreetMap raster tiles (online)" },
-  { key: "satellite", label: "Satellite", subtitle: "Esri World Imagery (online)" },
-  { key: "terrain", label: "Terrain", subtitle: "OpenTopoMap topographic relief (online)" },
-];
 
 /** One checkbox row of the external MAP LAYERS panel. */
 export interface OverlayRow {
