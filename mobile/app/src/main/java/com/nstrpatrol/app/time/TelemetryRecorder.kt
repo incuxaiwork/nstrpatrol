@@ -365,8 +365,12 @@ class TelemetryRecorder(
 
         var rawMoving = false
         if (fresh && tickDisp != Double.MAX_VALUE) {
-            val teleport = tickDisp >= AppConfig.GPS_TELEPORT_M &&
-                (!hasAcc || acc!! > AppConfig.GPS_POOR_ACCURACY_M) && speedKmh < AppConfig.GPS_MOVING_SPEED_KMH
+            // Teleports must not start/feed the streak — including huge jumps
+            // whose GPS speed is merely elevated (multipath Doppler), which
+            // the plain 5 km/h bar lets through.
+            val bigJumpNoProof = tickDisp >= 100.0 && (!hasAcc || acc!! > 30.0) && speedKmh < 8.0
+            val teleport = bigJumpNoProof || (tickDisp >= AppConfig.GPS_TELEPORT_M &&
+                (!hasAcc || acc!! > AppConfig.GPS_POOR_ACCURACY_M) && speedKmh < AppConfig.GPS_MOVING_SPEED_KMH)
             if (!teleport) {
                 if (tickDisp >= AppConfig.GPS_TICK_DISP_M) {
                     rawMoving = true
@@ -443,6 +447,21 @@ class TelemetryRecorder(
                 acc > AppConfig.GPS_POOR_ACCURACY_M && speedKmh < AppConfig.GPS_MOVING_SPEED_KMH
             ) {
                 return false
+            }
+            // Segment plausibility (observed: 32 m in 3 s = 38 km/h on foot
+            // with GPS reporting 0.8 km/h; 681 m after a 404 s silence with
+            // GPS at 5.6 km/h). Real travel keeps implied and GPS speed in
+            // the same ballpark; drift does not.
+            if (disp != Double.MAX_VALUE && timeSince > 0) {
+                val impliedKmh = (disp / 1000.0) / (timeSince / 3_600_000.0)
+                if (impliedKmh > 12.0 && speedKmh < impliedKmh * 0.5) {
+                    return false
+                }
+                // Re-acquisition jumps: hundreds of meters after silence on a
+                // poor fix are multipath teleports, not walked path.
+                if (disp >= 100.0 && acc > 30.0 && speedKmh < 8.0) {
+                    return false
+                }
             }
             if (isStill && disp < maxOf(minDisp, AppConfig.STILL_MIN_DISPLACEMENT_M)) {
                 return false
