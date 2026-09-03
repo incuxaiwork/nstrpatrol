@@ -157,9 +157,11 @@ fun PatrolReportScreen(
             // samples and falls back to the cloud per-mode breakdown — local
             // points/modes are absent for patrols pulled from another device.
             val localDominant = if (samples.isEmpty()) null else ActivitySummary.isVehicleDominant(dao, patrolId)
+            val reportDistance = computeReportDistance(points)
+                .takeIf { it > 0.0 } ?: (dao.patrolSession(patrolId)?.totalDistanceMeters ?: 0.0)
             estimatedSteps = ActivitySummary.estimateSteps(
                 recordedSteps = metrics.steps,
-                distanceMeters = computeReportDistance(points),
+                distanceMeters = reportDistance,
                 localVehicleDominant = localDominant,
                 cloudVehicleDominant = ActivitySummary.isCloudVehicleDominant(backendStatsModes)
             )
@@ -193,7 +195,12 @@ fun PatrolReportScreen(
     }
 
     val session = localSession ?: backendSession
+    // Prefer the live recomputation, but fall back to the stored session
+    // distance: completed patrols whose points are absent on this device
+    // (cloud pulls, wiped rows, single-point tracks) otherwise show 0 m
+    // while the patrol card correctly shows the recorded distance.
     val totalDistance = computeReportDistance(points)
+        .takeIf { it > 0.0 } ?: (session?.totalDistanceMeters ?: 0.0)
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded
 

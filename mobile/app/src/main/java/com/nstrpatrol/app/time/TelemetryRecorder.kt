@@ -98,6 +98,15 @@ class TelemetryRecorder(
     // phone while stationary) never counts as distance or steps.
     private var lastSeenLat: Double? = null
     private var lastSeenLon: Double? = null
+    // Motion latch: per-tick displacement jitters (drift looks like 3-8 m
+    // jumps), so a single tick can never flip the verdict. Motion latches on
+    // only after consecutive raw-moving ticks or fast cumulative travel, and
+    // unlatches after consecutive stationary ticks. Teleport ticks (huge jump
+    // on a poor fix) reset the streak instead of feeding it.
+    private var movingStreak = 0
+    private var stillStreak = 0
+    private var latchCumDisp = 0.0
+    private var gpsMovingLatched = false
     private var lastPersistedMode: MovementMode = MovementMode.UNKNOWN
     private var lastIntegrityLogAt: Long = 0L
 
@@ -156,6 +165,10 @@ class TelemetryRecorder(
         lastPointTime = 0L
         lastSeenLat = null
         lastSeenLon = null
+        movingStreak = 0
+        stillStreak = 0
+        latchCumDisp = 0.0
+        gpsMovingLatched = false
         lastPersistedMode = MovementMode.UNKNOWN
         lastFreshFixElapsed = 0L
         lastForceResyncElapsed = 0L
@@ -243,7 +256,7 @@ class TelemetryRecorder(
         } else {
             Double.MAX_VALUE
         }
-        val gpsMoving = isGpsMoving(rawTelemetry, tickDisp)
+        val gpsMoving = updateGpsMotion(rawTelemetry, tickDisp)
         lastSeenLat = rawTelemetry.latitude
         lastSeenLon = rawTelemetry.longitude
 
@@ -332,28 +345,61 @@ class TelemetryRecorder(
      * is ~0.
      */
     /**
-     * True only when a fresh GPS fix proves the coordinates are really
-     * changing. [tickDisp] is the per-tick displacement of the raw fix.
-     * A shaking-but-stationary phone keeps the fix inside the jitter circle
-     * with ~0 speed — that must never count as movement.
+     * Latched GPS motion verdict for this tick. Per-tick displacement alone
+     * cannot separate walking from satellite drift (both look like 3-8 m
+     * jumps), and one-off teleports (85 m between two 76 m-accuracy fixes)
+     * must never count. So: teleport ticks reset the streak, ordinary ticks
+     * vote, and motion latches on only after [AppConfig.GPS_LATCH_TICKS]
+     * consecutive moving ticks or [AppConfig.GPS_LATCH_CUMULATIVE_M] of
+     * travel. While unlatched, steps are swallowed and points face the
+     * stationary 10 m guard no matter what the inertial sensors claim.
      */
-    private fun isGpsMoving(telemetry: GpsTelemetry, tickDisp: Double): Boolean {
-        val lat = telemetry.latitude ?: return false
-        val lon = telemetry.longitude ?: return false
-        if (lat == 0.0 && lon == 0.0) return false
-        val maxFixAge = settings?.gpsMaxFixAgeMs?.value ?: AppConfig.DEFAULT_MAX_FIX_AGE_MS
-        if (telemetry.ageMs !in 0..maxFixAge) return false
-        // First fix of the patrol: nothing to compare against yet — allow it
-        // so the track gets its anchor point and initial steps aren't lost.
-        if (tickDisp == Double.MAX_VALUE) return true
+    private fun updateGpsMotion(telemetry: GpsTelemetry, tickDisp: Double): Boolean {
+        val lat = telemetry.latitude
+        val lon = telemetry.longitude
+        val fresh = lat != null && lon != null && !(lat == 0.0 && lon == 0.0) &&
+            telemetry.ageMs in 0..(settings?.gpsMaxFixAgeMs?.value ?: AppConfig.DEFAULT_MAX_FIX_AGE_MS)
         val speedKmh = telemetry.speedMps?.let { it * 3.6 } ?: 0.0
-        // Coordinate change above the jitter floor is the primary signal.
-        if (tickDisp >= AppConfig.JITTER_DISTANCE_M) return true
-        // Fast GPS speed with a sane fix is secondary evidence (covers the
-        // case where consecutive fixes land close together at speed).
-        val acc = telemetry.horizontalAccuracyMeters?.toDouble() ?: Double.MAX_VALUE
-        if (speedKmh >= 1.5 && acc <= 25.0) return true
-        return false
+        val acc = telemetry.horizontalAccuracyMeters?.toDouble()
+        val hasAcc = acc != null && acc < 1e6
+
+        var rawMoving = false
+        if (fresh && tickDisp != Double.MAX_VALUE) {
+            val teleport = tickDisp >= AppConfig.GPS_TELEPORT_M &&
+                (!hasAcc || acc!! > AppConfig.GPS_POOR_ACCURACY_M) && speedKmh < AppConfig.GPS_MOVING_SPEED_KMH
+            if (!teleport) {
+                if (tickDisp >= AppConfig.GPS_TICK_DISP_M) {
+                    rawMoving = true
+                    latchCumDisp += tickDisp
+                }
+                // Fast GPS speed on a sane fix: unambiguous motion even when
+                // consecutive fixes land close together.
+                if (speedKmh >= AppConfig.GPS_MOVING_SPEED_KMH && hasAcc && acc!! <= 30.0) {
+                    rawMoving = true
+                }
+            } else {
+                // A teleport proves nothing except a bad fix — it must not
+                // start or feed a motion streak.
+                latchCumDisp = 0.0
+            }
+        }
+        if (rawMoving) {
+            movingStreak++
+            stillStreak = 0
+        } else {
+            stillStreak++
+            movingStreak = 0
+            if (latchCumDisp > 0 && tickDisp != Double.MAX_VALUE) latchCumDisp = 0.0
+        }
+        if (movingStreak >= AppConfig.GPS_LATCH_TICKS ||
+            latchCumDisp >= AppConfig.GPS_LATCH_CUMULATIVE_M
+        ) {
+            gpsMovingLatched = true
+        }
+        if (stillStreak >= AppConfig.GPS_STILL_TICKS) {
+            gpsMovingLatched = false
+        }
+        return gpsMovingLatched
     }
 
     private suspend fun tryRecordPoint(pid: String, now: Long, force: Boolean, gpsMoving: Boolean = true): Boolean {
@@ -383,6 +429,21 @@ class TelemetryRecorder(
             val isStill = _movement.value.mode == MovementMode.STILL || !gpsMoving
             val acc = telemetry.horizontalAccuracyMeters?.toDouble() ?: Double.MAX_VALUE
             val speedKmh = telemetry.speedMps?.let { it * 3.6 } ?: 0.0
+            // Garbage-fix guards (observed in the field: an 85 m teleport
+            // between two 76 m-accuracy fixes was recorded as travel).
+            // A fix worse than 50 m accuracy cannot anchor a track point.
+            // (acc is Double.MAX_VALUE when the fix carries no accuracy —
+            // those pass this gate and rely on the rules below.)
+            if (acc < 1e6 && acc > AppConfig.GPS_MAX_FIX_ACCURACY_M) {
+                return false
+            }
+            // A giant jump on a poor fix without corroborating speed is a
+            // satellite teleport, not travel — drop it even mid-patrol.
+            if (disp != Double.MAX_VALUE && disp >= AppConfig.GPS_TELEPORT_M &&
+                acc > AppConfig.GPS_POOR_ACCURACY_M && speedKmh < AppConfig.GPS_MOVING_SPEED_KMH
+            ) {
+                return false
+            }
             if (isStill && disp < maxOf(minDisp, AppConfig.STILL_MIN_DISPLACEMENT_M)) {
                 return false
             }
