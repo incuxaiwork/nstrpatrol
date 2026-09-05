@@ -138,11 +138,53 @@ export function tagCompartments(
 
 export interface TaggedGrid extends GridPolygon {
   rangeId?: string;
+  rangeIds?: string[];
   beatId?: string;
+  beatIds?: string[];
   compId?: string;
+  compIds?: string[];
+  /** Coverage hint for UI — when a single beat/compartment dominates ≥90% of the cell */
+  primaryBeatId?: string;
+  primaryCompId?: string;
 }
 
-/** Attribute grid cells to beat → compartment by centroid containment. */
+/** Rect vs ring intersection — re-used from lib/gis/grid.ts (planar, SVG space) */
+function rectIntersectsRingFast(x0: number, y0: number, x1: number, y1: number, poly: { ring: Pt[]; bbox: ReturnType<typeof ringBbox> }): boolean {
+  const { ring, bbox } = poly;
+  if (x1 < bbox.minX || x0 > bbox.maxX || y1 < bbox.minY || y0 > bbox.maxY) return false;
+  const corners: Pt[] = [{ x: x0, y: y0 }, { x: x1, y: y0 }, { x: x1, y: y1 }, { x: x0, y: y1 }];
+  for (const c of corners) if (pointInRing(c, poly)) return true;
+  for (const v of ring) if (v.x >= x0 && v.x <= x1 && v.y >= y0 && v.y <= y1) return true;
+  const segs: [Pt, Pt][] = [[{ x: x0, y: y0 }, { x: x1, y: y0 }], [{ x: x1, y: y0 }, { x: x1, y: y1 }], [{ x: x1, y: y1 }, { x: x0, y: y1 }], [{ x: x0, y: y1 }, { x: x0, y: y0 }]];
+  const n = ring.length;
+  for (const [a, b] of segs) for (let j = 0; j < n; j++) if (segmentsIntersect(a, b, ring[j], ring[(j + 1) % n])) return true;
+  return false;
+}
+function segmentsIntersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt): boolean {
+  const d1 = (p2.x - p1.x) * (p3.y - p1.y) - (p2.y - p1.y) * (p3.x - p1.x);
+  const d2 = (p2.x - p1.x) * (p4.y - p1.y) - (p2.y - p1.y) * (p4.x - p1.x);
+  const d3 = (p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x);
+  const d4 = (p4.x - p3.x) * (p2.y - p3.y) - (p4.y - p3.y) * (p2.x - p3.x);
+  return d1 * d2 < 0 && d3 * d4 < 0;
+}
+
+/** Estimate what fraction of a grid rect lies inside a polygon by 5×5 sampling (25 pts) */
+function coverageFraction(
+  x0: number, y0: number, x1: number, y1: number,
+  poly: { ring: Pt[]; bbox: ReturnType<typeof ringBbox> }
+): number {
+  const NX = 5, NY = 5;
+  let inside = 0, total = 0;
+  for (let ix = 0; ix < NX; ix++) for (let iy = 0; iy < NY; iy++) {
+    const x = x0 + (x1 - x0) * (ix + 0.5) / NX;
+    const y = y0 + (y1 - y0) * (iy + 0.5) / NY;
+    total++;
+    if (pointInRing({ x, y }, poly)) inside++;
+  }
+  return total ? inside / total : 0;
+}
+
+/** Attribute grid cells to beats/compartments — lists all touched, but collapses to single when one dominates ≥90% */
 export function tagGrids(
   grids: GridPolygon[],
   beats: TaggedBeat[],
@@ -150,18 +192,73 @@ export function tagGrids(
 ): TaggedGrid[] {
   const beatPolys = beats
     .filter((b) => b.beatId)
-    .map((b) => ({ id: b.beatId!, ring: parseRing(b.points), bbox: ringBbox(parseRing(b.points)) }));
+    .map((b) => {
+      const ring = parseRing(b.points);
+      return { id: b.beatId!, ring, bbox: ringBbox(ring), rangeId: b.rangeId };
+    });
   const compPolys = comps
     .filter((c) => c.compId)
-    .map((c) => ({ id: c.compId!, ring: parseRing(c.points), bbox: ringBbox(parseRing(c.points)) }));
+    .map((c) => {
+      const ring = parseRing(c.points);
+      return { id: c.compId!, ring, bbox: ringBbox(ring), beatId: c.beatId, rangeId: c.rangeId };
+    });
+
   return grids.map((g) => {
-    const centroid = ringCentroid(g.points);
-    if (!centroid) return { ...g };
-    const beatMatches = containingPolygons([centroid], beatPolys);
-    const beatId = beatMatches.length > 0 ? beatMatches[0] : undefined;
-    const compMatches = containingPolygons([centroid], compPolys);
-    const compId = compMatches.length > 0 ? compMatches[0] : undefined;
-    const rangeId = beatId ? beats.find((b) => b.beatId === beatId)?.rangeId : undefined;
-    return { ...g, rangeId, beatId, compId };
+    const gRing = parseRing(g.points);
+    if (gRing.length < 3) return { ...g };
+    const bbox = ringBbox(gRing);
+    const x0 = bbox.minX, y0 = bbox.minY, x1 = bbox.maxX, y1 = bbox.maxY;
+
+    // All beats that intersect the cell rect
+    const touchingBeats = beatPolys.filter((bp) => rectIntersectsRingFast(x0, y0, x1, y1, bp));
+    // All compartments that intersect
+    const touchingComps = compPolys.filter((cp) => rectIntersectsRingFast(x0, y0, x1, y1, cp));
+
+    // Determine primary (≥90% coverage) by sampling
+    let primaryBeatId: string | undefined;
+    let primaryCompId: string | undefined;
+    let maxBeatCov = 0;
+    for (const b of touchingBeats) {
+      const cov = coverageFraction(x0, y0, x1, y1, b);
+      if (cov > maxBeatCov) { maxBeatCov = cov; primaryBeatId = b.id; }
+    }
+    let maxCompCov = 0;
+    for (const c of touchingComps) {
+      const cov = coverageFraction(x0, y0, x1, y1, c);
+      if (cov > maxCompCov) { maxCompCov = cov; primaryCompId = c.id; }
+    }
+    if (maxBeatCov < 0.9) primaryBeatId = undefined;
+    if (maxCompCov < 0.9) primaryCompId = undefined;
+
+    const beatIds = touchingBeats.map((b) => b.id);
+    const compIds = touchingComps.map((c) => c.id);
+    // Range ids are the union of the touching beats' ranges
+    const rangeIds = [...new Set(touchingBeats.map((b) => b.rangeId).filter((v): v is string => Boolean(v)))];
+    // Fallback to centroid for range when no beat touches (edge cell outside beats but inside boundary)
+    let rangeId: string | undefined;
+    if (rangeIds.length === 1) rangeId = rangeIds[0];
+    else if (primaryBeatId) rangeId = beatPolys.find((b) => b.id === primaryBeatId)?.rangeId;
+    else {
+      const centroid = ringCentroid(g.points);
+      if (centroid) {
+        const m = containingPolygons([centroid], beatPolys.map((b) => ({ id: b.id, ring: b.ring, bbox: b.bbox })));
+        if (m.length) rangeId = beatPolys.find((b) => b.id === m[0])?.rangeId;
+      }
+    }
+
+    const beatId = primaryBeatId ?? (beatIds.length === 1 ? beatIds[0] : undefined);
+    const compId = primaryCompId ?? (compIds.length === 1 ? compIds[0] : undefined);
+
+    return {
+      ...g,
+      rangeId,
+      rangeIds: rangeIds.length > 0 ? rangeIds : undefined,
+      beatId,
+      beatIds: beatIds.length > 0 ? beatIds : undefined,
+      compId,
+      compIds: compIds.length > 0 ? compIds : undefined,
+      primaryBeatId,
+      primaryCompId,
+    };
   });
 }

@@ -306,6 +306,10 @@ export interface ApiPatrol {
   userId: string;
   user?: { id: string; fullName: string; email: string; phone?: string | null; cader?: string | null; role?: string };
   forest?: { id: string; name: string; code: string };
+  /** Device-reported patrol method (patrolMethod) and latest detected movement mode */
+  patrolMethod?: string | null;
+  detectedMethod?: string | null;
+  totalSteps?: number | null;
   /** Authoritative organizational geography resolved server-side from
    *  Patrol.beat → Beat → Range → SubDivision (null when unresolved). */
   geography?: {
@@ -317,7 +321,7 @@ export interface ApiPatrol {
     subDivisionId: string | null;
     division: string | null;
   } | null;
-  /** Aggregated patrol stats (distanceKm, durationSeconds). Provided by both
+  /** Aggregated patrol stats (distanceKm, durationSeconds, steps). Provided by both
    *  the list and detail endpoints. */
   stats?: ApiPatrolStats;
 }
@@ -327,6 +331,9 @@ export interface ApiPatrolStats {
   /** null when no GPS points exist (no GROUP BY row); 0 is genuine zero distance. */
   distanceKm: number | null;
   durationSeconds: number;
+  steps: number;
+  moveMinutes: number;
+  modes?: { mode: string; seconds: number }[];
 }
 
 /** One GPS fix of GET /api/patrols/live (backend `toFix` — real device data). */
@@ -777,9 +784,40 @@ export const forests = {
   list: () => request<ApiForest[]>("/api/forests"),
 };
 
+export interface ApiBeatCoverageRow {
+  beat: string;
+  rangeName: string | null;
+  totalCells: number;
+  patrolledCells: number;
+  coveragePercent: number | null;
+  pointCount: number;
+  lastPatrolledAt: string | null;
+}
+
+export interface ApiBeatCoverage {
+  generatedAt: string;
+  scope: {
+    kind: string;
+    subDivisionId: string | null;
+    rangeId: string | null;
+    beatId: string | null;
+  };
+  summary: {
+    beats: number;
+    totalCells: number;
+    patrolledCells: number;
+    unpatrolledCells: number;
+    zeroPatrolBeats: number;
+    pointCount: number;
+  };
+  rows: ApiBeatCoverageRow[];
+}
+
 export const coverage = {
   grids: (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
     request<ApiGridCoverage>("/api/coverage/grids", { query }),
+  beats: (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
+    request<ApiBeatCoverage>("/api/coverage/beats", { query }),
   rangers: (query: { rangeId?: string; beatId?: string; from?: string; to?: string } = {}) =>
     request<ApiRangerCoverage>("/api/coverage/rangers", { query }),
 };

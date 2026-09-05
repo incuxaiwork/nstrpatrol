@@ -63,6 +63,7 @@ export function lngLatToSvg(lng: number, lat: number): { x: number; y: number } 
 
 /** "x,y x,y …" SVG polygon string → [lon, lat][] ring. */
 export function svgRingToLngLat(points: string): [number, number][] {
+  if (typeof points !== "string" || !points.trim()) return [];
   return points
     .trim()
     .split(/\s+/)
@@ -359,19 +360,28 @@ export function routeToTimed(r: GisRoute): TimedPoint[] {
 }
 
 /**
- * Playback geometry at `progress` (0..1) — trail polyline, head point, and the
- * GPS dots played so far. `dots` holds only the points up to the current
- * playhead so the replayed patrol's markers animate in alongside the trail
- * instead of flashing every fix at once.
+ * Playback geometry at `progress` (0..1) — base trail (full path in blue),
+ * progress trail (played portion in red), head point, and the GPS dots played
+ * so far. `dots` holds only the points up to the current playhead so the
+ * replayed patrol's markers animate in alongside the trail instead of flashing
+ * every fix at once.
  */
 export function replayFeatures(
   timed: TimedPoint[],
   progress: number
-): { trail: GeoFeatureCollection; head: GeoFeatureCollection; dots: GeoFeatureCollection } {
+): { baseTrail: GeoFeatureCollection; trail: GeoFeatureCollection; head: GeoFeatureCollection; dots: GeoFeatureCollection } {
+  const allPoints = timed.map((p) => [p.lon, p.lat] as [number, number]);
   const shown = timed.slice(0, Math.floor(progress * Math.max(timed.length - 1, 0)) + 1);
   const points = shown.map((p) => [p.lon, p.lat] as [number, number]);
   const last = points[points.length - 1];
   return {
+    baseTrail: {
+      type: "FeatureCollection",
+      features:
+        allPoints.length >= 2
+          ? [{ type: "Feature", properties: {}, geometry: { type: "LineString", coordinates: allPoints } }]
+          : [],
+    },
     trail: {
       type: "FeatureCollection",
       features:

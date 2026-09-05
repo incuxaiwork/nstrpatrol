@@ -23,7 +23,7 @@ import { JurisdictionBanner } from "@/components/jurisdiction";
 import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
-import { patrolTypeLabels } from "@/lib/mock/patrols";
+import { patrolTypeLabels, patrolMethodLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
 import { formatDateTime, formatMinutes, formatKm, geoLabel } from "@/lib/utils";
 import type { PatrolEvent } from "@/lib/types";
@@ -68,12 +68,6 @@ export default function PatrolDetailPage() {
           <>
             <Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>
             <ReportButton onClick={() => setReportOpen(true)} />
-            <Link
-              href={`/patrols/${patrol.id}/replay`}
-              className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
-            >
-              <Icon name="play" size={14} /> Replay
-            </Link>
           </>
         }
       />
@@ -92,7 +86,8 @@ export default function PatrolDetailPage() {
           items={[
             { label: "Distance", value: patrol.distanceKm != null ? formatKm(patrol.distanceKm) : "—" },
             { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
-            { label: "Checkpoints", value: patrol.checkpoints ?? "Not available" },
+            { label: "Method", value: patrol.method ? (patrolMethodLabels[patrol.method] ?? patrol.method) : "—" },
+            { label: "Steps", value: patrol.steps != null ? patrol.steps.toLocaleString() : "—" },
             { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },
             { label: "Observations", value: patrol.observations },
             { label: "Photos", value: patrol.photos },
@@ -146,20 +141,6 @@ export default function PatrolDetailPage() {
         </div>
 
         <div className="space-y-4">
-          <Card>
-            <CardHeader title="Details" icon="info" />
-            <dl className="space-y-2.5 p-4 text-sm">
-              <DetailRow label="Division" value={patrol.division || "Unknown"} />
-              <DetailRow label="Range" value={patrol.range || "Unknown"} />
-              <DetailRow label="Beat" value={patrol.beat || "Unassigned"} />
-              <DetailRow label="Team" value={patrol.teamId || "—"} />
-              <DetailRow label="Objective" value={patrol.objective || "—"} />
-              <DetailRow label="Scheduled" value={formatDateTime(patrol.startScheduled)} />
-              {patrol.startActual && <DetailRow label="Started" value={formatDateTime(patrol.startActual)} />}
-              {patrol.endScheduled && <DetailRow label="Due by" value={formatDateTime(patrol.endScheduled)} />}
-              {patrol.endActual && <DetailRow label="Completed" value={formatDateTime(patrol.endActual)} />}
-            </dl>
-          </Card>
 
           {auth && (
             <Card>
@@ -192,6 +173,48 @@ export default function PatrolDetailPage() {
             </div>
           </Card>
 
+          {/* Movement — start/end, idle/rest, actual moving time, status */}
+          <Card>
+            <CardHeader
+              title="Movement"
+              icon="activity"
+              subtitle={patrol.method ? patrolMethodLabels[patrol.method] ?? patrol.method : "Unknown method"}
+            />
+            <dl className="space-y-2.5 p-4 text-sm">
+              <DetailRow label="Start time" value={formatDateTime(patrol.startActual ?? patrol.startScheduled)} />
+              <DetailRow label="End time" value={patrol.endActual ? formatDateTime(patrol.endActual) : patrol.status === "ongoing" ? "Ongoing" : "—"} />
+              {(() => {
+                const modes = patrol.modes ?? [];
+                let idleSec = modes.filter((m) => ["STILL", "STATIONARY", "UNKNOWN"].includes(m.mode.toUpperCase())).reduce((a, m) => a + m.seconds, 0);
+                // Fallback: if no mode breakdown but we have moveMinutes vs total, derive idle
+                if (idleSec === 0 && patrol.moveMinutes != null && patrol.durationMin > 0) {
+                  idleSec = Math.max(0, (patrol.durationMin - patrol.moveMinutes) * 60);
+                }
+                const idleMin = Math.round(idleSec / 60);
+                const totalMin = patrol.durationMin;
+                const movingMin = patrol.moveMinutes ?? (idleSec > 0 ? Math.max(0, totalMin - idleMin) : totalMin);
+                return (
+                  <>
+                    <DetailRow label="Idle / rest time" value={idleMin > 0 ? formatMinutes(idleMin) : patrol.durationMin > 0 && patrol.moveMinutes === 0 ? formatMinutes(patrol.durationMin) : "—"} />
+                    <DetailRow label="Actual moving time" value={movingMin > 0 ? formatMinutes(movingMin) : totalMin > 0 ? formatMinutes(totalMin) : "—"} />
+                  </>
+                );
+              })()}
+              <DetailRow label="Status" value={<Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>} />
+              <DetailRow label="Method" value={patrol.method ? (patrolMethodLabels[patrol.method] ?? patrol.method) : "—"} />
+              <DetailRow
+                label="Steps"
+                value={
+                  patrol.method === "foot"
+                    ? patrol.steps != null
+                      ? `${patrol.steps.toLocaleString()} steps`
+                      : "Not available — no step sensor data"
+                    : "—  (not a foot patrol)"
+                }
+              />
+            </dl>
+          </Card>
+
           {patrol.notes && (
             <Card>
               <CardHeader title="Notes" icon="file" />
@@ -203,25 +226,37 @@ export default function PatrolDetailPage() {
             <CardHeader
               title="Coverage"
               icon="target"
-              subtitle="ForestGrid cells touched by this patrol (live from the backend)"
+              subtitle="1 km grids in this beat — patrolled vs total (live from backend)"
             />
             <div className="p-4">
-              {patrol.coveragePct == null ? (
+              {!patrol.coverageCells ? (
                 <p className="text-sm text-ink-soft">
                   Coverage unavailable — the backend could not compute it for this patrol.
                 </p>
               ) : (
                 <>
                   <div className="flex items-center justify-between text-sm">
-                    <span className="text-ink-soft">Patrolled cells</span>
-                    <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
+                    <span className="text-ink-soft">Beat coverage</span>
+                    <span className="font-mono text-sm font-semibold text-ink">
+                      {patrol.coverageCells.patrolled} / {patrol.coverageCells.total} grids
+                      {patrol.coveragePct != null && (
+                        <span className="ml-2 text-xs font-normal text-ink-soft">({patrol.coveragePct}%)</span>
+                      )}
+                    </span>
                   </div>
-                  <div className="mt-2">
-                    <Progress
-                      value={patrol.coveragePct}
-                      tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
-                    />
-                  </div>
+                  <p className="mt-1 text-xs text-ink-soft">
+                    {patrol.coveragePct == null
+                      ? `This patrol touched ${patrol.coverageCells.patrolled} grid(s) — spatial coverage % unavailable (PostGIS).`
+                      : `This patrol touched ${patrol.coverageCells.patrolled} of the beat’s ${patrol.coverageCells.total} × 1 km grids.`}
+                  </p>
+                  {patrol.coveragePct != null && (
+                    <div className="mt-3">
+                      <Progress
+                        value={patrol.coveragePct}
+                        tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
+                      />
+                    </div>
+                  )}
                 </>
               )}
             </div>

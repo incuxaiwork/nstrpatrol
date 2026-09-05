@@ -14,6 +14,7 @@ import type {
   PatrolEvent,
   PatrolMethod,
   PatrolStatus,
+  PatrolViolation,
   NotificationItem,
   Ranger,
 } from "@/lib/types";
@@ -471,9 +472,18 @@ const patrolStatusMap: Record<string, PatrolStatus> = {
 
 const patrolMethodMap: Record<string, PatrolMethod> = {
   WALK: "foot",
-  BICYCLE: "cycle",
-  VEHICLE: "four-wheeler",
+  FOOT: "foot",
+  STILL: "foot",
   STATIONARY: "foot",
+  UNKNOWN: "foot",
+  BICYCLE: "cycle",
+  CYCLE: "cycle",
+  VEHICLE: "four-wheeler",
+  CAR: "four-wheeler",
+  BIKE: "cycle",
+  IN_VEHICLE: "four-wheeler",
+  ON_BICYCLE: "cycle",
+  ON_FOOT: "foot",
 };
 
 export function patrolFromApi(
@@ -489,6 +499,10 @@ export function patrolFromApi(
     beat?: string | null;
     forest?: { code?: string } | null;
     user?: { fullName?: string } | null;
+    detectedMethod?: string | null;
+    patrolMethod?: string | null;
+    totalSteps?: number | null;
+    avgSpeedKmh?: number | null;
     geography?: {
       beatId: string | null;
       beat: string | null;
@@ -498,7 +512,8 @@ export function patrolFromApi(
       subDivisionId: string | null;
       division: string | null;
     } | null;
-    stats?: { points?: number; distanceKm?: number | null; durationSeconds?: number };
+    stats?: { points?: number; distanceKm?: number | null; durationSeconds?: number; steps?: number; moveMinutes?: number; modes?: { mode: string; seconds: number }[] };
+    modes?: { mode: string; seconds: number }[];
   },
   points: { lat: number; lng: number; t?: string | null }[] = [],
   patrolIncidents: { patrolId?: string | null; photos?: string[] }[] = []
@@ -507,8 +522,71 @@ export function patrolFromApi(
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
   const timeline: PatrolEvent[] = [];
-  if (firstPoint?.t) timeline.push({ time: firstPoint.t, kind: "start", label: "Patrol started" });
-  if (lastPoint?.t) timeline.push({ time: lastPoint.t, kind: "end", label: "Patrol ended" });
+  // Start
+  const startIso = firstPoint?.t ?? p.startedAt ?? p.createdAt ?? null;
+  if (startIso) timeline.push({ time: startIso, kind: "start", label: "Patrol started" });
+  // Rest periods from activity modes (STILL/STATIONARY)
+  const modes = (p.stats?.modes as { mode: string; seconds: number }[] | undefined) ?? (p as { modes?: { mode: string; seconds: number }[] }).modes;
+  if (modes) {
+    // We don't have per-segment start times here, only aggregated seconds per mode.
+    // For a richer timeline we would need the raw segments, but we can at least
+    // surface a single rest entry when idle time > 2 min.
+    const idleSec = modes.filter((m) => ["STILL", "STATIONARY", "UNKNOWN"].includes(m.mode.toUpperCase())).reduce((a, m) => a + m.seconds, 0);
+    if (idleSec > 120) {
+      // Place the rest marker mid-patrol for ordering
+      const midMs = startIso ? new Date(startIso).getTime() + (new Date(lastPoint?.t ?? p.endedAt ?? startIso).getTime() - new Date(startIso).getTime()) / 2 : null;
+      if (midMs) timeline.push({ time: new Date(midMs).toISOString(), kind: "checkpoint", label: `Rest period — ${Math.round(idleSec / 60)} min idle` });
+    }
+  }
+  // Incidents in chronological order
+  for (const inc of mine as unknown as { patrolId?: string | null; occurredAt?: string; reportedAt?: string; title?: string; type?: string }[]) {
+    const t = (inc as { occurredAt?: string }).occurredAt ?? (inc as { reportedAt?: string }).reportedAt;
+    if (!t) continue;
+    const label = (inc as { title?: string }).title ? `Incident noted — ${(inc as { title?: string }).title}` : "Incident noted";
+    timeline.push({ time: t, kind: "incident", label });
+  }
+  // Also handle generic patrolIncidents that are already Observation-shaped (from list)
+  // End
+  const endIso = lastPoint?.t ?? p.endedAt ?? null;
+  if (endIso) timeline.push({ time: endIso, kind: "end", label: "Patrol ended" });
+  // Sort chronologically
+  timeline.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+  // Violations — method mismatch and speed
+  const violations: PatrolViolation[] = [];
+  const selectedMethod = p.patrolMethod ?? p.type ?? null;
+  const detected = p.detectedMethod ?? (p as { detectedMethod?: string | null }).detectedMethod ?? null;
+  // Method mismatch: user selected foot but device detected vehicle/bicycle
+  if (selectedMethod && detected) {
+    const sel = selectedMethod.toUpperCase();
+    const det = detected.toUpperCase();
+    const isFootSel = sel === "WALK" || sel === "FOOT" || sel === "STATIONARY";
+    const isVehicleDet = ["VEHICLE", "IN_VEHICLE", "BICYCLE", "ON_BICYCLE", "CAR", "BIKE"].includes(det);
+    if (isFootSel && isVehicleDet) {
+      violations.push({
+        time: startIso ?? new Date().toISOString(),
+        type: "method_mismatch",
+        message: `Method mismatch — selected Foot but detected ${det}`,
+        details: `Selected: ${selectedMethod}, Detected: ${detected}`,
+      });
+    }
+  }
+  // Speed violation — foot should be < 8 km/h, bicycle < 25, vehicle < 80
+  const avgSpeed = (p as { avgSpeedKmh?: number | null }).avgSpeedKmh ?? null;
+  if (avgSpeed != null && Number.isFinite(avgSpeed)) {
+    const sel = (selectedMethod ?? "").toUpperCase();
+    let limit = 80;
+    if (sel === "WALK" || sel === "FOOT") limit = 8;
+    else if (sel === "BICYCLE") limit = 25;
+    if (avgSpeed > limit) {
+      violations.push({
+        time: endIso ?? startIso ?? new Date().toISOString(),
+        type: "speed",
+        message: `Speed violation — ${avgSpeed.toFixed(1)} km/h exceeds ${limit} km/h for ${selectedMethod ?? "patrol"}`,
+        details: `Avg speed ${avgSpeed} km/h`,
+      });
+    }
+  }
   return {
     id: p.id,
     code: `PT-${p.id.slice(-6).toUpperCase()}`,
@@ -517,7 +595,12 @@ export function patrolFromApi(
     // ("—" / "Unavailable" in the UI). The device's movement mode is mapped
     // separately into `method`.
     type: undefined,
-    method: p.type ? patrolMethodMap[p.type] ?? undefined : undefined,
+    method: (() => {
+      // Prefer the device-detected latest mode (most accurate), then the
+      // declared patrolMethod, then the legacy type enum.
+      const src = p.detectedMethod ?? p.patrolMethod ?? p.type;
+      return src ? patrolMethodMap[src] ?? undefined : undefined;
+    })(),
     status: (p.status ? patrolStatusMap[p.status] : undefined) ?? "ongoing",
     objective: p.description ?? "",
     // Authoritative server-resolved geography only. Unresolved levels stay
@@ -563,6 +646,10 @@ export function patrolFromApi(
       }
       return 0;
     })(),
+    steps: p.stats?.steps ?? p.totalSteps ?? null,
+    moveMinutes: p.stats?.moveMinutes ?? null,
+    detectedMethod: p.detectedMethod ?? p.patrolMethod ?? p.type ?? null,
+    modes: p.stats?.modes ?? (p as { modes?: { mode: string; seconds: number }[] }).modes ?? undefined,
     // Real coverage arrives only via GET /api/patrols/:id/coverage/summary on
     // the DETAIL view (services.patrols.get merges it); lists never carry it.
     checkpoints: undefined,
@@ -571,6 +658,7 @@ export function patrolFromApi(
     photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
     route: points.map((pt) => ({ lat: pt.lat, lng: pt.lng })),
     timeline,
+    violations: violations.length > 0 ? violations : undefined,
   };
 }
 

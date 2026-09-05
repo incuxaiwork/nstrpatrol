@@ -100,7 +100,7 @@ export default function PatrolsPage() {
       }
       return [];
     }
-    // No range selected — show all beats
+    // No range selected — show all beats (deduplicate: e.g. Nagulavaram exists in V.P. South and Markapur)
     const allBeats: string[] = [];
     for (const div of tree.divisions) {
       const ranges = tree.ranges[div.id] ?? [];
@@ -109,7 +109,7 @@ export default function PatrolsPage() {
         for (const b of beats) allBeats.push(b.name);
       }
     }
-    return allBeats.sort();
+    return [...new Set(allBeats)].sort();
   }, [hierarchyData.data, range]);
 
   /* ── Clear stale beat if no longer in filtered set ── */
@@ -345,7 +345,7 @@ export default function PatrolsPage() {
             {
               key: "observations", header: "Obs.",
               sortValue: (r) => r.observations,
-              render: (r) => <span className="text-ink-soft">{r.observations > 0 ? r.observations : "—"}</span>,
+              render: (r) => <span className={r.observations > 0 ? "font-medium text-ink" : "text-ink-soft"}>{r.observations}</span>,
             },
             {
               key: "status", header: "Status",

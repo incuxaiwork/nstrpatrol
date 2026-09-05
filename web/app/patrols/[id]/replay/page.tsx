@@ -35,6 +35,7 @@ export default function PatrolReplayPage() {
   const [playback, setPlayback] = useState(0);
   const [seek, setSeek] = useState<{ key: number; value: number } | null>(null);
   const seekKey = useRef(1);
+  const handleProgress = useCallback((p: number) => setPlayback(p), []);
 
   const events = useMemo(() => {
     if (!patrol) return [];
@@ -119,7 +120,7 @@ export default function PatrolReplayPage() {
                   compartments={spatial.data.compartments}
                   boundary={spatial.data.boundary}
                   layerState={{ ...DEFAULT_LAYER_STATE, routes: true }}
-                  onProgress={(p) => setPlayback(p)}
+                  onProgress={handleProgress}
                   seekSignal={seek}
                   onSelect={() => undefined}
                 />

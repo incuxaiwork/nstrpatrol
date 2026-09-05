@@ -270,11 +270,14 @@ boundary: ["gl-boundary-line"],
     "gl-routes-endpoints",
     "gl-live-path-case",
     "gl-live-path",
+    "gl-replay-base-case",
+    "gl-replay-base",
     "gl-replay-case",
     "gl-replay-trail",
     "gl-replay-dots",
     "gl-replay-head-halo",
     "gl-replay-head",
+    "gl-replay-person",
   ],
   rangers: [
     "gl-markers-ranger",
@@ -305,7 +308,9 @@ const BASEMAP_LAYER_IDS: Record<BasemapKey, string> = {
 };
 
 /** Layers whose visibility is constrained by the Range → Beat → Compartment
- *  region filter (division is fixed context, never filtered). */
+ *  region filter (division is fixed context, never filtered). Analysis grid
+ *  is NOT filtered — it always covers the whole forest so sharp range/beat
+ *  cuttings stay fully gridded when the map is narrowed. */
 const REGION_FILTERED_LAYERS = [
   "gl-beats-fill",
   "gl-beats-outline",
@@ -320,11 +325,6 @@ const REGION_FILTERED_LAYERS = [
   "gl-ranges-outline",
   "gl-ranges-fill",
   "gl-ranges-label",
-  "gl-agrid-fill",
-  "gl-agrid-line",
-  "gl-agrid-label",
-  "gl-agrid-sel-fill",
-  "gl-agrid-sel-line",
 ];
 
 function buildLayers(m: MapLibreMap) {
@@ -334,6 +334,7 @@ function buildLayers(m: MapLibreMap) {
     "routes",
     "route-endpoints",
     "heat",
+    "replay-base",
     "replay-trail",
     "replay-head",
     "replay-points",
@@ -372,9 +373,7 @@ function buildLayers(m: MapLibreMap) {
     });
   }
 
-  // 2. Per-beat coverage tint (green ramp where a beat carries a coverage
-  //    figure). It is a COVERAGE visualization and follows the Coverage
-  //    checkbox — Beat ON alone shows boundaries only.
+  // 2. Per-beat coverage tint — transparent per user request (forest as basemap, no fill)
   m.addLayer({
     id: "gl-beats-coverage",
     type: "fill",
@@ -382,15 +381,7 @@ function buildLayers(m: MapLibreMap) {
     filter: ["!=", ["get", "coveragePct"], null],
     paint: {
       "fill-color": "#2E7D32",
-      "fill-opacity": [
-        "interpolate",
-        ["linear"],
-        ["get", "coveragePct"],
-        0,
-        0.05,
-        100,
-        0.3,
-      ],
+      "fill-opacity": 0,
     },
   });
 
@@ -411,7 +402,7 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-compartments-fill",
     type: "fill",
     source: "compartments",
-    paint: { "fill-color": "#E65100", "fill-opacity": 0.02 },
+    paint: { "fill-color": "#E65100", "fill-opacity": 0 },
   });
   m.addLayer({
     id: "gl-compartments-line",
@@ -461,14 +452,14 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-beats-fill",
     type: "fill",
     source: "beats",
-    paint: { "fill-color": "#1E4620", "fill-opacity": 0.02 },
+    paint: { "fill-color": "#1E4620", "fill-opacity": 0 },
   });
   m.addLayer({
     id: "gl-auth-fill",
     type: "fill",
     source: "beats",
     filter: ["==", ["get", "isAuth"], true],
-    paint: { "fill-color": "#B07D12", "fill-opacity": 0.08 },
+    paint: { "fill-color": "#B07D12", "fill-opacity": 0 },
   });
   m.addLayer({
     id: "gl-auth-line",
@@ -546,7 +537,7 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-ranges-fill",
     type: "fill",
     source: "ranges",
-    paint: { "fill-color": "#FF1493", "fill-opacity": 0.02 },
+    paint: { "fill-color": "#FF1493", "fill-opacity": 0 },
   });
   m.addLayer({
     id: "gl-ranges-outline",
@@ -616,7 +607,7 @@ function buildLayers(m: MapLibreMap) {
     source: "analysis-grid",
     paint: {
       "fill-color": "#8a8f98",
-      "fill-opacity": 0.07,
+      "fill-opacity": 0,
     },
   });
   m.addLayer({
@@ -683,6 +674,22 @@ function buildLayers(m: MapLibreMap) {
       "circle-stroke-width": 2,
     },
   });
+  // Base patrol path — static blue line (always visible, full route)
+  m.addLayer({
+    id: "gl-replay-base-case",
+    type: "line",
+    source: "replay-base",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#FFFFFF", "line-width": 9, "line-opacity": 0.9 },
+  });
+  m.addLayer({
+    id: "gl-replay-base",
+    type: "line",
+    source: "replay-base",
+    layout: { "line-cap": "round", "line-join": "round" },
+    paint: { "line-color": "#2E7BF6", "line-width": 5, "line-opacity": 0.95 },
+  });
+  // Played portion — red line that grows with progress
   m.addLayer({
     id: "gl-replay-case",
     type: "line",
@@ -695,7 +702,7 @@ function buildLayers(m: MapLibreMap) {
     type: "line",
     source: "replay-trail",
     layout: { "line-cap": "round", "line-join": "round" },
-    paint: { "line-color": "#2E7BF6", "line-width": 5, "line-opacity": 0.95 },
+    paint: { "line-color": "#B3261E", "line-width": 5, "line-opacity": 0.95 },
   });
   m.addLayer({
     id: "gl-replay-dots",
@@ -703,7 +710,7 @@ function buildLayers(m: MapLibreMap) {
     source: "replay-points",
     paint: {
       "circle-radius": 5,
-      "circle-color": "#2E7BF6",
+      "circle-color": "#B3261E",
       "circle-stroke-color": "#ffffff",
       "circle-stroke-width": 2,
     },
@@ -712,7 +719,7 @@ function buildLayers(m: MapLibreMap) {
     id: "gl-replay-head-halo",
     type: "circle",
     source: "replay-head",
-    paint: { "circle-radius": 16, "circle-color": "#2E7BF6", "circle-opacity": 0.33 },
+    paint: { "circle-radius": 16, "circle-color": "#B3261E", "circle-opacity": 0.33 },
   });
   m.addLayer({
     id: "gl-replay-head",
@@ -720,9 +727,27 @@ function buildLayers(m: MapLibreMap) {
     source: "replay-head",
     paint: {
       "circle-radius": 7,
-      "circle-color": "#2E7BF6",
+      "circle-color": "#B3261E",
       "circle-stroke-color": "#fff",
       "circle-stroke-width": 2.5,
+    },
+  });
+  // Person icon moving with the patrol — symbol layer on top of the red head
+  m.addLayer({
+    id: "gl-replay-person",
+    type: "symbol",
+    source: "replay-head",
+    layout: {
+      "text-field": "🚶",
+      "text-size": 18,
+      "text-allow-overlap": true,
+      "text-ignore-placement": true,
+      "text-anchor": "center",
+    },
+    paint: {
+      "text-color": "#B3261E",
+      "text-halo-color": "#ffffff",
+      "text-halo-width": 1.5,
     },
   });
 
@@ -848,7 +873,7 @@ function buildLayers(m: MapLibreMap) {
     type: "fill",
     source: "analysis-grid",
     filter: ["==", ["get", "selected"], true],
-    paint: { "fill-color": "#0E4C92", "fill-opacity": 0.22 },
+    paint: { "fill-color": "#0E4C92", "fill-opacity": 0 },
   });
   m.addLayer({
     id: "gl-agrid-sel-line",
@@ -1198,17 +1223,23 @@ export function MapWorkspace({
   const ranges = useMemo(() => rangesFromBeats(beats), [beats]);
 
   const [prevSeek, setPrevSeek] = useState(seekSignal);
-  if (prevSeek !== seekSignal && seekSignal) {
-    setPrevSeek(seekSignal);
-    setProgress(seekSignal.value);
-    setReplayOn(false);
-    onProgress?.(seekSignal.value);
-  }
+  const onProgressRef = useRef(onProgress);
+  useEffect(() => { onProgressRef.current = onProgress; }, [onProgress]);
+  useEffect(() => {
+    if (seekSignal && seekSignal !== prevSeek) {
+      setPrevSeek(seekSignal);
+      setProgress(seekSignal.value);
+      setReplayOn(false);
+      queueMicrotask(() => onProgressRef.current?.(seekSignal.value));
+    }
+  }, [seekSignal, prevSeek]);
   const [prevPatrol, setPrevPatrol] = useState(replayPatrolId);
-  if (prevPatrol !== replayPatrolId) {
-    setPrevPatrol(replayPatrolId);
-    setProgress(0);
-  }
+  useEffect(() => {
+    if (prevPatrol !== replayPatrolId) {
+      setPrevPatrol(replayPatrolId);
+      setProgress(0);
+    }
+  }, [replayPatrolId, prevPatrol]);
 
   // Track the browser fullscreen state on the map wrapper.
   useEffect(() => {
@@ -1826,35 +1857,40 @@ export function MapWorkspace({
     return undefined;
   }, [replayPatrolId, replayPoints, routes]);
 
-  // Replay playback loop.
+  // Replay playback loop — parent updates are deferred to avoid
+  // "Cannot update a component while rendering a different component".
   useEffect(() => {
     if (!replayOn || !replayRoute || replayRoute.timed.length < 2) return;
     const id = setInterval(() => {
       setProgress((p) => {
         if (p >= 1) {
-          setReplayOn(false);
-          onProgress?.(1);
+          queueMicrotask(() => {
+            setReplayOn(false);
+            onProgressRef.current?.(1);
+          });
           return 1;
         }
         const next = Math.min(1, p + 0.01 * replaySpeed);
-        onProgress?.(next);
+        queueMicrotask(() => onProgressRef.current?.(next));
         return next;
       });
     }, 60);
     return () => clearInterval(id);
-  }, [replayOn, replaySpeed, replayRoute, onProgress]);
+  }, [replayOn, replaySpeed, replayRoute]);
 
-  // Replay geometry + route filtering.
+  // Replay geometry + route filtering — base (blue) always full, trail (red) grows with progress, head is person.
   useEffect(() => {
     if (!ready) return;
     const m = mapRef.current!;
     if (replayRoute) {
-      const { trail, head, dots } = replayFeatures(replayRoute.timed, progress);
+      const { baseTrail, trail, head, dots } = replayFeatures(replayRoute.timed, progress);
+      setSourceData(m, "replay-base", baseTrail);
       setSourceData(m, "replay-trail", trail);
       setSourceData(m, "replay-head", head);
       setSourceData(m, "replay-points", dots);
       m.setFilter("gl-routes", ["==", "patrolId", replayRoute.patrolId]);
     } else {
+      setSourceData(m, "replay-base", emptyFc());
       setSourceData(m, "replay-trail", emptyFc());
       setSourceData(m, "replay-head", emptyFc());
       setSourceData(m, "replay-points", emptyFc());
@@ -1967,21 +2003,24 @@ export function MapWorkspace({
             onClick={() => {
               const m = mapRef.current;
               if (!m) return;
-              m.easeTo({ bearing: 0, pitch: 0, duration: 800 });
+              // Reset north only — keep current center/zoom/pitch
+              m.easeTo({ bearing: 0, pitch: 0, duration: 700 });
             }}
           />
-          <MapFloatButton
-            label="Recenter division"
-            icon="locate"
-            onClick={() => {
-              const m = mapRef.current;
-              if (!m) return;
-              const target = replayPoints && replayPoints.length > 0
-                ? [replayPoints[replayPoints.length - 1].lng, replayPoints[replayPoints.length - 1].lat] as [number, number]
-                : DIVISION_CENTER;
-              m.easeTo({ center: target, zoom: 12.8, duration: 1000 });
-            }}
-          />
+          {mode !== "focus" && (
+            <MapFloatButton
+              label="Recenter division"
+              icon="locate"
+              onClick={() => {
+                const m = mapRef.current;
+                if (!m) return;
+                const target = replayPoints && replayPoints.length > 0
+                  ? [replayPoints[replayPoints.length - 1].lng, replayPoints[replayPoints.length - 1].lat] as [number, number]
+                  : DIVISION_CENTER;
+                m.easeTo({ center: target, zoom: 12.8, duration: 1000 });
+              }}
+            />
+          )}
           <MapFloatButton
             label={isFull ? "Exit fullscreen" : "Full screen"}
             icon={isFull ? "minimize" : "maximize"}
@@ -2086,8 +2125,8 @@ export function MapWorkspace({
           </div>
         )}
 
-        {/* replay controls — only when a patrol is selected */}
-        {replayRoute && layerState.routes && (
+        {/* replay controls — always in focus (patrol detail) even if routes layer off */}
+        {(replayRoute && (mode === "focus" || layerState.routes)) && (
           <div className="absolute bottom-3 left-1/2 z-10 flex w-[min(560px,90%)] -translate-x-1/2 items-center gap-3 rounded-lg border border-line bg-white/95 px-3 py-2 shadow-pop">
             <button
               onClick={() => setReplayOn((v) => !v)}
@@ -2149,7 +2188,8 @@ function activeLegendRows(s: ForestLayerState): { color: string; label: string; 
   if (s.routes) {
     rows.push({ color: "#FF8F00", label: "Live patrol route (active patrol)" });
     rows.push({ color: "#2E7D32", label: "Patrol route" });
-    rows.push({ color: "#2E7BF6", label: "Replay track", isPoint: false });
+    rows.push({ color: "#2E7BF6", label: "Replay base (full path — blue)", isPoint: false });
+    rows.push({ color: "#B3261E", label: "Replay played (red) + person", isPoint: false });
   }
   if (s.rangers) {
     rows.push({ color: "#FF8F00", label: "Ranger position — live GPS", isPoint: true });

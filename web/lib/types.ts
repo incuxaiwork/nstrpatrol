@@ -132,6 +132,13 @@ export interface RangerRef {
   name: string;
 }
 
+export interface PatrolViolation {
+  time: string;
+  type: "method_mismatch" | "speed" | "coverage" | "tamper" | "mock";
+  message: string;
+  details?: string;
+}
+
 export interface Patrol {
   id: string;
   code: string;
@@ -161,8 +168,14 @@ export interface Patrol {
   endActual?: string;
   distanceKm: number | null;
   durationMin: number;
+  /** Step count from device step counter (foot patrols) — null when unavailable, 0 is genuine zero. */
+  steps?: number | null;
+  moveMinutes?: number | null;
+  detectedMethod?: string | null;
+  modes?: { mode: string; seconds: number }[];
   /** Real ForestGrid coverage (patrol detail only). null = PostGIS unavailable; absent = no data. */
   coveragePct?: number | null;
+  coverageCells?: { patrolled: number; total: number } | null;
   /** No checkpoint entity/API exists — undefined from real data, never 0. */
   checkpoints?: number;
   incidents: number;
@@ -171,6 +184,7 @@ export interface Patrol {
   notes?: string;
   route: { lat: number; lng: number }[];
   timeline: PatrolEvent[];
+  violations?: PatrolViolation[];
   templateId?: string;
 }
 

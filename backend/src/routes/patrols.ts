@@ -59,14 +59,59 @@ export interface PatrolGeography {
 type GeographyCore = Omit<PatrolGeography, 'beat' | 'division'>;
 
 async function resolvePatrolGeographyIndex(
-  patrols: { beat: string | null }[],
-): Promise<Map<string, GeographyCore>> {
+  patrols: { id: string; beat: string | null; userId: string }[],
+): Promise<{ index: Map<string, GeographyCore>; patrolIdToBeatName: Map<string, string>; patrolIdToRangeId: Map<string, string> }> {
   const index = new Map<string, GeographyCore>();
-  const names = [...new Set(patrols.map((p) => p.beat).filter((b): b is string => Boolean(b)))];
-  if (names.length === 0) return index;
+  const patrolIdToBeatName = new Map<string, string>();
+  const patrolIdToRangeId = new Map<string, string>();
+  // Collect beat names from patrols that have them
+  const beatNames = [...new Set(patrols.map((p) => p.beat).filter((b): b is string => Boolean(b)))];
+  // For patrols with no beat, fall back to the ranger's assigned beat/range
+  const patrolsNeedingUserBeat = patrols.filter((p) => !p.beat);
+  if (patrolsNeedingUserBeat.length > 0) {
+    const userIds = [...new Set(patrolsNeedingUserBeat.map((p) => p.userId))];
+    const users = await prisma.user.findMany({
+      where: { id: { in: userIds } },
+      select: { id: true, beatId: true, rangeId: true },
+    });
+    const beatIds = [...new Set(users.map((u) => u.beatId).filter((b): b is string => Boolean(b)))];
+    const rangeIdsFromUsers = [...new Set(users.map((u) => u.rangeId).filter((r): r is string => Boolean(r)))];
+    // Also collect range names for those rangeIds to ensure they're in the index
+    let rangeNamesFromIds: string[] = [];
+    if (rangeIdsFromUsers.length > 0) {
+      const rangesFromUsers = await prisma.range.findMany({
+        where: { id: { in: rangeIdsFromUsers } },
+        select: { id: true, name: true },
+      });
+      rangeNamesFromIds = rangesFromUsers.map((r) => r.name);
+      for (const n of rangeNamesFromIds) if (!beatNames.includes(n)) beatNames.push(n);
+      // Map userId -> rangeId for fallback
+      const userIdToRangeId = new Map(users.map((u) => [u.id, u.rangeId ?? null]));
+      for (const p of patrolsNeedingUserBeat) {
+        const rid = userIdToRangeId.get(p.userId);
+        if (rid) patrolIdToRangeId.set(p.id, rid);
+      }
+    }
+    if (beatIds.length > 0) {
+      const userBeats = await prisma.beat.findMany({
+        where: { id: { in: beatIds } },
+        select: { id: true, name: true, rangeName: true },
+      });
+      const beatIdToName = new Map(userBeats.map((b) => [b.id, b.name]));
+      const userIdToBeatName = new Map(users.map((u) => [u.id, u.beatId ? beatIdToName.get(u.beatId) ?? null : null]));
+      for (const p of patrolsNeedingUserBeat) {
+        const name = userIdToBeatName.get(p.userId);
+        if (name) {
+          if (!beatNames.includes(name)) beatNames.push(name);
+          patrolIdToBeatName.set(p.id, name);
+        }
+      }
+    }
+  }
+  if (beatNames.length === 0) return { index, patrolIdToBeatName, patrolIdToRangeId };
 
   const beats = await prisma.beat.findMany({
-    where: { name: { in: names } },
+    where: { name: { in: beatNames } },
     select: { id: true, name: true, rangeName: true },
   });
   const rangeNames = [...new Set(beats.map((b) => b.rangeName).filter((r): r is string => Boolean(r)))];
@@ -94,21 +139,80 @@ async function resolvePatrolGeographyIndex(
       subDivision: subdivision?.name ?? null,
     });
   }
-  return index;
+  return { index, patrolIdToBeatName, patrolIdToRangeId };
 }
 
 function geographyFor(
-  patrol: { beat: string | null },
+  patrol: { id: string; beat: string | null; userId: string },
   index: Map<string, GeographyCore>,
+  patrolIdToBeatName?: Map<string, string>,
+  patrolIdToRangeId?: Map<string, string>,
 ): PatrolGeography {
-  const core = patrol.beat ? index.get(patrol.beat) : undefined;
+  // Primary: patrol's own beat
+  let beatName: string | null = patrol.beat ?? null;
+  let core = beatName ? index.get(beatName) : undefined;
+  // Fallback: ranger's assigned beat (for patrols with null beat)
+  if (!core && !beatName && patrolIdToBeatName) {
+    const fallbackName = patrolIdToBeatName.get(patrol.id);
+    if (fallbackName) {
+      beatName = fallbackName;
+      core = index.get(fallbackName);
+    }
+  }
+  // If still no core but we have a fallback rangeId (user has range but no beat), build a minimal core
+  if (!core && patrolIdToRangeId) {
+    const fallbackRangeId = patrolIdToRangeId.get(patrol.id);
+    if (fallbackRangeId) {
+      // Try to find the range name from the index (any beat that has this rangeId)
+      for (const c of index.values()) {
+        if (c.rangeId === fallbackRangeId) {
+          return {
+            beat: beatName,
+            beatId: null,
+            range: c.range,
+            rangeId: fallbackRangeId,
+            subDivision: c.subDivision,
+            subDivisionId: c.subDivisionId,
+            division: DIVISION_PT_MARKAPUR,
+          };
+        }
+      }
+      // Fallback: the index has no beat for this range (e.g., patrol batch has no beats for that range),
+      // so the range name wasn't loaded. Return the rangeId and let the frontend resolve the name
+      // via the hierarchy, or at least show the rangeId. We could also do a direct DB lookup
+      // here, but that would require an async call. For now, return the rangeId with null name
+      // and let the frontend handle it via unitName. The patrol list will at least show the rangeId
+      // which the frontend can map to a display name via the hierarchy.
+      return {
+        beat: beatName,
+        beatId: null,
+        range: null,
+        rangeId: fallbackRangeId,
+        subDivision: null,
+        subDivisionId: null,
+        division: DIVISION_PT_MARKAPUR,
+      };
+    }
+  }
+  // No fallback assumption — if patrol and user have no assignment, return honest nulls
+  if (!core) {
+    return {
+      beat: beatName,
+      beatId: null,
+      range: null,
+      rangeId: null,
+      subDivision: null,
+      subDivisionId: null,
+      division: DIVISION_PT_MARKAPUR,
+    };
+  }
   return {
-    beat: patrol.beat ?? null,
-    beatId: core?.beatId ?? null,
-    range: core?.range ?? null,
-    rangeId: core?.rangeId ?? null,
-    subDivision: core?.subDivision ?? null,
-    subDivisionId: core?.subDivisionId ?? null,
+    beat: beatName,
+    beatId: core.beatId ?? null,
+    range: core.range ?? null,
+    rangeId: core.rangeId ?? null,
+    subDivision: core.subDivision ?? null,
+    subDivisionId: core.subDivisionId ?? null,
     division: DIVISION_PT_MARKAPUR,
   };
 }
@@ -195,19 +299,48 @@ async function loadPatrolStats(
   }
 
   // Timestamp fallback — patrols without GPS points still have device-recorded
-  // startedAt/endedAt which give a legitimate duration estimate. Distance cannot
-  // be derived without coordinates so it stays null.
+  // startedAt/endedAt which give a legitimate duration estimate. For foot
+  // patrols with step counts but no GPS, estimate distance as steps * 0.8m.
+  // Also fixup patrols that have a GPS row but with 0 duration (single point).
+  // For the list, step counts come from totalSteps (pushed by device); if that
+  // is null we also check StepReading aggregates for patrols that only have
+  // sensor rows (e.g. 6014 steps but totalSteps null).
+  let stepMap = new Map<string, number>();
+  try {
+    const stepRows = await prisma.stepReading.groupBy({
+      by: ["patrolId"],
+      where: { patrolId: { in: ids } },
+      _sum: { steps: true },
+    });
+    for (const r of stepRows) if (r._sum.steps) stepMap.set(r.patrolId, Number(r._sum.steps));
+  } catch {}
   if (patrols) {
-    for (const p of patrols) {
-      if (statsMap.has(p.id)) continue;
-      if (p.startedAt && p.endedAt) {
-        const spanMs = new Date(p.endedAt).getTime() - new Date(p.startedAt).getTime();
-        if (spanMs >= 0) {
-          statsMap.set(p.id, {
-            distanceKm: 0,
-            durationSeconds: Math.round(spanMs / 1000),
-          });
+    for (const p of patrols as unknown as { id: string; startedAt: Date | null; endedAt: Date | null; type?: string; patrolMethod?: string | null; totalSteps?: number | null }[]) {
+      const existing = statsMap.get(p.id);
+      const stepsForPatrol = stepMap.get(p.id) ?? (p as { totalSteps?: number | null }).totalSteps ?? 0;
+      const isFoot = p.type === 'WALK' || (p as { patrolMethod?: string | null }).patrolMethod === 'Foot';
+      // If no GPS row, or GPS duration is 0 but patrol has timestamps, use timestamps
+      if (!existing || existing.durationSeconds === 0) {
+        if (p.startedAt) {
+          const endMs = p.endedAt ? new Date(p.endedAt).getTime() : Date.now();
+          const spanMs = endMs - new Date(p.startedAt).getTime();
+          if (spanMs > 0) {
+            const dur = Math.round(spanMs / 1000);
+            if (!existing) {
+              let dist = 0;
+              if (isFoot && stepsForPatrol > 0) dist = Math.round((stepsForPatrol * 0.8 / 1000) * 100) / 100;
+              statsMap.set(p.id, { distanceKm: dist, durationSeconds: dur });
+            } else if (existing.durationSeconds === 0) {
+              existing.durationSeconds = dur;
+              if (existing.distanceKm === 0 && isFoot && stepsForPatrol > 0) {
+                existing.distanceKm = Math.round((stepsForPatrol * 0.8 / 1000) * 100) / 100;
+              }
+            }
+          }
         }
+      } else if (existing && existing.distanceKm === 0 && isFoot && stepsForPatrol > 0) {
+        // GPS distance 0 but foot patrol has steps — estimate
+        existing.distanceKm = Math.round((stepsForPatrol * 0.8 / 1000) * 100) / 100;
       }
     }
   }
@@ -315,7 +448,7 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
   // Batched geography + stats enrichment — run in parallel to avoid
   // sequential DB round-trips (geography ~3 queries, stats ~1-2 queries).
   const ids = patrols.map((p) => p.id);
-  const [geoIndex, statsMap] = await Promise.all([
+  const [geoResult, statsMap] = await Promise.all([
     resolvePatrolGeographyIndex(patrols),
     loadPatrolStats(ids, patrols),
   ]);
@@ -324,7 +457,7 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
     const s = statsMap.get(p.id);
     return {
       ...p,
-      geography: geographyFor(p, geoIndex),
+      geography: geographyFor(p, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId),
       stats: s ?? null,
     };
   }));
@@ -546,6 +679,15 @@ patrolsRouter.get('/:id', async (req, res) => {
     durationSeconds = Math.round(fallback[0]?.durationSeconds ?? 0);
   }
 
+  // Duration fallback — when GPS trace is empty or single-point, use the
+  // patrol's own startedAt/endedAt (device-recorded, not fabricated). For
+  // ACTIVE patrols with no endedAt, use now as the end.
+  if (durationSeconds === 0 && patrol.startedAt) {
+    const endMs = patrol.endedAt ? new Date(patrol.endedAt).getTime() : Date.now();
+    const spanMs = endMs - new Date(patrol.startedAt).getTime();
+    if (spanMs > 0) durationSeconds = Math.round(spanMs / 1000);
+  }
+
   const stepsAgg = await prisma.stepReading.aggregate({
     where: { patrolId: id },
     _sum: { steps: true },
@@ -560,10 +702,17 @@ patrolsRouter.get('/:id', async (req, res) => {
   // activity segment so old data still reports something sensible.
   const detectedMethod = patrol.detectedMethod ?? latestSegment?.mode ?? 'STILL';
 
-  const [geoIndex] = await Promise.all([resolvePatrolGeographyIndex([patrol])]);
+  const [geoResult] = await Promise.all([resolvePatrolGeographyIndex([patrol])]);
   // Steps: sensor readings win; otherwise the device-reported total (new
   // clients push it with create/complete). Never fabricate steps here.
   const steps = stepsAgg._sum.steps ?? patrol.totalSteps ?? 0;
+  // Distance fallback for foot patrols with no GPS trace but with step count
+  // — estimate 0.8m per step (empirical average). Only for WALK/foot, not
+  // vehicle/bicycle where steps are irrelevant.
+  if (distanceKm === 0 && steps > 0) {
+    const isFoot = patrol.type === 'WALK' || patrol.patrolMethod === 'Foot' || detectedMethod === 'WALK' || detectedMethod === 'STILL';
+    if (isFoot) distanceKm = Math.round((steps * 0.8 / 1000) * 100) / 100;
+  }
   // Moving minutes: device-reported when present; else fall back to the whole
   // point-span so multi-mode (vehicle/bike) patrols are not undercounted to
   // walking-only segment sums.
@@ -585,7 +734,7 @@ patrolsRouter.get('/:id', async (req, res) => {
 
   res.json({
     ...patrol,
-    geography: geographyFor(patrol, geoIndex),
+    geography: geographyFor(patrol, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId),
     detectedMethod,
     stats: { points: pointCount, distanceKm, durationSeconds, steps, moveMinutes: movingMinutes, modes },
   });

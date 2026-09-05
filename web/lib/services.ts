@@ -70,7 +70,7 @@ import type {
   Vehicle,
   Weapon,
 } from "@/lib/types";
-import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage, GeoJsonFeatureCollection } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
+import type { ApiAlert, ApiMapAsset, ApiIncident, ApiPatrol, ApiGridCoverage, ApiBeatCoverage, GeoJsonFeatureCollection } from "@/lib/api";import type { BeatPolygon, GisMarker, GisRoute, HeatBlock } from "@/lib/mock/gis";
 import { lngLatToSvg, SVG_MAP_SPACE } from "@/lib/map-space";
 
 /* Mock paths resolve on the next microtask — no artificial latency. */
@@ -162,7 +162,9 @@ export const patrols = (() => {
           api.patrols.coverageSummary(id).catch(() => null),
         ]);
         const patrol = patrolFromApi(p, points, incidents);
-        return coverage ? { ...patrol, coveragePct: coverage.coveragePercent } : patrol;
+        return coverage
+          ? { ...patrol, coveragePct: coverage.coveragePercent, coverageCells: { patrolled: coverage.patrolledCells, total: coverage.totalCells } }
+          : patrol;
       }),
   // API GAP: no status-filtered patrol endpoint beyond the shared list
   // (backend list supports ?status, but no page consumes this yet).
@@ -1024,6 +1026,10 @@ export const gis = {
   // API GAP: heat aggregates (patrol density per beat) are not exposed by the
   // backend — always empty so the UI shows its empty state, never fake heat.
   heat: async (): Promise<HeatBlock[]> => [],
+  /** Per-beat patrol coverage (GET /api/coverage/beats). Backend-scoped;
+   *  authoritative ForestGrid → beat attribution, same semantics as grids. */
+  beatCoverage: async (query: { forestId?: string; rangeId?: string; beatId?: string; from?: string; to?: string } = {}): Promise<ApiBeatCoverage> =>
+    remoteOnly(async () => api.coverage.beats(query)),
   /**
    * Authoritative patrol coverage (GET /api/coverage/grids). Backend-scoped;
    * no mock fallback — failures surface honestly. The API accepts real
