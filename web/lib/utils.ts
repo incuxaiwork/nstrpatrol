@@ -33,24 +33,15 @@ export function formatDate(iso: string): string {
   });
 }
 
-export function formatKm(n: number | null | undefined): string {
-  if (n == null || !Number.isFinite(n) || n < 0) return "—";
-  if (n === 0) return "0 m";
-  if (n < 1) {
-    const m = Math.round(n * 1000);
-    return `${m.toLocaleString("en-IN")} m`;
-  }
+export function formatKm(n: number): string {
   return `${n.toLocaleString("en-IN", { maximumFractionDigits: 1 })} km`;
 }
 
-export function formatMinutes(min: number | null | undefined): string {
-  if (min == null || !Number.isFinite(min) || min <= 0) return "—";
-  const total = Math.round(min);
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  if (h > 0 && m > 0) return `${h} hr${h > 1 ? "s" : ""} ${m} mins`;
-  if (h > 0) return `${h} hr${h > 1 ? "s" : ""}`;
-  return `${m} mins`;
+export function formatMinutes(min: number): string {
+  if (!min) return "—";
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
 }
 
 export function initialsOf(name: string): string {
@@ -64,10 +55,4 @@ export function initialsOf(name: string): string {
 
 export function clamp(n: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, n));
-}
-
-/** Display label for a backend geography value; empty/unknown renders honestly. */
-export function geoLabel(v: string | null | undefined): string {
-  const s = (v ?? "").trim();
-  return s.length > 0 ? s : "—";
 }

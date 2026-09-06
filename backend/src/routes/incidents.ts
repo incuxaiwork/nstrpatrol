@@ -15,18 +15,6 @@ export const incidentsRouter = Router();
 
 incidentsRouter.use(requireAuth);
 
-/* ------------------------------------------------------------------ */
-/* Lightweight in-memory TTL cache for incident list                   */
-/* ------------------------------------------------------------------ */
-
-interface CacheEntry<T> { at: number; body: T }
-const incidentListCache = new Map<string, CacheEntry<string>>();
-const INCIDENT_LIST_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 10_000;
-
-function incidentListCacheKey(userId: string, q: Record<string, unknown>): string {
-  return `${userId}:${q.mine ?? ''}:${q.status ?? ''}:${q.type ?? ''}:${q.patrolId ?? ''}:${q.from ?? ''}:${q.to ?? ''}`;
-}
-
 export const incidentCreateSchema = z.object({
   id: z.string().min(1).max(50).nullish(),
   patrolId: z.string().min(1).max(50).nullish(),
@@ -70,7 +58,6 @@ incidentsRouter.post('/', validateBody(incidentCreateSchema), async (req, res) =
         update: {},
       })
     : await prisma.incident.create({ data });
-  incidentListCache.clear();
   res.status(201).json(incident);
 });
 
@@ -78,27 +65,15 @@ const incidentListQuery = z.object({
   mine: z.literal('true').optional(),
   status: z.enum(['SUBMITTED', 'VERIFIED', 'RESOLVED', 'REJECTED']).optional(),
   type: z.enum(['HUMAN_IMPACT', 'ANIMAL_MORTALITY', 'SIGHTING', 'WATER_SOURCE', 'QUICK_CAPTURE', 'GENERAL']).optional(),
-  patrolId: z.string().max(50).optional(),
   from: z.coerce.date().optional(),
   to: z.coerce.date().optional(),
 });
 
 incidentsRouter.get('/', validateQuery(incidentListQuery), async (req, res) => {
   const q = req.query as z.infer<typeof incidentListQuery>;
-
-  const cacheKey = incidentListCacheKey(req.user!.id, q);
-  const hit = incidentListCache.get(cacheKey);
-  if (hit && Date.now() - hit.at < INCIDENT_LIST_TTL_MS) {
-    res.setHeader('X-Cache', 'HIT');
-    res.setHeader('Content-Type', 'application/json; charset=utf-8');
-    res.send(hit.body);
-    return;
-  }
-
   const base: Record<string, unknown> = {};
   if (q.status) base.status = q.status;
   if (q.type) base.type = q.type;
-  if (q.patrolId) base.patrolId = q.patrolId;
   if (q.from || q.to) {
     base.occurredAt = {
       ...(q.from ? { gte: q.from } : {}),
@@ -111,36 +86,8 @@ incidentsRouter.get('/', validateQuery(incidentListQuery), async (req, res) => {
     where,
     orderBy: { occurredAt: 'desc' },
     take: 200,
-    select: {
-      id: true,
-      userId: true,
-      type: true,
-      title: true,
-      description: true,
-      severity: true,
-      status: true,
-      details: true,
-      latitude: true,
-      longitude: true,
-      accuracy: true,
-      photos: true,
-      occurredAt: true,
-      reportedAt: true,
-      syncStatus: true,
-      patrolId: true,
-      verifiedById: true,
-      verifiedAt: true,
-      resolutionNote: true,
-      createdAt: true,
-      updatedAt: true,
-    },
   });
-
-  const body = JSON.stringify(incidents);
-  incidentListCache.set(cacheKey, { at: Date.now(), body });
-  res.setHeader('X-Cache', 'MISS');
-  res.setHeader('Content-Type', 'application/json; charset=utf-8');
-  res.send(body);
+  res.json(incidents);
 });
 
 incidentsRouter.get('/:id', async (req, res) => {
@@ -172,7 +119,6 @@ incidentsRouter.post('/:id/verify', requireAuth, async (req, res) => {
     where: { id: param(req, 'id') },
     data: { status: 'VERIFIED', verifiedById: req.user!.id, verifiedAt: new Date() },
   });
-  incidentListCache.clear();
   res.json(updated);
 });
 
@@ -186,7 +132,6 @@ incidentsRouter.post('/:id/resolve', requireAdmin, validateBody(resolveSchema), 
     where: { id: param(req, 'id') },
     data: { status: 'RESOLVED', resolutionNote: req.body.resolutionNote ?? null },
   });
-  incidentListCache.clear();
   res.json(updated);
 });
 
@@ -196,7 +141,6 @@ incidentsRouter.post('/:id/reject', requireAdmin, validateBody(resolveSchema), a
     where: { id: param(req, 'id') },
     data: { status: 'REJECTED', resolutionNote: req.body.resolutionNote ?? null },
   });
-  incidentListCache.clear();
   res.json(updated);
 });
 

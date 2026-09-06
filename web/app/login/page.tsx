@@ -10,7 +10,6 @@ import { useRouter } from "next/navigation";
 import { auth as authService } from "@/lib/services";
 import { useApp } from "@/lib/store";
 import { Icon } from "@/components/icons";
-import { AUTH_DEFAULT_LANDING } from "@/lib/constants";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -31,7 +30,7 @@ export default function LoginPage() {
     try {
       const user = await authService.login(email.trim(), password);
       setUser(user);
-      router.replace(AUTH_DEFAULT_LANDING);
+      router.replace("/");
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unable to sign in.";
       setError(

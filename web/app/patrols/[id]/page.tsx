@@ -18,14 +18,13 @@ import { Card, CardHeader, Badge, PageHeader, Progress, Avatar, type BadgeTone }
 import { StatRow, Timeline } from "@/components/data";
 import { Icon, type IconName } from "@/components/icons";
 import { MapWorkspace } from "@/components/map-loader";
-import { DEFAULT_LAYER_STATE, type ForestLayerState } from "@/lib/map-layers";
 import { JurisdictionBanner } from "@/components/jurisdiction";
 import { resolveJurisdiction, authStatusLabel, authStatusTone } from "@/lib/jurisdiction";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { patrolStatusLabel, patrolStatusTone } from "@/lib/nav";
-import { patrolTypeLabels, patrolMethodLabels } from "@/lib/mock/patrols";
+import { patrolTypeLabels } from "@/lib/mock/patrols";
 import { unitName } from "@/lib/mock/hierarchy";
-import { formatDateTime, formatMinutes, formatKm, geoLabel } from "@/lib/utils";
+import { formatDateTime, formatMinutes, formatKm } from "@/lib/utils";
 import type { PatrolEvent } from "@/lib/types";
 import { ReportButton } from "@/components/reports/ReportButton";
 import { PatrolReportDialog } from "@/components/reports/dialogs";
@@ -34,8 +33,8 @@ export default function PatrolDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: patrol, error, loading, reload } = useAsyncData(() => patrols.get(params.id));
-  const auths = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
-  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
+  const auths = useAsyncData(() => authorizations.list());
+  const spatial = useAsyncData(() => gis.spatial());
   const [reportOpen, setReportOpen] = useState(false);
 
   const jurisdiction = useMemo(
@@ -43,13 +42,9 @@ export default function PatrolDetailPage() {
     [patrol, auths.data]
   );
 
-  if (loading || !patrol || auths.loading || !auths.data) return <SkeletonRows rows={8} />;
+  if (loading || auths.loading || !auths.data || spatial.loading || !spatial.data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
-  if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the records")} />;
-
-  // Geography is only shown where the backend actually resolved it.
-  const areaText = [patrol.division, patrol.range, patrol.beat].filter(Boolean).join(" / ") || "Unknown";
-  const typeText = patrol.type ? patrolTypeLabels[patrol.type] : "Field";
+  if (!patrol || !jurisdiction) return <NotFound what="patrol" id={params.id} onBack={() => pushToast("info", "Patrol lookup", "This patrol id does not exist in the mock records")} />;
 
   const eventTone = (k: PatrolEvent["kind"]): BadgeTone =>
     k === "incident" ? "danger" : k === "sos" ? "danger" : k === "observation" ? "warning" : k === "checkpoint" ? "info" : "forest";
@@ -63,11 +58,17 @@ export default function PatrolDetailPage() {
     <div>
       <PageHeader
         title={patrol.title}
-        subtitle={`${patrol.code} · ${typeText} patrol · started ${formatDateTime(patrol.startScheduled)}`}
+        subtitle={`${patrol.code} · ${patrolTypeLabels[patrol.type]} patrol · started ${formatDateTime(patrol.startScheduled)}`}
         actions={
           <>
             <Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>
             <ReportButton onClick={() => setReportOpen(true)} />
+            <Link
+              href={`/patrols/${patrol.id}/replay`}
+              className="inline-flex h-9 items-center gap-1.5 rounded-field border border-line-strong bg-white px-3 text-sm font-medium text-ink hover:border-forest-600 hover:text-forest-800"
+            >
+              <Icon name="play" size={14} /> Replay
+            </Link>
           </>
         }
       />
@@ -76,18 +77,17 @@ export default function PatrolDetailPage() {
         <JurisdictionBanner
           state={jurisdiction.state}
           authorization={auth}
-          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => geoLabel(id ?? "")).join(" / ") : undefined}
-          patrolArea={areaText}
+          homeArea={jurisdiction.homeBeat ? [jurisdiction.homeDivision, jurisdiction.homeRange, jurisdiction.homeBeat].map((id) => unitName(id ?? "")).join(" / ") : undefined}
+          patrolArea={`${unitName(patrol.division)} / ${unitName(patrol.range)} / ${unitName(patrol.beat)}`}
         />
       </div>
 
       <div className="mt-4">
         <StatRow
           items={[
-            { label: "Distance", value: patrol.distanceKm != null ? formatKm(patrol.distanceKm) : "—" },
+            { label: "Distance", value: patrol.distanceKm > 0 ? formatKm(patrol.distanceKm) : "—" },
             { label: "Duration", value: patrol.durationMin > 0 ? formatMinutes(patrol.durationMin) : "—" },
-            { label: "Method", value: patrol.method ? (patrolMethodLabels[patrol.method] ?? patrol.method) : "—" },
-            { label: "Steps", value: patrol.steps != null ? patrol.steps.toLocaleString() : "—" },
+            { label: "Checkpoints", value: patrol.checkpoints },
             { label: "Incidents", value: patrol.incidents, tone: patrol.incidents > 0 ? "danger" : undefined },
             { label: "Observations", value: patrol.observations },
             { label: "Photos", value: patrol.photos },
@@ -100,23 +100,17 @@ export default function PatrolDetailPage() {
           <Card>
             <CardHeader title="Route & live position" icon="map" subtitle="Press play to replay the patrol trace" />
             <div className="p-3">
-              {spatial.data ? (
-                <MapWorkspace
-                  mode="focus"
-                  heightClass="h-[300px]"
-                  replayPatrolId={patrol.id}
-                  replayPoints={patrol.route}
-                  liveBeats={spatial.data.beats}
-                  compartments={spatial.data.compartments}
-                  boundary={spatial.data.boundary}
-                  layerState={{ ...DEFAULT_LAYER_STATE, routes: true }}
-                  onSelect={() => undefined}
-                />
-              ) : (
-                <div className="flex h-[300px] items-center justify-center text-xs text-ink-soft">
-                  {spatial.loading ? "Loading map layers…" : "Map unavailable"}
-                </div>
-              )}
+              <MapWorkspace
+                mode="overview"
+                heightClass="h-[300px]"
+                replayPatrolId={patrol.id}
+                replayPoints={patrol.route}
+                liveBeats={spatial.data.beats}
+                compartments={spatial.data.compartments}
+                boundary={spatial.data.boundary}
+                grids={spatial.data.grids}
+                onSelect={() => undefined}
+              />
             </div>
           </Card>
 
@@ -141,6 +135,20 @@ export default function PatrolDetailPage() {
         </div>
 
         <div className="space-y-4">
+          <Card>
+            <CardHeader title="Details" icon="info" />
+            <dl className="space-y-2.5 p-4 text-sm">
+              <DetailRow label="Division" value={unitName(patrol.division)} />
+              <DetailRow label="Range" value={unitName(patrol.range)} />
+              <DetailRow label="Beat" value={unitName(patrol.beat)} />
+              <DetailRow label="Team" value={unitName(patrol.teamId)} />
+              <DetailRow label="Objective" value={patrol.objective} />
+              <DetailRow label="Scheduled" value={formatDateTime(patrol.startScheduled)} />
+              {patrol.startActual && <DetailRow label="Started" value={formatDateTime(patrol.startActual)} />}
+              {patrol.endScheduled && <DetailRow label="Due by" value={formatDateTime(patrol.endScheduled)} />}
+              {patrol.endActual && <DetailRow label="Completed" value={formatDateTime(patrol.endActual)} />}
+            </dl>
+          </Card>
 
           {auth && (
             <Card>
@@ -173,48 +181,6 @@ export default function PatrolDetailPage() {
             </div>
           </Card>
 
-          {/* Movement — start/end, idle/rest, actual moving time, status */}
-          <Card>
-            <CardHeader
-              title="Movement"
-              icon="activity"
-              subtitle={patrol.method ? patrolMethodLabels[patrol.method] ?? patrol.method : "Unknown method"}
-            />
-            <dl className="space-y-2.5 p-4 text-sm">
-              <DetailRow label="Start time" value={formatDateTime(patrol.startActual ?? patrol.startScheduled)} />
-              <DetailRow label="End time" value={patrol.endActual ? formatDateTime(patrol.endActual) : patrol.status === "ongoing" ? "Ongoing" : "—"} />
-              {(() => {
-                const modes = patrol.modes ?? [];
-                let idleSec = modes.filter((m) => ["STILL", "STATIONARY", "UNKNOWN"].includes(m.mode.toUpperCase())).reduce((a, m) => a + m.seconds, 0);
-                // Fallback: if no mode breakdown but we have moveMinutes vs total, derive idle
-                if (idleSec === 0 && patrol.moveMinutes != null && patrol.durationMin > 0) {
-                  idleSec = Math.max(0, (patrol.durationMin - patrol.moveMinutes) * 60);
-                }
-                const idleMin = Math.round(idleSec / 60);
-                const totalMin = patrol.durationMin;
-                const movingMin = patrol.moveMinutes ?? (idleSec > 0 ? Math.max(0, totalMin - idleMin) : totalMin);
-                return (
-                  <>
-                    <DetailRow label="Idle / rest time" value={idleMin > 0 ? formatMinutes(idleMin) : patrol.durationMin > 0 && patrol.moveMinutes === 0 ? formatMinutes(patrol.durationMin) : "—"} />
-                    <DetailRow label="Actual moving time" value={movingMin > 0 ? formatMinutes(movingMin) : totalMin > 0 ? formatMinutes(totalMin) : "—"} />
-                  </>
-                );
-              })()}
-              <DetailRow label="Status" value={<Badge tone={patrolStatusTone[patrol.status]} dot>{patrolStatusLabel[patrol.status]}</Badge>} />
-              <DetailRow label="Method" value={patrol.method ? (patrolMethodLabels[patrol.method] ?? patrol.method) : "—"} />
-              <DetailRow
-                label="Steps"
-                value={
-                  patrol.method === "foot"
-                    ? patrol.steps != null
-                      ? `${patrol.steps.toLocaleString()} steps`
-                      : "Not available — no step sensor data"
-                    : "—  (not a foot patrol)"
-                }
-              />
-            </dl>
-          </Card>
-
           {patrol.notes && (
             <Card>
               <CardHeader title="Notes" icon="file" />
@@ -223,42 +189,18 @@ export default function PatrolDetailPage() {
           )}
 
           <Card>
-            <CardHeader
-              title="Coverage"
-              icon="target"
-              subtitle="1 km grids in this beat — patrolled vs total (live from backend)"
-            />
+            <CardHeader title="Coverage" icon="target" />
             <div className="p-4">
-              {!patrol.coverageCells ? (
-                <p className="text-sm text-ink-soft">
-                  Coverage unavailable — the backend could not compute it for this patrol.
-                </p>
-              ) : (
-                <>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-ink-soft">Beat coverage</span>
-                    <span className="font-mono text-sm font-semibold text-ink">
-                      {patrol.coverageCells.patrolled} / {patrol.coverageCells.total} grids
-                      {patrol.coveragePct != null && (
-                        <span className="ml-2 text-xs font-normal text-ink-soft">({patrol.coveragePct}%)</span>
-                      )}
-                    </span>
-                  </div>
-                  <p className="mt-1 text-xs text-ink-soft">
-                    {patrol.coveragePct == null
-                      ? `This patrol touched ${patrol.coverageCells.patrolled} grid(s) — spatial coverage % unavailable (PostGIS).`
-                      : `This patrol touched ${patrol.coverageCells.patrolled} of the beat’s ${patrol.coverageCells.total} × 1 km grids.`}
-                  </p>
-                  {patrol.coveragePct != null && (
-                    <div className="mt-3">
-                      <Progress
-                        value={patrol.coveragePct}
-                        tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
-                      />
-                    </div>
-                  )}
-                </>
-              )}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-ink-soft">Beat coverage</span>
+                <span className="font-semibold text-ink">{patrol.coveragePct}%</span>
+              </div>
+              <div className="mt-2">
+                <Progress
+                  value={patrol.coveragePct}
+                  tone={patrol.coveragePct >= 80 ? "forest" : patrol.coveragePct >= 40 ? "warning" : "danger"}
+                />
+              </div>
             </div>
           </Card>
         </div>

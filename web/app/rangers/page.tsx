@@ -5,35 +5,30 @@
  * table/grid views, KPIs and team overview.
  */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { rangers } from "@/lib/services";
-import { api } from "@/lib/api";
 import { useAsyncData } from "@/lib/use-async";
 import { Card, CardHeader, Badge, PageHeader, Avatar, SearchInput } from "@/components/ui";
-import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, Pagination, type ViewMode } from "@/components/data";
+import { DataTable, FilterBar, FilterSelect, KpiCard, ViewSwitcher, type ViewMode } from "@/components/data";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
+import { mockDivisions, unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { DutyStatus } from "@/lib/types";
 
 export default function RangersPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
-  // Backend per-ranger coverage aggregate (#27) powers the Avg Coverage KPI.
-  const cov = useAsyncData(() => api.coverage.rangers().catch(() => null), [], { cacheKey: "rangers:coverage" });
+  const { data, error, loading, reload } = useAsyncData(() => rangers.list());
 
   const [status, setStatus] = useState("");
   const [division, setDivision] = useState("");
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ViewMode>("table");
-  const [page, setPage] = useState(1);
-
-  const PAGE_SIZE = 12;
 
   const filtered = useMemo(() => {
     if (!data) return [];
@@ -46,27 +41,17 @@ export default function RangersPage() {
     );
   }, [data, status, division, query]);
 
-  // Reset to first page whenever the filter/search roster changes.
-  useEffect(() => { setPage(1); }, [filtered]);
-
-  const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
-
   if (loading || !data) return <SkeletonRows rows={8} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   const inField = data.filter((r) => r.dutyStatus === "field").length;
   const onDuty = data.filter((r) => r.dutyStatus === "on-duty").length;
-  // Avg Coverage KPI: prefer the backend coverage/rangers aggregate (#27) so
-  // the number reflects real GPS/PostGIS attribution; fall back to averaging
-  // whatever per-ranger coverage the roster carries, else "—".
-  const backendAvg = cov.data?.summary?.avgCoverage ?? null;
-  const coverageValues = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
-  const avgCoverage =
-    backendAvg != null
-      ? backendAvg
-      : coverageValues.length
-        ? Math.round(coverageValues.reduce((a, c) => a + c, 0) / coverageValues.length)
-        : null;
+  const avgCoverage = Math.round(data.reduce((a, r) => a + r.stats.coveragePct, 0) / data.length);
+
+  const dutySeg = data.reduce<Record<string, number>>((acc, r) => {
+    acc[r.dutyStatus] = (acc[r.dutyStatus] ?? 0) + 1;
+    return acc;
+  }, {});
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `rangers-${stamp()}`, filtered.map((r) => ({
@@ -74,9 +59,9 @@ export default function RangersPage() {
       name: r.name,
       designation: r.designation,
       dutyStatus: dutyStatusLabel[r.dutyStatus],
-      division: r.division || "",
-      range: r.range || "",
-      beat: r.beat || "",
+      division: unitName(r.division),
+      range: unitName(r.range),
+      beat: unitName(r.beat),
       team: r.teamId,
       phone: r.phone ?? "",
       bloodGroup: r.bloodGroup ?? "",
@@ -114,7 +99,7 @@ export default function RangersPage() {
         <KpiCard label="On duty" value={onDuty} icon="check" tone="info" onClick={() => setStatus("on-duty")} />
         <KpiCard label="Off duty" value={data.filter((r) => r.dutyStatus === "off-duty").length} icon="clock" tone="neutral" onClick={() => setStatus("off-duty")} />
         <KpiCard label="Offline" value={data.filter((r) => r.dutyStatus === "offline").length} icon="wifi" tone="danger" onClick={() => setStatus("offline")} />
-        <KpiCard label="Avg coverage" value={avgCoverage ?? "—"} unit={avgCoverage != null ? "%" : undefined} icon="target" tone="khaki" />
+        <KpiCard label="Avg coverage" value={avgCoverage} unit="%" icon="target" tone="khaki" />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -133,13 +118,12 @@ export default function RangersPage() {
             <FilterSelect label="Duty status" value={status} onChange={setStatus}
               options={Object.entries(dutyStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
             <FilterSelect label="Division" value={division} onChange={setDivision}
-              options={[...new Set(data.map((r) => r.division).filter(Boolean))].map((d) => ({ value: d, label: d }))} />
+              options={mockDivisions.map((d) => ({ value: d.id, label: d.name }))} />
           </FilterBar>
           {view === "table" && (
-            <>
-              <DataTable
-                rows={pageRows}
-                loading={loading}
+            <DataTable
+              rows={filtered}
+              loading={loading}
               onRowClick={(r) => router.push(`/rangers/${r.id}`)}
               columns={[
                 {
@@ -156,11 +140,11 @@ export default function RangersPage() {
                 },
                 {
                   key: "unit", header: "Unit", sortValue: (r) => r.range,
-                  render: (r) => <span className="text-ink-soft">{r.range || "—"}</span>,
+                  render: (r) => <span className="text-ink-soft">{unitName(r.range)}</span>,
                 },
                 {
-                  key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct ?? -1,
-                  render: (r) => <span className="text-ink-soft">{r.stats.coveragePct != null ? `${r.stats.coveragePct}%` : "—"}</span>,
+                  key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct,
+                  render: (r) => <span className="text-ink-soft">{r.stats.coveragePct}%</span>,
                 },
                 {
                   key: "patrols", header: "Patrols", sortValue: (r) => r.stats.patrols,
@@ -180,43 +164,42 @@ export default function RangersPage() {
                 },
               ]}
               empty={<p className="py-8 text-center text-sm text-ink-soft">No rangers match the filters.</p>}
-              />
-              {filtered.length > PAGE_SIZE && (
-                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
-              )}
-            </>
+            />
           )}
-          {view === "cards" && (
-            <>
-              <RangerCards rangers={pageRows} onOpen={(r) => router.push(`/rangers/${r.id}`)} />
-              {filtered.length > PAGE_SIZE && (
-                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
-              )}
-            </>
-          )}
+          {view === "cards" && <RangerCards rangers={filtered} onOpen={(r) => router.push(`/rangers/${r.id}`)} />}
           {view === "map" && (
             <p className="px-4 py-8 text-center text-sm text-ink-soft">
               Map view for ranger positions links into the GIS workspace — see{" "}
               <Link href="/gis" className="text-forest-700 hover:underline">GIS Intelligence</Link>.
             </p>
           )}
-          {view === "gallery" && (
-            <>
-              <RangerGrid rangers={pageRows} onOpen={(r) => router.push(`/rangers/${r.id}`)} />
-              {filtered.length > PAGE_SIZE && (
-                <Pagination page={page} pageSize={PAGE_SIZE} total={filtered.length} onChange={setPage} />
-              )}
-            </>
-          )}
+          {view === "gallery" && <RangerGrid rangers={filtered} onOpen={(r) => router.push(`/rangers/${r.id}`)} />}
         </Card>
 
         <div className="space-y-4">
           <Card>
+            <CardHeader title="Duty distribution" icon="chart" />
+            <div className="space-y-2.5 p-4">
+              {(Object.keys(dutyStatusLabel) as DutyStatus[]).map((s) => (
+                <div key={s} className="flex items-center gap-2">
+                  <span className="w-20 text-xs text-ink-soft">{dutyStatusLabel[s]}</span>
+                  <div className="h-2 flex-1 overflow-hidden rounded-full bg-zinc-100">
+                    <div
+                      className={cn("h-full rounded-full", dutyBar(s))}
+                      style={{ width: `${(dutySeg[s] ?? 0) / (data.length || 1) * 100}%` }}
+                    />
+                  </div>
+                  <span className="w-6 text-right text-xs font-medium text-ink">{dutySeg[s] ?? 0}</span>
+                </div>
+              ))}
+            </div>
+          </Card>
+
+          <Card>
             <CardHeader title="Top performers" icon="star" subtitle="By field coverage this quarter" />
             <div className="divide-y divide-line">
               {[...data]
-                .filter((r) => r.stats.coveragePct != null)
-                .sort((a, b) => (b.stats.coveragePct ?? 0) - (a.stats.coveragePct ?? 0))
+                .sort((a, b) => b.stats.coveragePct - a.stats.coveragePct)
                 .slice(0, 5)
                 .map((r, i) => (
                   <Link key={r.id} href={`/rangers/${r.id}`} className="flex items-center gap-2.5 px-4 py-2.5 hover:bg-forest-50/40">
@@ -224,14 +207,11 @@ export default function RangersPage() {
                     <Avatar name={r.name} size={26} />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm text-ink">{r.name}</p>
-                      <p className="text-xs text-ink-soft">{r.range || "—"}</p>
+                      <p className="text-xs text-ink-soft">{unitName(r.range)}</p>
                     </div>
                     <span className="text-sm font-semibold text-forest-800">{r.stats.coveragePct}%</span>
                   </Link>
                 ))}
-              {data.every((r) => r.stats.coveragePct == null) && (
-                <p className="px-4 py-4 text-xs text-ink-soft">No coverage data available yet.</p>
-              )}
             </div>
           </Card>
         </div>
@@ -243,6 +223,16 @@ export default function RangersPage() {
 // -- helpers -----------------------------------------------------------
 
 function cn(...args: unknown[]) { return args.filter(Boolean).join(" "); }
+
+function dutyBar(s: string): string {
+  switch (s) {
+    case "field": return "bg-success";
+    case "on-duty": return "bg-forest-600";
+    case "off-duty": return "bg-zinc-300";
+    case "leave": return "bg-warning";
+    default: return "bg-danger";
+  }
+}
 
 function isStale(lastSync?: string): boolean {
   if (!lastSync) return false;
@@ -256,7 +246,7 @@ interface RangerLike {
   designation: string;
   dutyStatus: DutyStatus;
   range: string;
-  stats: { patrols: number; distanceKm: number; fieldHours: number; coveragePct?: number };
+  stats: { patrols: number; distanceKm: number; fieldHours: number; coveragePct: number };
 }
 
 function RangerCards({ rangers: rs, onOpen }: { rangers: RangerLike[]; onOpen(r: RangerLike): void }) {

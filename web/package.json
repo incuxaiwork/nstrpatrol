@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "verify:gis": "node scripts/verify-gis-projection.mjs"
+    "lint": "eslint"
   },
   "dependencies": {
     "maplibre-gl": "^6.3.0",
@@ -23,7 +22,6 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.0",
-    "puppeteer": "^25.9.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   },

@@ -19,31 +19,18 @@ export default function NewRangerPage() {
   const { pushToast } = useApp();
   const [submitting, setSubmitting] = useState(false);
 
-  const handleSubmit = async (values: Omit<Ranger, "id"> & { email?: string; password?: string }) => {
+  const handleSubmit = async (values: Omit<Ranger, "id">) => {
     setSubmitting(true);
-    try {
-      const record = await rangers.create(values);
-      pushToast(
-        "success",
-        "User account provisioned",
-        `${record.name} created — they can now sign in with the email you set.`
-      );
-      router.push(`/rangers/${record.id}`);
-    } catch (err) {
-      pushToast(
-        "error",
-        "Provisioning failed",
-        err instanceof Error ? err.message : "Backend rejected the request"
-      );
-      setSubmitting(false);
-    }
+    const record = await rangers.create(values);
+    pushToast("success", "Ranger created", `${record.name} added to the directory (mock store)`);
+    router.push(`/rangers/${record.id}`);
   };
 
   return (
     <div>
       <PageHeader
-        title="Provision User Account"
-        subtitle="Create a ranger and their platform sign-in credentials in one step"
+        title="Create Ranger"
+        subtitle="Add a new personnel record to the directory"
         actions={
           <button
             onClick={() => router.push("/rangers")}
@@ -55,7 +42,7 @@ export default function NewRangerPage() {
         }
       />
 
-      <RangerForm submitLabel="Provision account" submitting={submitting} onSubmit={handleSubmit} />
+      <RangerForm submitLabel="Add ranger record" submitting={submitting} onSubmit={handleSubmit} />
     </div>
   );
 }
