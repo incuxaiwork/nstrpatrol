@@ -1,0 +1,342 @@
+{
+ "e0.0005": {
+  "rings": 15,
+  "partsGt1kmChord": 1,
+  "maxEdgeKm": 3.5,
+  "per": [
+   {
+    "verts": 618,
+    "maxEdge": 0.4
+   },
+   {
+    "verts": 1707,
+    "maxEdge": 0.5
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 5,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 21,
+    "maxEdge": 0.2
+   },
+   {
+    "chordIn": 1.2,
+    "verts": 13121,
+    "violated": true
+   },
+   {
+    "verts": 813,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 1482,
+    "maxEdge": 0.3
+   },
+   {
+    "verts": 143,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 571,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 3454,
+    "maxEdge": 0.4
+   }
+  ]
+ },
+ "e0.001": {
+  "rings": 15,
+  "partsGt1kmChord": 1,
+  "maxEdgeKm": 3.5,
+  "per": [
+   {
+    "verts": 618,
+    "maxEdge": 0.4
+   },
+   {
+    "verts": 1706,
+    "maxEdge": 0.5
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 5,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 21,
+    "maxEdge": 0.2
+   },
+   {
+    "chordIn": 1.2,
+    "verts": 13119,
+    "violated": true
+   },
+   {
+    "verts": 813,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 1482,
+    "maxEdge": 0.3
+   },
+   {
+    "verts": 141,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 571,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 3454,
+    "maxEdge": 0.4
+   }
+  ]
+ },
+ "e0.002": {
+  "rings": 15,
+  "partsGt1kmChord": 1,
+  "maxEdgeKm": 3.5,
+  "per": [
+   {
+    "verts": 618,
+    "maxEdge": 0.4
+   },
+   {
+    "verts": 1706,
+    "maxEdge": 0.5
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 5,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 51,
+    "maxEdge": 0.3
+   },
+   {
+    "chordIn": 1.2,
+    "verts": 13120,
+    "violated": true
+   },
+   {
+    "verts": 813,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 1482,
+    "maxEdge": 0.3
+   },
+   {
+    "verts": 141,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 571,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 3454,
+    "maxEdge": 0.4
+   }
+  ]
+ },
+ "e0.003": {
+  "rings": 15,
+  "partsGt1kmChord": 1,
+  "maxEdgeKm": 3.5,
+  "per": [
+   {
+    "verts": 618,
+    "maxEdge": 0.4
+   },
+   {
+    "verts": 1706,
+    "maxEdge": 0.5
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 5,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 21,
+    "maxEdge": 0.2
+   },
+   {
+    "chordIn": 1.2,
+    "verts": 13118,
+    "violated": true
+   },
+   {
+    "verts": 813,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 1482,
+    "maxEdge": 0.3
+   },
+   {
+    "verts": 141,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 571,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 3454,
+    "maxEdge": 0.4
+   }
+  ]
+ },
+ "e0.005": {
+  "rings": 15,
+  "partsGt1kmChord": 1,
+  "maxEdgeKm": 3.5,
+  "per": [
+   {
+    "verts": 618,
+    "maxEdge": 0.4
+   },
+   {
+    "verts": 1706,
+    "maxEdge": 0.5
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 5,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 4,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 20,
+    "maxEdge": 0.2
+   },
+   {
+    "chordIn": 1.2,
+    "verts": 13115,
+    "violated": true
+   },
+   {
+    "verts": 813,
+    "maxEdge": 0.2
+   },
+   {
+    "verts": 1482,
+    "maxEdge": 0.3
+   },
+   {
+    "verts": 141,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 571,
+    "maxEdge": 0.1
+   },
+   {
+    "verts": 3454,
+    "maxEdge": 0.4
+   }
+  ]
+ }
+}

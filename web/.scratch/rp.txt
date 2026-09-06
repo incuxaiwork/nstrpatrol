@@ -1,0 +1,6 @@
+web/lib/map-space.ts:419	export interface RangePolygon {
+web/lib/map-space.ts:461	export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
+web/lib/map-space.ts:470	.map(([key, group], i): RangePolygon | null => {
+web/lib/map-space.ts:492	.filter((r): r is RangePolygon => r !== null);
+web/lib/map-space.ts:639	export function rangesToFeatures(ranges: RangePolygon[]): GeoFeatureCollection {
+web/lib/map-space.ts:664	export function rangeLabelsToFeatures(ranges: RangePolygon[]): GeoFeatureCollection {

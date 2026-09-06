@@ -1,0 +1,29 @@
+===== types.ts RangePolygon =====
+
+===== adapter call sites =====
+web/lib/backend-adapters.ts:100	export function beatsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BeatPolygon[] {
+web/lib/backend-adapters.ts:213	export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentP
+web/lib/backend-adapters.ts:258	export function blocksFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BlockPolygon[] {
+web/lib/backend-adapters.ts:195	export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): GridPolygon[] {
+web/lib/backend-adapters.ts:177	export function boundariesFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BoundaryPolygo
+web/lib/services.ts:38	beatsFromGeoJson,
+web/lib/services.ts:739	beats: beatsFromGeoJson(beatFc, extent),
+web/lib/services.ts:41	compartmentsFromGeoJson,
+web/lib/services.ts:740	compartments: compartmentsFromGeoJson(compFc, extent),
+web/lib/services.ts:39	blocksFromGeoJson,
+web/lib/services.ts:743	blocks: blocksFromGeoJson(blockFc, extent),
+web/lib/services.ts:42	gridsFromGeoJson,
+web/lib/services.ts:742	grids: gridsFromGeoJson(gridFc, extent),
+web/lib/services.ts:40	boundariesFromGeoJson,
+web/lib/services.ts:741	boundary: boundariesFromGeoJson(boundaryFc, extent),
+===== ranges/boundary/unionExtent consumers =====
+web/components/map.tsx:70	rangesFromBeats,
+web/components/map.tsx:1146	const ranges = useMemo(() => rangesFromBeats(beats), [beats]);
+web/components/map.tsx:59	boundaryFromBeats,
+web/components/map.tsx:1247	const derivedBoundary = useMemo(() => boundaryFromBeats(beats), [beats]);
+web/lib/backend-adapters.ts:61	export function unionExtent(...fcs: GeoJsonFeatureCollection[]): GeoExtent | null {
+web/lib/backend-adapters.ts:97	return fallback ?? unionExtent(fc) ?? SVG_MAP_SPACE;
+web/lib/map-space.ts:461	export function rangesFromBeats(beats: BeatPolygon[]): RangePolygon[] {
+web/lib/map-space.ts:612	export function boundaryFromBeats(beats: BeatPolygon[]): BoundaryPolygon[] {
+web/lib/services.ts:48	unionExtent,
+web/lib/services.ts:737	const extent: GeoExtent | null = unionExtent(beatFc, compFc);

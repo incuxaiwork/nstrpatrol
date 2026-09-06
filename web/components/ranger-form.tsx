@@ -2,20 +2,28 @@
 
 /**
  * Shared ranger intake form (PRD §7 — Create/Early-edit ranger).
- * Used by /rangers/new and /rangers/[id]/edit; no backend — writes go
- * through the in-memory mock store in `lib/services`.
+ * Used by /rangers/new and /rangers/[id]/edit. Assignment options come
+ * from the backend GIS-derived hierarchy (`hierarchy.units()`) and the
+ * teams service — never from static fixtures.
  */
 
 import { useMemo, useState } from "react";
 import { Card, CardHeader, Field, Input, Select, Badge } from "@/components/ui";
 import { Icon } from "@/components/icons";
-import { mockDivisions, mockRanges, mockBeats } from "@/lib/mock/hierarchy";
-import { mockTeams } from "@/lib/mock/people";
+import { hierarchy, rangers } from "@/lib/services";
+import { useAsyncData } from "@/lib/use-async";
 import { dutyStatusLabel } from "@/lib/nav";
 import type { DutyStatus, Ranger } from "@/lib/types";
-import { unitName } from "@/lib/mock/hierarchy";
 
 const designations = ["Forest Guard", "Assistant Forest Ranger", "Deputy Ranger", "Watchman"];
+
+/** Credential fields are only collected when provisioning a NEW account
+ *  (no `initial`). For edits (initial set) they are omitted — the existing
+ *  account keeps its credentials and the backend owns password changes. */
+export interface RangerProfileValues extends Omit<Ranger, "id"> {
+  email?: string;
+  password?: string;
+}
 
 export default function RangerForm({
   initial,
@@ -25,28 +33,46 @@ export default function RangerForm({
 }: {
   initial?: Ranger;
   submitLabel: string;
-  onSubmit(values: Omit<Ranger, "id">): void;
+  onSubmit(values: Omit<Ranger, "id"> & { email?: string; password?: string }): void;
   submitting?: boolean;
 }) {
   const [name, setName] = useState(initial?.name ?? "");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState(initial?.code ?? "");
   const [designation, setDesignation] = useState(initial?.designation ?? "Forest Guard");
   const [dutyStatus, setDutyStatus] = useState<DutyStatus>(initial?.dutyStatus ?? "on-duty");
-  const [division, setDivision] = useState(initial?.division ?? "d-markapur");
-  const [range, setRange] = useState(initial?.range ?? "r-vp-south");
-  const [beat, setBeat] = useState(initial?.beat ?? "b-vp-south-tummurukota");
-  const [teamId, setTeamId] = useState(initial?.teamId ?? "t1");
+  const [division, setDivision] = useState(initial?.division ?? "");
+  const [range, setRange] = useState(initial?.range ?? "");
+  const [beat, setBeat] = useState(initial?.beat ?? "");
+  const [teamId, setTeamId] = useState(initial?.teamId ?? "");
   const [phone, setPhone] = useState(initial?.phone ?? "");
   const [bloodGroup, setBloodGroup] = useState(initial?.bloodGroup ?? "O+");
   const [joinYear, setJoinYear] = useState(String(initial?.joinYear ?? 2026));
 
-  const ranges = mockRanges[division] ?? [];
-  const beats = mockBeats[range] ?? [];
-  const valid = useMemo(() => name.trim().length >= 3, [name]);
+  // Real hierarchy + teams from the backend; empty until they load.
+  const units = useAsyncData(() => hierarchy.units());
+  const teams = useAsyncData(() => rangers.teams());
+  const divisions = units.data?.divisions ?? [];
+  const ranges = units.data ? units.data.ranges[division] ?? [] : [];
+  const beats = units.data ? units.data.beats[range] ?? [] : [];
+  const nameIn = (list: { id: string; name: string }[] | undefined, id: string) =>
+    list?.find((u) => u.id === id)?.name ?? id;
+  const areaLabel =
+    [nameIn(divisions, division), nameIn(ranges, range), nameIn(beats, beat)]
+      .filter(Boolean)
+      .join(" / ") || "—";
+  const teamLabel = teams.data?.find((t) => t.id === teamId)?.name || "—";
+  // A new account must carry a valid email + strong password so it can be
+  // provisioned against the backend (Provision User Account workflow).
+  const emailOk = initial || /\S+@\S+\.\S+/.test(email);
+  const passwordOk = initial || password.length >= 8;
+  const valid = useMemo(() => name.trim().length >= 3 && emailOk && passwordOk, [name, emailOk, passwordOk]);
 
   const submit = () => {
     if (!valid) return;
     onSubmit({
+      ...(initial ? {} : { email: email.trim(), password }),
       code,
       name: name.trim(),
       designation,
@@ -75,6 +101,16 @@ export default function RangerForm({
             <Field label="Full name" required hint="As per service record">
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kavita Joshi" />
             </Field>
+            {!initial && (
+              <>
+                <Field label="Email" required hint="Used to sign in">
+                  <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. kavita.joshi@forest.gov.in" />
+                </Field>
+                <Field label="Temporary password" required hint="Min. 8 characters">
+                  <Input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Set a sign-in password" />
+                </Field>
+              </>
+            )}
             <Field label="Service code" hint="Leave blank to auto-generate">
               <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder={initial ? "Keep current" : "e.g. R-012"} />
             </Field>
@@ -111,30 +147,46 @@ export default function RangerForm({
         <Card>
           <CardHeader title="Assignment" icon="map" subtitle="Operational unit and team" />
           <div className="grid gap-4 p-5 sm:grid-cols-3">
-            <Field label="Division" required>
-              <Select value={division} onChange={(e) => { setDivision(e.target.value); setRange(mockRanges[e.target.value]?.[0]?.id ?? ""); setBeat(mockBeats[mockRanges[e.target.value]?.[0]?.id ?? ""]?.[0]?.id ?? ""); }}>
-                {mockDivisions.map((d) => (
+            <Field label="Division" required hint={units.loading ? "Loading units…" : undefined}>
+              <Select value={division} onChange={(e) => {
+                const d = e.target.value;
+                setDivision(d);
+                const firstRange = units.data?.ranges[d]?.[0]?.id ?? "";
+                setRange(firstRange);
+                setBeat(firstRange ? units.data?.beats[firstRange]?.[0]?.id ?? "" : "");
+              }}>
+                {divisions.length === 0 && <option value="">Loading…</option>}
+                {divisions.map((d) => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </Select>
             </Field>
             <Field label="Range" required>
-              <Select value={range} onChange={(e) => { setRange(e.target.value); setBeat(mockBeats[e.target.value]?.[0]?.id ?? ""); }}>
-                {ranges.map((r) => (
-                  <option key={r.id} value={r.id}>{r.name}</option>
-                ))}
+              <Select value={range} onChange={(e) => { setRange(e.target.value); setBeat(units.data?.beats[e.target.value]?.[0]?.id ?? ""); }}>
+                {ranges.length === 0 ? (
+                  <option value="">Select a division</option>
+                ) : (
+                  ranges.map((r) => (
+                    <option key={r.id} value={r.id}>{r.name}</option>
+                  ))
+                )}
               </Select>
             </Field>
             <Field label="Beat" required>
               <Select value={beat} onChange={(e) => setBeat(e.target.value)}>
-                {beats.map((b) => (
-                  <option key={b.id} value={b.id}>{b.name}</option>
-                ))}
+                {beats.length === 0 ? (
+                  <option value="">Select a range</option>
+                ) : (
+                  beats.map((b) => (
+                    <option key={b.id} value={b.id}>{b.name}</option>
+                  ))
+                )}
               </Select>
             </Field>
             <Field label="Team">
               <Select value={teamId} onChange={(e) => setTeamId(e.target.value)}>
-                {mockTeams.map((t) => (
+                <option value="">Unassigned</option>
+                {(teams.data ?? []).map((t) => (
                   <option key={t.id} value={t.id}>{t.name}</option>
                 ))}
               </Select>
@@ -151,8 +203,8 @@ export default function RangerForm({
             <SummaryRow label="Code" value={code || "auto"} />
             <SummaryRow label="Designation" value={designation} />
             <SummaryRow label="Status" value={<Badge tone="neutral">{dutyStatusLabel[dutyStatus]}</Badge>} />
-            <SummaryRow label="Area" value={`${divisionName(division)} / ${unitName(range)} / ${unitName(beat)}`} />
-            <SummaryRow label="Team" value={mockTeams.find((t) => t.id === teamId)?.name ?? "—"} />
+            <SummaryRow label="Area" value={areaLabel} />
+            <SummaryRow label="Team" value={teamLabel} />
           </dl>
           <div className="border-t border-line p-4">
             <button
@@ -163,16 +215,16 @@ export default function RangerForm({
               <Icon name="check" size={16} />
               {submitting ? "Saving…" : submitLabel}
             </button>
-            {!valid && <p className="mt-2 text-center text-xs text-ink-soft">Name is required.</p>}
+            {!valid && (
+              <p className="mt-2 text-center text-xs text-ink-soft">
+                {!name.trim() ? "A name is required." : initial ? "Fix the fields above." : "A valid email and a password of 8+ characters are required to provision the account."}
+              </p>
+            )}
           </div>
         </Card>
       </div>
     </div>
   );
-}
-
-function divisionName(id: string) {
-  return mockDivisions.find((d) => d.id === id)?.name ?? id;
 }
 
 function SummaryRow({ label, value }: { label: string; value: React.ReactNode }) {
