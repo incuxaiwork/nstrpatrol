@@ -4,10 +4,12 @@
  * Auth-aware shell wrapper: redirects anonymous users to /login and hides
  * the admin chrome (sidebar/topbar) on the login screen.
  *
- * Auth check uses useSyncExternalStore with a null server snapshot to avoid
- * hydration mismatches. During the null (hydrating) phase, AppShell renders
- * immediately — no blank loading screen, no layout shift. Redirect only
- * fires after the subscription confirms the user is genuinely unauthenticated.
+ * The session lives in localStorage, which the server cannot see. Reading it
+ * during render made SSR emit the placeholder while a signed-in client
+ * hydrated straight into <AppShell> — a hydration mismatch. Instead we read
+ * the store through useSyncExternalStore: server render and hydration both
+ * use the neutral `false` snapshot, then React re-renders with the live
+ * client value.
  */
 
 import { useEffect, useSyncExternalStore } from "react";
@@ -20,18 +22,21 @@ export function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   const onLogin = pathname === "/login";
-
-  // Server snapshot returns null (hydrating). Client resolves to true/false.
-  const authed = useSyncExternalStore(subscribeToAuth, hasSession, () => null);
+  const authed = useSyncExternalStore(subscribeToAuth, hasSession, () => false);
 
   useEffect(() => {
-    if (authed === false && !onLogin) {
+    if (!onLogin && !authed) {
       router.replace("/login");
     }
-  }, [authed, onLogin, router]);
+  }, [onLogin, authed, router]);
 
   if (onLogin) return <>{children}</>;
-  // Always render AppShell — no white screen, no layout shift.
-  // Redirect fires in background if auth fails.
+  if (!authed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-surface text-sm text-ink-soft">
+        Redirecting to sign in…
+      </div>
+    );
+  }
   return <AppShell>{children}</AppShell>;
 }

@@ -19,13 +19,15 @@ import { MediaViewer } from "@/components/media-viewer";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
-import { timeAgo, geoLabel } from "@/lib/utils";
+import { unitName } from "@/lib/mock/hierarchy";
+import { timeAgo } from "@/lib/utils";
+
 export default function ObservationDetailPage() {
   const params = useParams<{ id: string }>();
   const { pushToast } = useApp();
   const { data: obs, error, loading, reload } = useAsyncData(() => observations.get(params.id));
   const patrol = useAsyncData(() => (obs?.patrolId ? patrols.get(obs.patrolId) : Promise.resolve(undefined)));
-  const spatial = useAsyncData(() => gis.spatial(), [], { cacheKey: "gis:spatial" });
+  const spatial = useAsyncData(() => gis.spatial());
 
   const [resolveOpen, setResolveOpen] = useState(false);
   const [actionNote, setActionNote] = useState("");
@@ -39,7 +41,7 @@ export default function ObservationDetailPage() {
     <div>
       <PageHeader
         title={obs.title}
-        subtitle={`${obs.code} · ${categoryMeta[obs.category].label} · ${geoLabel(obs.range)} · ${timeAgo(obs.recordedAt)} by ${obs.recordedBy}`}
+        subtitle={`${obs.code} · ${categoryMeta[obs.category].label} · ${unitName(obs.range)} · ${timeAgo(obs.recordedAt)} by ${obs.recordedBy}`}
         actions={
           <>
             {obs.priority === "urgent" && <Badge tone="danger">Urgent</Badge>}
@@ -96,15 +98,7 @@ export default function ObservationDetailPage() {
           <Card>
             <CardHeader title="Location" icon="map" subtitle="Coordinates recorded from the field device" />
             <div className="p-3">
-              <MapWorkspace
-                mode="focus"
-                heightClass="h-[240px]"
-                liveBeats={spatial.data.beats}
-                compartments={spatial.data.compartments}
-                boundary={spatial.data.boundary}
-                focusedPoint={obs.lat != null && obs.lng != null ? { lat: obs.lat, lng: obs.lng } : null}
-                onSelect={() => undefined}
-              />
+              <MapWorkspace mode="overview" heightClass="h-[240px]" liveBeats={spatial.data.beats} compartments={spatial.data.compartments} boundary={spatial.data.boundary} grids={spatial.data.grids} onSelect={() => undefined} />
             </div>
             <p className="px-4 pb-4 font-mono text-xs text-ink-soft">
               {obs.lat != null && obs.lng != null
@@ -138,9 +132,9 @@ export default function ObservationDetailPage() {
               <DetailRow label="Subcategory" value={obs.subcategory} />
               <DetailRow label="Species" value={obs.species ?? "—"} />
               <DetailRow label="Group size" value={obs.groupSize ?? "—"} />
-            <DetailRow label="Division" value={geoLabel(obs.division)} />
-            <DetailRow label="Range" value={geoLabel(obs.range)} />
-            <DetailRow label="Beat" value={geoLabel(obs.beat)} />
+              <DetailRow label="Division" value={unitName(obs.division)} />
+              <DetailRow label="Range" value={unitName(obs.range)} />
+              <DetailRow label="Beat" value={unitName(obs.beat)} />
               <DetailRow label="Recorded by" value={obs.recordedBy} />
               <DetailRow label="Patrol" value={obs.patrolId ?? "—"} />
             </dl>

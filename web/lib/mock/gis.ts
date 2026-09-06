@@ -11,11 +11,7 @@ export interface BeatPolygon {
   name: string;
   division: string;
   range: string;
-  points: string; // SVG polygon points (largest / first ring)
-  /** Additional SVG rings for fragmented beats — MultiPolygon-safe (one
-   *  string per outer ring). `points` stays the primary ring for labels &
-   *  region tagging; renderers dissolve / union across parts. */
-  parts?: string[];
+  points: string; // SVG polygon points
   coveragePct: number | null;
   isZeroPatrol?: boolean;
   /** Region tags (client-side spatial resolution over real polygons). */
@@ -30,16 +26,6 @@ export interface GisMarker {
   x: number;
   y: number;
   tone?: string;
-  /**
-   * Optional REAL record fields for map popups — populated only when the
-   * backend provides them, never fabricated. Missing fields render as "—".
-   */
-  category?: string;
-  severity?: string;
-  status?: string;
-  occurredAt?: string;
-  reporter?: string | null;
-  accuracyM?: number | null;
 }
 
 export interface GisRoute {
@@ -50,16 +36,6 @@ export interface GisRoute {
   points: string; // SVG polyline points
   color: string;
   timedPoints?: { x: number; y: number; t: number }[];
-  /** Optional REAL patrol fields for map popups ("—" when absent). */
-  patrolType?: string | null;
-  rangerName?: string | null;
-  startedAt?: string | null;
-  endedAt?: string | null;
-  /** Derived ONLY from the recorded GPS trace (timestamps / haversine). */
-  durationMinutes?: number | null;
-  distanceKm?: number | null;
-  pointCount?: number | null;
-  rangerId?: string | null;
 }
 
 export interface HeatBlock {

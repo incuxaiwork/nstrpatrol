@@ -34,8 +34,8 @@ const PAGE_SIZE = 10;
 export default function PatrolPermissionsPage() {
   const router = useRouter();
   const { pushToast } = useApp();
-  const { data, error, loading, reload } = useAsyncData(() => authorizations.list(), [], { cacheKey: "patrols:auths" });
-  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  const { data, error, loading, reload } = useAsyncData(() => authorizations.list());
+  const roster = useAsyncData(() => rangers.list());
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -242,24 +242,14 @@ export default function PatrolPermissionsPage() {
                     </>
                   )}
                   {canManage && a.status === "draft" && (
-                    <>
-                      <Link
-                        href={`/patrols/permissions/new?edit=${a.id}`}
-                        title="Continue draft"
-                        aria-label={`Continue draft ${a.id}`}
-                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
-                      >
-                        <Icon name="edit" size={13} />
-                      </Link>
-                      <button
-                        onClick={() => setConfirming({ id: a.id, kind: "approve" })}
-                        title="Quick approve draft"
-                        aria-label={`Quick approve draft ${a.id}`}
-                        className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-forest-700 transition-colors hover:border-forest-600"
-                      >
-                        <Icon name="check" size={13} />
-                      </button>
-                    </>
+                    <Link
+                      href={`/patrols/permissions/new?edit=${a.id}`}
+                      title="Continue draft"
+                      aria-label={`Continue draft ${a.id}`}
+                      className="flex size-7 items-center justify-center rounded-md border border-line bg-white text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                    >
+                      <Icon name="edit" size={13} />
+                    </Link>
                   )}
                   {canManage && a.status === "active" && (
                     <>

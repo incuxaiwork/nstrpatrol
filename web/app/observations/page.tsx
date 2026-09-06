@@ -17,6 +17,7 @@ import { Donut, DonutLegend } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
 import { categoryMeta } from "@/lib/mock/observations";
+import { unitName } from "@/lib/mock/hierarchy";
 import { timeAgo } from "@/lib/utils";
 
 
@@ -31,7 +32,7 @@ const categoryIcon: Record<string, IconName> = {
 
 export default function ObservationsDashboardPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => observations.list(), [], { cacheKey: "observations:list" });
+  const { data, error, loading, reload } = useAsyncData(() => observations.list());
 
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
@@ -128,8 +129,7 @@ export default function ObservationsDashboardPage() {
                       {o.priority === "urgent" && <Badge tone="danger">Urgent</Badge>}
                     </p>
                     <p className="text-xs text-ink-soft">
-                      {o.code} · {o.recordedBy} · {timeAgo(o.recordedAt)}
-                      {o.range && ` · ${o.range}`}
+                      {o.code} · {o.recordedBy} · {timeAgo(o.recordedAt)} · {unitName(o.range)}
                     </p>
                   </div>
                   <Badge tone={severityTone[o.severity]}>{severityLabel[o.severity]}</Badge>

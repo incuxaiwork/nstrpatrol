@@ -5,17 +5,12 @@
  *
  * Semantics: every checkbox drives REAL MapLibre layer visibility
  * (setLayoutProperty visibility) — there are no decorative toggles. The
- * basemap is a single-choice radio (atlas / street / terrain / satellite);
+ * basemap is a single-choice radio (atlas / street / satellite / terrain);
  * switching it never moves the camera.
- *
- * The basemap registry lives in lib/basemaps.ts; this module re-exports the
- * shared `BasemapKey` type and the radio `BASEMAP_OPTIONS` so control panels
- * stay import-light.
  */
 
-import type { BasemapKey } from "@/lib/basemaps";
-
-export { BASEMAP_OPTIONS, type BasemapKey } from "@/lib/basemaps";
+/** Single-choice basemap. "atlas" is the offline NSTR.mbtiles raster. */
+export type BasemapKey = "atlas" | "street" | "satellite" | "terrain";
 
 /**
  * Visibility state of every map layer group. The web counterpart of the
@@ -29,6 +24,7 @@ export interface ForestLayerState {
   ranges: boolean;
   compartments: boolean;
   analysisGrid: boolean;
+  grids: boolean;
   routes: boolean;
   rangers: boolean;
   markers: boolean;
@@ -40,25 +36,28 @@ export interface ForestLayerState {
 }
 
 export const DEFAULT_LAYER_STATE: ForestLayerState = {
-  // Atlas (OpenFreeMap online vector basemap) is the default GIS basemap —
-  // it scales cleanly to every zoom. Satellite is EOX Sentinel-2 cloudless
-  // (open-access, keyless — no 403 traps). Administrative boundaries and the
-  // analysis grid ship OFF by default so a fresh GIS page stays clean — the
-  // admin reveals them via the MAP LAYERS panel as needed.
-  basemap: "atlas",
-  boundary: false,
-  beats: false,
-  ranges: false,
-  compartments: false,
-  analysisGrid: false,
-  routes: false,
-  rangers: false,
-  markers: false,
-  sos: false,
-  zeropatrol: false,
-  coverage: false,
+  basemap: "satellite",
+  boundary: true,
+  beats: true,
+  ranges: true,
+  compartments: true,
+  analysisGrid: true,
+  grids: true,
+  routes: true,
+  rangers: true,
+  markers: true,
+  sos: true,
+  zeropatrol: true,
+  coverage: true,
   heat: false,
 };
+
+export const BASEMAP_OPTIONS: { key: BasemapKey; label: string; subtitle: string }[] = [
+  { key: "atlas", label: "Atlas (offline)", subtitle: "NSTR.mbtiles raster atlas via the portal tile proxy" },
+  { key: "street", label: "Street", subtitle: "OpenStreetMap raster tiles (online)" },
+  { key: "satellite", label: "Satellite", subtitle: "Esri World Imagery (online)" },
+  { key: "terrain", label: "Terrain", subtitle: "OpenTopoMap topographic relief (online)" },
+];
 
 /** One checkbox row of the external MAP LAYERS panel. */
 export interface OverlayRow {
@@ -82,27 +81,28 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
     {
       label: "Forest & administrative",
       rows: [
-        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid red reserve outline & label" },
-        { key: "ranges", title: "Range Boundaries", subtitle: "Vivid pink range hulls & labels" },
-        { key: "beats", title: "Beat Boundaries", subtitle: "Orange beat outlines & labels — no fill" },
-        { key: "compartments", title: "Compartment Boundaries", subtitle: "Bright sky-blue dashed internal lines (zoom in) & labels" },
+        { key: "boundary", title: "Forest Boundary", subtitle: "Strongest boundary — solid deep-green reserve outline & label" },
+        { key: "ranges", title: "Range Boundaries", subtitle: "Burnt-sienna dashed range hulls & labels" },
+        { key: "beats", title: "Beat Boundaries", subtitle: "Teal beat outlines & labels — no fill" },
+        { key: "compartments", title: "Compartment Boundaries", subtitle: "Thin amber internal lines (zoom in) & labels" },
       ],
     },
     {
       label: "Grid",
       rows: [
         { key: "analysisGrid", title: `Analysis Grid — ${gridSizeLabelStr}`, subtitle: "Configurable cells over the forest area" },
+        { key: "grids", title: "Reference ForestGrid", subtitle: "Backend survey cells (~3.3 km) — authoritative coverage grid" },
       ],
     },
     {
       label: "Operations",
       rows: [
-        { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces, replay track & the LIVE window of active patrols" },
-        { key: "rangers", title: "Ranger Positions", subtitle: "Latest GPS fix per ranger on an ACTIVE patrol (GET /api/patrols/live)" },
+        { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces & replay track" },
+        { key: "rangers", title: "Ranger Positions", subtitle: "Ranger markers on the ground" },
         { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
         { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
         { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },
-        { key: "coverage", title: "Patrol Coverage", subtitle: "Per-beat coverage tint" },
+        { key: "coverage", title: "Patrol Coverage", subtitle: "Patrolled / unpatrolled grid cells + per-beat coverage tint" },
         { key: "heat", title: "Danger Heat", subtitle: "Incident heat blocks" },
       ],
     },

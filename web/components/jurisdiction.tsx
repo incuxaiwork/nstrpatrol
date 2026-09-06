@@ -9,6 +9,7 @@
 import { Badge, Card, CardHeader } from "@/components/ui";
 import { Icon } from "@/components/icons";
 import { mapBeatsRaw } from "@/lib/mock/gis";
+import { unitName } from "@/lib/mock/hierarchy";
 import { authStatusLabel, authStatusTone, jurisdictionLabel, jurisdictionTone } from "@/lib/jurisdiction";
 import type { JurisdictionState, PatrolAuthorization } from "@/lib/types";
 
@@ -25,9 +26,7 @@ export function JurisdictionBadge({ state }: { state: JurisdictionState }) {
           ? "Authorized exception"
           : state === "pending-review"
             ? "Pending review"
-            : state === "unknown"
-              ? "Unknown / Unassigned"
-              : "Requires review"}
+            : "Requires review"}
     </Badge>
   );
 }
@@ -47,22 +46,6 @@ export function JurisdictionBanner({
   homeArea?: string;
   patrolArea: string;
 }) {
-  // Data gap, not a violation — neutral presentation, never alarm styling.
-  if (state === "unknown") {
-    return (
-      <div className="flex items-start gap-3 rounded-card border border-line bg-surface px-4 py-3">
-        <Icon name="info" size={16} className="mt-0.5 shrink-0 text-ink-soft" />
-        <div>
-          <p className="text-sm font-medium text-ink">Jurisdiction unknown</p>
-          <p className="mt-0.5 text-xs text-ink-soft">
-            The ranger&apos;s home jurisdiction is not on record for this patrol
-            {patrolArea ? ` (patrol area: ${patrolArea})` : ""}. Assign the ranger to an organizational unit to enable validation.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   if (state === "normal") {
     return (
       <div className="flex items-start gap-3 rounded-card border border-forest-200 bg-forest-50 px-4 py-3">
@@ -209,8 +192,8 @@ export function JurisdictionCompareCard({ authorization }: { authorization: Patr
             {rows.map((r) => (
               <tr key={r.label} className="border-t border-line">
                 <td className="py-2 pr-4 text-xs font-medium text-ink-soft">{r.label}</td>
-                <td className="py-2 pr-4 font-medium text-ink">{r.home || "—"}</td>
-                <td className="py-2 font-medium text-[#8a4b00]">{r.auth || "—"}</td>
+                <td className="py-2 pr-4 font-medium text-ink">{unitName(r.home)}</td>
+                <td className="py-2 font-medium text-[#8a4b00]">{unitName(r.auth)}</td>
               </tr>
             ))}
           </tbody>
