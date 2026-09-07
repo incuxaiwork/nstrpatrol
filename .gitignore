@@ -46,3 +46,8 @@ harness-shots/
 web/.scratch/
 backend/scratch/
 .scripts/
+
+# temp worksheets / ad-hoc probes
+create_worksheet*.js
+backend/test-haversine.cjs
+test-haversine.cjs
