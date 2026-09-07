@@ -33,3 +33,16 @@ pnpm-debug.log*
 
 # Misc
 *.pem
+
+# harness / probe caches — never push (reverted PR had 7k+ chrome-probe binaries)
+scripts/.liveshots*/
+scripts/.audit/
+.scripts/
+.probe/
+.audit/
+.chrome-profile/
+harness-shots/
+.liveshots/
+web/.scratch/
+backend/scratch/
+.scripts/
