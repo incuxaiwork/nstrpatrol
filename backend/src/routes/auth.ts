@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { prisma } from '../db/prisma';
+import { prisma, withDbRetry } from '../db/prisma';
 import { requireAuth, optionalAuth } from '../middleware/auth';
 import { validateBody } from '../middleware/validate';
 import { HttpError } from '../middleware/error';
 import { hashPassword, verifyPassword } from '../lib/password';
 import { generateRefreshToken, hashRefreshToken, signAccessToken } from '../lib/jwt';
-import { serializeUser, userSelect } from '../lib/user';
+import { ROLE_FOR_CADER, serializeUser, userSelect } from '../lib/user';
 
 export const authRouter = Router();
 
@@ -17,13 +17,19 @@ const registerSchema = z.object({
   email: emailSchema,
   password: passwordSchema,
   fullName: z.string().trim().min(1).max(120),
-  role: z.enum(['ADMIN', 'RANGER']).default('RANGER'),
   cader: z.enum(['DFO', 'DyDFO', 'FRO', 'DyRO', 'FSO', 'FBO', 'ABO']).default('FBO'),
   phone: z.string().trim().max(30).nullish(),
+  // Optional organizational scope persisted on the new account (Provision
+  // User Account workflow). The User model already carries these nullable
+  // columns — no schema migration is required.
+  divisionId: z.string().trim().max(80).nullish(),
+  subDivisionId: z.string().trim().max(80).nullish(),
+  rangeId: z.string().trim().max(80).nullish(),
+  beatId: z.string().trim().max(80).nullish(),
 });
 
 authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (req, res) => {
-  const { email, password, fullName, role, cader, phone } = req.body;
+  const { email, password, fullName, cader, phone, divisionId, subDivisionId, rangeId, beatId } = req.body;
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) throw new HttpError(409, 'conflict', 'A user with that email already exists');
 
@@ -36,7 +42,9 @@ authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (
     throw new HttpError(403, 'forbidden', 'Admin access required to create users');
   }
 
-  const effectiveRole = isFirstUser ? 'ADMIN' : role;
+  // Authoritative mapping: the role is derived server-side from the
+  // organizational cader — a client-suggested role is never honored.
+  const effectiveRole = isFirstUser ? 'ADMIN' : ROLE_FOR_CADER[cader] ?? 'RANGER';
   const passwordHash = await hashPassword(password);
   const user = await prisma.user.create({
     data: {
@@ -47,6 +55,12 @@ authRouter.post('/register', optionalAuth, validateBody(registerSchema), async (
       cader,
       phone: phone ?? null,
       isAdmin: effectiveRole === 'ADMIN',
+      // Persist the admin-provisioned organizational scope made available so
+      // login /me can geofence the new account by Range/Beat immediately.
+      divisionId: divisionId ?? undefined,
+      subDivisionId: subDivisionId ?? undefined,
+      rangeId: rangeId ?? undefined,
+      beatId: beatId ?? undefined,
     },
     select: userSelect,
   });
@@ -60,17 +74,21 @@ const loginSchema = z.object({
 
 authRouter.post('/login', validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
-  const user = await prisma.user.findUnique({ where: { email } });
+  // Retried on transient connectivity so a brief Postgres blip on login does
+  // not surface as a raw driver error to the admin.
+  const user = await withDbRetry(() => prisma.user.findUnique({ where: { email } }));
   if (!user || !(await verifyPassword(password, user.passwordHash))) {
     throw new HttpError(401, 'invalid_credentials', 'Invalid email or password');
   }
   if (!user.isActive) throw new HttpError(403, 'account_disabled', 'This account is disabled');
 
   const refresh = generateRefreshToken();
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { refreshTokenHash: refresh.hash },
-  });
+  await withDbRetry(() =>
+    prisma.user.update({
+      where: { id: user.id },
+      data: { refreshTokenHash: refresh.hash },
+    })
+  );
 
   // Look up range and beat names for geofencing
   let rangeName: string | null = null;

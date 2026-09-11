@@ -14,7 +14,7 @@ import type {
   PatrolEvent,
   PatrolMethod,
   PatrolStatus,
-  AdminUser,
+  PatrolViolation,
   NotificationItem,
   Ranger,
 } from "@/lib/types";
@@ -70,44 +70,60 @@ export function unionExtent(...fcs: GeoJsonFeatureCollection[]): GeoExtent | nul
   };
 }
 
-/** Projector that maps lon/lat into the shared SVG viewBox (1000×700). */
+/**
+ * Projector that maps lon/lat into the shared SVG viewBox (see SVG_MAP_SPACE).
+ * Pure affine map with NO integer rounding: because the inverse (svgToLngLat
+ * in map-space.ts) uses the exact same constants, projecting a polygon to SVG
+ * and projecting its centroid back reproduces the source centroid exactly (the
+ * coordinate-invertibility contract; verified by scripts/verify-gis-projection.mjs).
+ */
 function makeProjector(extent: GeoExtent) {
   const spanLon = Math.max(extent.maxLon - extent.minLon, 1e-6);
   const spanLat = Math.max(extent.maxLat - extent.minLat, 1e-6);
   const availW = VIEW.w - VIEW.pad * 2;
   const availH = VIEW.h - VIEW.pad * 2;
   return (lon: number, lat: number) => ({
-    x: Math.round(VIEW.pad + ((lon - extent.minLon) / spanLon) * availW),
-    y: Math.round(VIEW.pad + ((extent.maxLat - lat) / spanLat) * availH),
+    x: VIEW.pad + ((lon - extent.minLon) / spanLon) * availW,
+    y: VIEW.pad + ((extent.maxLat - lat) / spanLat) * availH,
   });
 }
 
+/**
+ * The SINGLE shared projection box. The explicitly passed extent (services.ts
+ * computes one union extent for all layers so they align) is authoritative;
+ * without it each collection keeps its own union; without geometry the SVG
+ * viewBox constants (the real Markapur survey box) take over.
+ */
 function extentOf(fc: GeoJsonFeatureCollection, fallback: GeoExtent | null): GeoExtent {
-  return unionExtent(fc) ?? fallback ?? {
-    minLon: SVG_MAP_SPACE.minLon,
-    maxLon: SVG_MAP_SPACE.maxLon,
-    minLat: SVG_MAP_SPACE.minLat,
-    maxLat: SVG_MAP_SPACE.maxLat,
-  };
+  return fallback ?? unionExtent(fc) ?? SVG_MAP_SPACE;
 }
 
 export function beatsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BeatPolygon[] {
   const features = fc.features.filter(
-    (f) => f.geometry?.type === "Polygon" && Array.isArray((f.geometry.coordinates as unknown[])[0])
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+      Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
   return features.map((f, i) => {
-    const ring = ringOf(f);
     const coverage = Number(f.properties.coveragePct ?? f.properties.Coverage_pct);
+    // ALL outer rings (Polygon → 1 ring; MultiPolygon → one per part) so no
+    // fragment of a fragmented beat is ever dropped. `points` keeps the
+    // first (primary) ring for labels, containment and single-anchor logic.
+    const rings = ringsOf(f).filter((ring) => ring.length >= 3);
+    const svg = (ring: LngLatRing[]) =>
+      ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ");
+    const siblingParts = rings.length > 1 ? rings.map(svg) : undefined;
     return {
       id: String(f.id ?? `api-beat-${i}`),
       name: String(f.properties.Beat ?? f.properties.name ?? `Beat ${i + 1}`),
       division: String(f.properties.Division ?? ""),
       range: String(f.properties.Range ?? ""),
-      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+      points: rings[0] ? svg(rings[0]) : "",
+      parts: siblingParts,
       coveragePct: Number.isFinite(coverage) ? coverage : null,
       // Zero-patrol flag only when the backend supplies a coverage value.
       ...(Number.isFinite(coverage) ? { isZeroPatrol: coverage < 70 } : {}),
@@ -120,6 +136,11 @@ export interface CompartmentPolygon {
   compNo: string;
   beat: string;
   points: string;
+  /** Interior rings of the same polygon part (holes), SVG point-strings.
+   *  Present only when the source polygon actually carries holes; the
+   *  renderer emits them as [outer, ...holes] so enclosures read as
+   *  genuine cut-outs instead of solidly filled compartments. */
+  holes?: string[];
   areaHa: number;
   /** Region tags (client-side spatial resolution over real polygons). */
   rangeId?: string;
@@ -148,16 +169,51 @@ export interface GridPolygon {
   compId?: string;
 }
 
-/** All outer rings of a Polygon or MultiPolygon + overall bbox. */
+/** All outer rings of a Polygon or MultiPolygon (one entry per part). */
 function ringsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): LngLatRing[][] {
   const g = feature.geometry;
   if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
-  const coords = g.coordinates as unknown[][];
-  return coords.map((poly: unknown) => {
+  /* Normalize to a list of polygons first — for a plain Polygon the
+   * coordinates ARE the single polygon's ring list; taking [0] of each
+   * ring would grab a coordinate pair instead of the outer ring. */
+  const polys: unknown[][] =
+    g.type === "Polygon" ? [g.coordinates as unknown[]] : (g.coordinates as unknown[][]);
+  return polys.map((poly) => {
     const outer = Array.isArray(poly) ? poly[0] : poly;
     if (!Array.isArray(outer)) return [];
-    return (outer as number[][]).map(([lon, lat]) => ({ lon, lat }));
+    return (outer as number[][])
+      .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+      .map(([lon, lat]) => ({ lon, lat }));
   });
+}
+
+/** One polygon part plus its interior rings (holes), validity-filtered. */
+interface RingedPart {
+  outer: LngLatRing[];
+  holes: LngLatRing[][];
+}
+
+const asLngLatRing = (ring: unknown): LngLatRing[] =>
+  ((Array.isArray(ring) ? ring : []) as number[][])
+    .filter((p) => Array.isArray(p) && p.length >= 2 && Number.isFinite(p[0]) && Number.isFinite(p[1]))
+    .map(([lon, lat]) => ({ lon, lat }));
+
+/** Normalize a Polygon/MultiPolygon into parts, keeping each part's holes. */
+function ringedPartsOf(feature: { geometry: { type: string; coordinates: unknown } | null }): RingedPart[] {
+  const g = feature.geometry;
+  if (!g || (g.type !== "Polygon" && g.type !== "MultiPolygon")) return [];
+  const polys: unknown[][] =
+    g.type === "Polygon" ? [g.coordinates as unknown[]] : (g.coordinates as unknown[][]);
+  return polys
+    .filter((poly) => Array.isArray(poly) && poly.length >= 1)
+    .map((poly) => ({
+      outer: asLngLatRing(poly[0]),
+      holes: (poly as unknown[])
+        .slice(1)
+        .map(asLngLatRing)
+        .filter((ring) => ring.length >= 3),
+    }))
+    .filter((part) => part.outer.length >= 3);
 }
 
 export function boundariesFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): BoundaryPolygon[] {
@@ -198,23 +254,33 @@ export function gridsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExten
 
 export function compartmentsFromGeoJson(fc: GeoJsonFeatureCollection, extent?: GeoExtent | null): CompartmentPolygon[] {
   const features = fc.features.filter(
-    (f) => (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
+    (f) =>
+      (f.geometry?.type === "Polygon" || f.geometry?.type === "MultiPolygon") &&
       Array.isArray((f.geometry.coordinates as unknown[])[0])
   );
   if (features.length === 0) return [];
 
   const proj = makeProjector(extentOf(fc, extent ?? null));
 
-  return features.map((f, i) => {
-    const ring = ringOf(f);
+  /* One polygon per ringed part — MultiPolygons expand into sibling parts
+   * sharing compNo/beat/area (deterministic -pN id suffixes) so no feature
+   * ever silently disappears from the map. Interior rings (holes) stay
+   * attached to their own outer ring and are NOT flattened into siblings. */
+  return features.flatMap((f, i) => {
+    const compNo = String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`);
+    const beat = String(f.properties.BEAT ?? "");
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
-    return {
-      id: String(f.id ?? `api-comp-${i}`),
-      compNo: String(f.properties.COMP_NO ?? f.properties.compNo ?? `C${i + 1}`),
-      beat: String(f.properties.BEAT ?? ""),
-      points: ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
-      areaHa: Number.isFinite(area) ? area : 0,
-    };
+    const areaHa = Number.isFinite(area) ? area : 0;
+    const baseId = String(f.id ?? `api-comp-${i}`);
+    return ringedPartsOf(f)
+      .map((part, partIdx) => ({
+        id: partIdx === 0 ? baseId : `${baseId}-p${partIdx + 1}`,
+        compNo,
+        beat,
+        points: part.outer.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" "),
+        ...(part.holes.length ? { holes: part.holes.map((ring) => ring.map((p) => `${proj(p.lon, p.lat).x},${proj(p.lon, p.lat).y}`).join(" ")) } : {}),
+        areaHa,
+      }));
   });
 }
 
@@ -251,6 +317,10 @@ function slugify(raw: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "");
+}
+
+export function compartmentIdFor(beatId: string, compNo: string): string {
+  return `${beatId}-c-${slugify(compNo)}`;
 }
 
 /** Deterministic id/name mapping for the known Markapur hierarchy. */
@@ -361,24 +431,30 @@ export function hierarchyFromGeoJson(
     }
   }
 
-  const compartments: HierarchyCompartment[] = (compsFc?.features ?? []).flatMap((f) => {
+  const compartments: HierarchyCompartment[] = (compsFc?.features ?? []).flatMap((f, i) => {
+    const featureId = String(f.id ?? `comp-${i}`);
     const beatName = String(f.properties.BEAT ?? "");
     const compNo = String(f.properties.COMP_NO ?? "");
+    const rawRange = String(f.properties.RANGE ?? "");
     const area = Number(f.properties.AREA_HA ?? f.properties.areaHa);
-    const beatId = beatIdsByName.get(beatName);
-    if (!beatName || !compNo || !beatId) return [];
-    const rangeId = Object.entries(beats)
-      .find(([, list]) => list.some((b) => b.id === beatId))?.[0];
-    if (!rangeId) return [];
-    return [
-      {
-        id: `${beatId}-c-${slugify(compNo)}`,
-        compNo,
-        beat: beatId,
-        range: rangeId,
-        areaHa: Number.isFinite(area) ? area : 0,
-      },
-    ];
+    const areaHa = Number.isFinite(area) ? area : 0;
+    // The backend feature id (OBJECTID_1 ≡ Compartment.id) is the SINGLE
+    // unique compartment identity — (BEAT, COMP_NO) is NOT unique (many
+    // ENCLOSURE polygons share COMP_NO "0" within one beat). Use it so every
+    // compartment stays an individual, distinct selectable feature.
+    const beatId = beatName ? beatIdsByName.get(beatName) : undefined;
+    // No artificial validation rule assuming every feature has a Beat: the
+    // legitimate ENCLOSURE features (COMP_NO "0") with no Beat/Range are
+    // retained as individually selectable compartments, keyed by their own
+    // stable feature id, so they are never silently dropped from the filter.
+    if (beatId) {
+      const rangeId = Object.entries(beats)
+        .find(([, list]) => list.some((b) => b.id === beatId))?.[0];
+      if (rangeId) {
+        return [{ id: featureId, compNo, beat: beatId, range: rangeId, areaHa }];
+      }
+    }
+    return [{ id: featureId, compNo, beat: "", range: rangeIdFor(rawRange) ?? "", areaHa }];
   });
 
   return { divisions, ranges, beats, compartments };
@@ -396,9 +472,18 @@ const patrolStatusMap: Record<string, PatrolStatus> = {
 
 const patrolMethodMap: Record<string, PatrolMethod> = {
   WALK: "foot",
-  BICYCLE: "cycle",
-  VEHICLE: "four-wheeler",
+  FOOT: "foot",
+  STILL: "foot",
   STATIONARY: "foot",
+  UNKNOWN: "foot",
+  BICYCLE: "cycle",
+  CYCLE: "cycle",
+  VEHICLE: "four-wheeler",
+  CAR: "four-wheeler",
+  BIKE: "cycle",
+  IN_VEHICLE: "four-wheeler",
+  ON_BICYCLE: "cycle",
+  ON_FOOT: "foot",
 };
 
 export function patrolFromApi(
@@ -411,9 +496,24 @@ export function patrolFromApi(
     startedAt?: string | null;
     endedAt?: string | null;
     createdAt?: string;
+    beat?: string | null;
     forest?: { code?: string } | null;
     user?: { fullName?: string } | null;
-    stats?: { points?: number; distanceKm?: number; durationSeconds?: number };
+    detectedMethod?: string | null;
+    patrolMethod?: string | null;
+    totalSteps?: number | null;
+    avgSpeedKmh?: number | null;
+    geography?: {
+      beatId: string | null;
+      beat: string | null;
+      range: string | null;
+      rangeId: string | null;
+      subDivision: string | null;
+      subDivisionId: string | null;
+      division: string | null;
+    } | null;
+    stats?: { points?: number; distanceKm?: number | null; durationSeconds?: number; steps?: number; moveMinutes?: number; modes?: { mode: string; seconds: number }[] };
+    modes?: { mode: string; seconds: number }[];
   },
   points: { lat: number; lng: number; t?: string | null }[] = [],
   patrolIncidents: { patrolId?: string | null; photos?: string[] }[] = []
@@ -422,34 +522,143 @@ export function patrolFromApi(
   const firstPoint = points[0];
   const lastPoint = points[points.length - 1];
   const timeline: PatrolEvent[] = [];
-  if (firstPoint?.t) timeline.push({ time: firstPoint.t, kind: "start", label: "Patrol started" });
-  if (lastPoint?.t) timeline.push({ time: lastPoint.t, kind: "end", label: "Patrol ended" });
+  // Start
+  const startIso = firstPoint?.t ?? p.startedAt ?? p.createdAt ?? null;
+  if (startIso) timeline.push({ time: startIso, kind: "start", label: "Patrol started" });
+  // Rest periods from activity modes (STILL/STATIONARY)
+  const modes = (p.stats?.modes as { mode: string; seconds: number }[] | undefined) ?? (p as { modes?: { mode: string; seconds: number }[] }).modes;
+  if (modes) {
+    // We don't have per-segment start times here, only aggregated seconds per mode.
+    // For a richer timeline we would need the raw segments, but we can at least
+    // surface a single rest entry when idle time > 2 min.
+    const idleSec = modes.filter((m) => ["STILL", "STATIONARY", "UNKNOWN"].includes(m.mode.toUpperCase())).reduce((a, m) => a + m.seconds, 0);
+    if (idleSec > 120) {
+      // Place the rest marker mid-patrol for ordering
+      const midMs = startIso ? new Date(startIso).getTime() + (new Date(lastPoint?.t ?? p.endedAt ?? startIso).getTime() - new Date(startIso).getTime()) / 2 : null;
+      if (midMs) timeline.push({ time: new Date(midMs).toISOString(), kind: "checkpoint", label: `Rest period — ${Math.round(idleSec / 60)} min idle` });
+    }
+  }
+  // Incidents in chronological order
+  for (const inc of mine as unknown as { patrolId?: string | null; occurredAt?: string; reportedAt?: string; title?: string; type?: string }[]) {
+    const t = (inc as { occurredAt?: string }).occurredAt ?? (inc as { reportedAt?: string }).reportedAt;
+    if (!t) continue;
+    const label = (inc as { title?: string }).title ? `Incident noted — ${(inc as { title?: string }).title}` : "Incident noted";
+    timeline.push({ time: t, kind: "incident", label });
+  }
+  // Also handle generic patrolIncidents that are already Observation-shaped (from list)
+  // End
+  const endIso = lastPoint?.t ?? p.endedAt ?? null;
+  if (endIso) timeline.push({ time: endIso, kind: "end", label: "Patrol ended" });
+  // Sort chronologically
+  timeline.sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+
+  // Violations — method mismatch and speed
+  const violations: PatrolViolation[] = [];
+  const selectedMethod = p.patrolMethod ?? p.type ?? null;
+  const detected = p.detectedMethod ?? (p as { detectedMethod?: string | null }).detectedMethod ?? null;
+  // Method mismatch: user selected foot but device detected vehicle/bicycle
+  if (selectedMethod && detected) {
+    const sel = selectedMethod.toUpperCase();
+    const det = detected.toUpperCase();
+    const isFootSel = sel === "WALK" || sel === "FOOT" || sel === "STATIONARY";
+    const isVehicleDet = ["VEHICLE", "IN_VEHICLE", "BICYCLE", "ON_BICYCLE", "CAR", "BIKE"].includes(det);
+    if (isFootSel && isVehicleDet) {
+      violations.push({
+        time: startIso ?? new Date().toISOString(),
+        type: "method_mismatch",
+        message: `Method mismatch — selected Foot but detected ${det}`,
+        details: `Selected: ${selectedMethod}, Detected: ${detected}`,
+      });
+    }
+  }
+  // Speed violation — foot should be < 8 km/h, bicycle < 25, vehicle < 80
+  const avgSpeed = (p as { avgSpeedKmh?: number | null }).avgSpeedKmh ?? null;
+  if (avgSpeed != null && Number.isFinite(avgSpeed)) {
+    const sel = (selectedMethod ?? "").toUpperCase();
+    let limit = 80;
+    if (sel === "WALK" || sel === "FOOT") limit = 8;
+    else if (sel === "BICYCLE") limit = 25;
+    if (avgSpeed > limit) {
+      violations.push({
+        time: endIso ?? startIso ?? new Date().toISOString(),
+        type: "speed",
+        message: `Speed violation — ${avgSpeed.toFixed(1)} km/h exceeds ${limit} km/h for ${selectedMethod ?? "patrol"}`,
+        details: `Avg speed ${avgSpeed} km/h`,
+      });
+    }
+  }
   return {
     id: p.id,
     code: `PT-${p.id.slice(-6).toUpperCase()}`,
     title: p.name ?? (p.forest?.code ? `${p.forest.code} patrol` : "Field patrol"),
-    type: "general-duties",
-    method: p.type ? patrolMethodMap[p.type] ?? undefined : undefined,
+    // No semantic patrol-type entity exists in the backend — leave undefined
+    // ("—" / "Unavailable" in the UI). The device's movement mode is mapped
+    // separately into `method`.
+    type: undefined,
+    method: (() => {
+      // Prefer the device-detected latest mode (most accurate), then the
+      // declared patrolMethod, then the legacy type enum.
+      const src = p.detectedMethod ?? p.patrolMethod ?? p.type;
+      return src ? patrolMethodMap[src] ?? undefined : undefined;
+    })(),
     status: (p.status ? patrolStatusMap[p.status] : undefined) ?? "ongoing",
     objective: p.description ?? "",
-    division: "",
-    range: "",
-    beat: "",
+    // Authoritative server-resolved geography only. Unresolved levels stay
+    // "" (rendered "—"), never guessed.
+    division: p.geography?.division ?? "",
+    subDivision: p.geography?.subDivision ?? "",
+    range: p.geography?.range ?? "",
+    beat: p.geography?.beat ?? p.beat ?? "",
     teamId: "",
     leader: p.user?.fullName ?? "",
     members: [],
     startScheduled: p.startedAt ?? p.createdAt ?? new Date().toISOString(),
     startActual: firstPoint?.t ?? p.startedAt ?? undefined,
     endActual: lastPoint?.t ?? p.endedAt ?? undefined,
-    distanceKm: p.stats?.distanceKm ?? 0,
-    durationMin: p.stats?.durationSeconds ? Math.round(p.stats.durationSeconds / 60) : 0,
-    coveragePct: 0,
-    checkpoints: 0,
+    distanceKm: (() => {
+      // Prefer authoritative backend distance (PostGIS or pure-PG Haversine).
+      if (typeof p.stats?.distanceKm === 'number') return p.stats.distanceKm;
+      // Defensive fallback: compute Haversine from already-loaded GPS points
+      // when backend stats are entirely absent (e.g. no GPS points at all).
+      if (points.length >= 2) {
+        let total = 0;
+        for (let i = 1; i < points.length; i++) {
+          const dLat = ((points[i].lat - points[i - 1].lat) * Math.PI) / 180;
+          const dLng = ((points[i].lng - points[i - 1].lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) ** 2 +
+            Math.cos((points[i - 1].lat * Math.PI) / 180) *
+              Math.cos((points[i].lat * Math.PI) / 180) *
+              Math.sin(dLng / 2) ** 2;
+          total += 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+        return Math.round(total * 100) / 100;
+      }
+      return null;
+    })(),
+    durationMin: (() => {
+      if (p.stats?.durationSeconds) return Math.round(p.stats.durationSeconds / 60);
+      // Fallback: compute from GPS point timestamps when backend stats are
+      // 0 (PostGIS unavailable) but the points carry real timestamps.
+      if (firstPoint?.t && lastPoint?.t) {
+        const spanMs = new Date(lastPoint.t).getTime() - new Date(firstPoint.t).getTime();
+        if (spanMs > 0) return Math.round(spanMs / 60_000);
+      }
+      return 0;
+    })(),
+    steps: p.stats?.steps ?? p.totalSteps ?? null,
+    moveMinutes: p.stats?.moveMinutes ?? null,
+    detectedMethod: p.detectedMethod ?? p.patrolMethod ?? p.type ?? null,
+    modes: p.stats?.modes ?? (p as { modes?: { mode: string; seconds: number }[] }).modes ?? undefined,
+    // Real coverage arrives only via GET /api/patrols/:id/coverage/summary on
+    // the DETAIL view (services.patrols.get merges it); lists never carry it.
+    checkpoints: undefined,
     incidents: mine.length,
     observations: mine.length,
     photos: mine.reduce((acc, i) => acc + (i.photos?.length ?? 0), 0),
     route: points.map((pt) => ({ lat: pt.lat, lng: pt.lng })),
     timeline,
+    violations: violations.length > 0 ? violations : undefined,
   };
 }
 
@@ -545,38 +754,6 @@ export function observationFromApi(i: {
 }
 
 /* ------------------------------------------------------------------ */
-/* Admin users ↔ backend users                                         */
-/* ------------------------------------------------------------------ */
-
-const roleIdFromApi: Record<string, string> = {
-  ADMIN: "admin",
-  RANGER: "ranger",
-};
-
-export function adminUserFromApi(u: {
-  id: string;
-  fullName?: string;
-  email?: string;
-  role?: string;
-  isActive?: boolean;
-  cader?: string | null;
-}): AdminUser {
-  return {
-    id: u.id,
-    name: u.fullName ?? "",
-    email: u.email ?? "",
-    roleId: u.role ? roleIdFromApi[u.role] ?? u.role.toLowerCase() : "ranger",
-    status: u.isActive === false ? "disabled" : "active",
-    division: "",
-    created: "",
-  };
-}
-
-export function registerRoleFromWeb(roleId: string): "ADMIN" | "RANGER" {
-  return roleId === "admin" ? "ADMIN" : "RANGER";
-}
-
-/* ------------------------------------------------------------------ */
 /* Users → rangers                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -595,6 +772,7 @@ export function rangerFromApi(
     phone?: string | null;
     isActive?: boolean;
     createdAt?: string | null;
+    beatId?: string | null;
   },
   patrols: { userId: string; status: string; startedAt: string | null; endedAt: string | null }[] = []
 ): Ranger {
@@ -618,12 +796,16 @@ export function rangerFromApi(
     division: "",
     range: "",
     beat: "",
+    // Real DB assignment id when the backend has finalized a beat assignment
+    // (users API). No name resolution exists yet — never fabricated.
+    assignedBeatId: u.beatId ?? undefined,
     teamId: "",
     stats: {
       patrols: mine.length,
       distanceKm: 0,
       fieldHours: Math.round(fieldHours * 10) / 10,
-      coveragePct: 0,
+      // No per-ranger coverage aggregate exists in the backend — the field
+      // stays undefined ("—") rather than a fabricated 0%.
       observations: 0,
       incidents: 0,
     },

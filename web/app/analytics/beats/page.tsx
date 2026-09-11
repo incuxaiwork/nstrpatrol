@@ -14,8 +14,8 @@ import { zeroPatrolZones } from "@/lib/mock/gis";
 import { exportRows, stamp } from "@/lib/export";
 
 export default function BeatAnalyticsPage() {
-  const coverage = useAsyncData(() => analytics.beatCoverage());
-  const wildlife = useAsyncData(() => analytics.wildlife());
+  const coverage = useAsyncData(() => analytics.beatCoverage(), [], { cacheKey: "analytics:beatCoverage" });
+  const wildlife = useAsyncData(() => analytics.wildlife(), [], { cacheKey: "analytics:wildlife" });
 
   if (coverage.loading || !coverage.data) return <SkeletonRows rows={6} />;
   if (coverage.error) return <ErrorState message={coverage.error.message} onRetry={coverage.reload} />;

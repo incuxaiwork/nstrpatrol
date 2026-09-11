@@ -58,11 +58,10 @@ export function MapLayersPanel({
             <label
               key={b.key}
               title={b.subtitle}
-              className={`flex cursor-pointer items-center gap-2 rounded-field border px-2.5 py-1.5 text-xs font-medium transition ${
-                layerState.basemap === b.key
+              className={`flex cursor-pointer items-center gap-2 rounded-field border px-2.5 py-1.5 text-xs font-medium transition ${layerState.basemap === b.key
                   ? "border-forest-700 bg-forest-50 text-forest-800"
                   : "border-line bg-white text-ink hover:bg-surface"
-              }`}
+                }`}
             >
               <input
                 type="radio"
