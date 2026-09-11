@@ -150,17 +150,17 @@ export async function patrolScopeFilter(user: ScopeUser): Promise<Prisma.PatrolW
   if (scope.kind === 'DIVISION') return undefined;
   if (scope.kind === 'OPERATIONAL') return { id: '__none__' };
 
-  const [userIds, rangeNames] = await Promise.all([
+  const [userIds, rangeNames, rangeInfo] = await Promise.all([
     userIdsInScope(scope),
     scope.kind === 'SUB_DIVISION' ? rangeNamesInScope(scope) : Promise.resolve([]),
+    scope.kind === 'RANGE' && scope.rangeId
+      ? prisma.range.findUnique({ where: { id: scope.rangeId }, select: { name: true } })
+      : Promise.resolve(null),
   ]);
 
   const and: Prisma.PatrolWhereInput[] = [];
   if (scope.kind === 'RANGE') {
-    const range = scope.rangeId
-      ? await prisma.range.findUnique({ where: { id: scope.rangeId }, select: { name: true } })
-      : null;
-    const beatNames = range ? await beatNamesForRanges([range.name]) : [];
+    const beatNames = rangeInfo ? await beatNamesForRanges([rangeInfo.name]) : [];
     and.push({ OR: [{ beat: { in: beatNames } }, { userId: { in: userIds } }] });
   } else if (scope.kind === 'SUB_DIVISION') {
     const beatNames = await beatNamesForRanges(rangeNames);
@@ -243,18 +243,26 @@ export async function incidentScopeFilter(user: ScopeUser): Promise<Prisma.Incid
   if (scope.kind === 'DIVISION') return undefined;
   if (scope.kind === 'OPERATIONAL') return { id: '__none__' };
 
-  const userIds = await userIdsInScope(scope);
+  const [userIds, rangeNames, rangeInfo] = await Promise.all([
+    userIdsInScope(scope),
+    scope.kind === 'SUB_DIVISION' ? rangeNamesInScope(scope) : Promise.resolve([]),
+    scope.kind === 'RANGE' && scope.rangeId
+      ? prisma.range.findUnique({ where: { id: scope.rangeId }, select: { name: true } })
+      : Promise.resolve(null),
+  ]);
   const or: Prisma.IncidentWhereInput[] = [{ userId: { in: userIds } }];
 
+  let resolvedRangeNames: string[];
   if (scope.kind === 'SUB_DIVISION') {
-    const beatNames = await beatNamesForRanges(await rangeNamesInScope(scope));
-    if (beatNames.length > 0) {
-      const patrolIds = (await prisma.patrol.findMany({ where: { beat: { in: beatNames } }, select: { id: true } })).map((p) => p.id);
-      if (patrolIds.length > 0) or.push({ patrolId: { in: patrolIds } });
-    }
-  } else if (scope.kind === 'RANGE' && scope.rangeId) {
-    const range = await prisma.range.findUnique({ where: { id: scope.rangeId }, select: { name: true } });
-    const beatNames = range ? await beatNamesForRanges([range.name]) : [];
+    resolvedRangeNames = rangeNames;
+  } else if (scope.kind === 'RANGE' && rangeInfo) {
+    resolvedRangeNames = [rangeInfo.name];
+  } else {
+    resolvedRangeNames = [];
+  }
+
+  if (resolvedRangeNames.length > 0) {
+    const beatNames = await beatNamesForRanges(resolvedRangeNames);
     if (beatNames.length > 0) {
       const patrolIds = (await prisma.patrol.findMany({ where: { beat: { in: beatNames } }, select: { id: true } })).map((p) => p.id);
       if (patrolIds.length > 0) or.push({ patrolId: { in: patrolIds } });
@@ -321,14 +329,20 @@ export async function userScopeFilter(user: ScopeUser): Promise<Prisma.UserWhere
   const or: Prisma.UserWhereInput[] = [];
   if (scope.kind === 'SUB_DIVISION' && scope.subDivisionId) {
     or.push({ subDivisionId: scope.subDivisionId });
-    const rangeNames = await rangeNamesInScope(scope);
-    const ranges = await prisma.range.findMany({ where: { name: { in: rangeNames } }, select: { id: true } });
-    if (ranges.length > 0) or.push({ rangeId: { in: ranges.map((r) => r.id) } });
-    const beatNames = await beatNamesForRanges(rangeNames);
-    if (beatNames.length > 0) {
-      const beats = await prisma.beat.findMany({ where: { name: { in: beatNames } }, select: { id: true } });
-      if (beats.length > 0) or.push({ beatId: { in: beats.map((b) => b.id) } });
+    const [rangeNames, scopedUsers] = await Promise.all([
+      rangeNamesInScope(scope),
+      userIdsInScope(scope),
+    ]);
+    if (rangeNames.length > 0) {
+      const ranges = await prisma.range.findMany({ where: { name: { in: rangeNames } }, select: { id: true } });
+      if (ranges.length > 0) or.push({ rangeId: { in: ranges.map((r) => r.id) } });
+      const beatNames = await beatNamesForRanges(rangeNames);
+      if (beatNames.length > 0) {
+        const beats = await prisma.beat.findMany({ where: { name: { in: beatNames } }, select: { id: true } });
+        if (beats.length > 0) or.push({ beatId: { in: beats.map((b) => b.id) } });
+      }
     }
+    if (scopedUsers.length > 0) or.push({ id: { in: scopedUsers } });
   } else if (scope.kind === 'RANGE' && scope.rangeId) {
     or.push({ rangeId: scope.rangeId });
   } else if (scope.kind === 'BEAT' && scope.beatId) {

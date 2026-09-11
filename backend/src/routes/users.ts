@@ -13,6 +13,14 @@ export const usersRouter = Router();
 
 usersRouter.use(requireAuth);
 
+/* ------------------------------------------------------------------ */
+/* Lightweight in-memory TTL cache for user list                       */
+/* ------------------------------------------------------------------ */
+
+interface CacheEntry<T> { at: number; body: T }
+const userListCache = new Map<string, CacheEntry<string>>();
+const USER_LIST_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 15_000;
+
 const listQuery = z.object({
   role: z.enum(['ADMIN', 'RANGER']).optional(),
   q: z.string().trim().max(120).optional(),
@@ -20,6 +28,16 @@ const listQuery = z.object({
 
 usersRouter.get('/', validateQuery(listQuery), async (req, res) => {
   const { role, q } = req.query as z.infer<typeof listQuery>;
+
+  const cacheKey = `${req.user!.id}:${role ?? ''}:${q ?? ''}`;
+  const hit = userListCache.get(cacheKey);
+  if (hit && Date.now() - hit.at < USER_LIST_TTL_MS) {
+    res.setHeader('X-Cache', 'HIT');
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.send(hit.body);
+    return;
+  }
+
   const where: Record<string, unknown> = {
     ...(role ? { role } : {}),
     ...(q
@@ -40,7 +58,11 @@ usersRouter.get('/', validateQuery(listQuery), async (req, res) => {
     select: userSelect,
     orderBy: { fullName: 'asc' },
   });
-  res.json(users);
+  const body = JSON.stringify(users);
+  userListCache.set(cacheKey, { at: Date.now(), body });
+  res.setHeader('X-Cache', 'MISS');
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(body);
 });
 
 const updateSchema = z.object({
@@ -79,12 +101,14 @@ usersRouter.patch('/:id', requireAdmin, validateBody(updateSchema), async (req, 
 
   const updated = await prisma.user.update({ where: { id }, data, select: userSelect });
   invalidateUserScope(id);
+  userListCache.clear();
   res.json(updated);
 });
 
 async function setActive(id: string, isActive: boolean) {
   const user = await prisma.user.update({ where: { id }, data: { isActive }, select: userSelect });
   invalidateUserScope(id);
+  userListCache.clear();
   return user;
 }
 

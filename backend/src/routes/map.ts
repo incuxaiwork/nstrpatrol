@@ -444,16 +444,40 @@ const assetMeta = (a: { id: string; resourceKey: string; contentType: string; si
 });
 
 mapRouter.get('/assets', async (_req, res) => {
-  const assets = await prisma.mapAsset.findMany({ orderBy: { resourceKey: 'asc' } });
-  res.json(assets.map(assetMeta));
+  const assets = await prisma.mapAsset.findMany({
+    orderBy: { resourceKey: 'asc' },
+    select: {
+      id: true,
+      resourceKey: true,
+      contentType: true,
+      sizeBytes: true,
+      sha256: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+  res.json(assets);
 });
 
 mapRouter.get('/assets/:resourceKey/meta', async (req, res) => {
   const resourceKey = param(req, 'resourceKey');
   if (!ASSET_KEY_PATTERN.test(resourceKey)) throw new HttpError(400, 'invalid_key', 'Invalid asset key');
-  const asset = await prisma.mapAsset.findUnique({ where: { resourceKey } });
+  const asset = await prisma.mapAsset.findUnique({
+    where: { resourceKey },
+    select: {
+      id: true,
+      resourceKey: true,
+      contentType: true,
+      sizeBytes: true,
+      sha256: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
   if (!asset) throw new HttpError(404, 'not_found', 'Asset not found');
-  res.json(assetMeta(asset));
+  res.json(asset);
 });
 
 mapRouter.post('/assets', requireAdmin, upload.single('file'), async (req, res) => {

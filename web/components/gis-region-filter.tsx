@@ -33,9 +33,15 @@ export function RegionFilter({ units, error, loading, value, onChange }: RegionF
   const range = value.rangeId ?? null;
   const beats = range ? units?.beats[range] ?? [] : [];
   const beat = value.beatId ?? null;
+  // Cascading compartments — the finest available scope:
+  //   • a Beat selected → only compartments of that Beat;
+  //   • otherwise a Range selected → every compartment of that Range;
+  //   • neither → empty (compartment filter disabled until a Range is chosen).
   const comps = beat
     ? (units?.compartments ?? []).filter((c) => c.beat === beat)
-    : [];
+    : range
+      ? (units?.compartments ?? []).filter((c) => c.range === range)
+      : [];
 
   const selectClass =
     "h-9 rounded-field border border-line-strong bg-white px-2.5 text-sm text-ink outline-none focus:border-forest-600 disabled:bg-zinc-50 disabled:text-ink-soft";
@@ -84,7 +90,7 @@ export function RegionFilter({ units, error, loading, value, onChange }: RegionF
         <Select
           id="gis-filter-compartment"
           className={selectClass}
-          disabled={loading || !!error || !beat || comps.length === 0}
+          disabled={loading || !!error || !range || comps.length === 0}
           value={value.compId ?? ALL}
           aria-label="Compartment filter"
           onChange={(e) => {
