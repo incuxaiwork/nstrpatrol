@@ -27,7 +27,7 @@ export const mockRangers: Ranger[] = [
     vehicleId: "v2", weaponId: "w2", lastSync: minutesAgo(9),
   },
   {
-    id: "r-003", code: "R-003", name: "Chandra Mohan", designation: "Assistant Forest Ranger",
+    id: "r-003", code: "R-003", name: "Chandra Mohan", designation: "Assistant Forest Officer",
     dutyStatus: "off-duty", phone: "+91 90000 10003", joinYear: 2013,
     division: "d-markapur", range: "r-y-palem", beat: "b-y-palem-pullalacheruvu", teamId: "t2",
     bloodGroup: "O+",
@@ -79,7 +79,7 @@ export const mockRangers: Ranger[] = [
     stats: { patrols: 61, distanceKm: 740, fieldHours: 880, coveragePct: 58, observations: 12, incidents: 0 },
   },
   {
-    id: "r-011", code: "R-011", name: "Jitendra Kashyap", designation: "Deputy Ranger",
+    id: "r-011", code: "R-011", name: "Jitendra Kashyap", designation: "Deputy Officer",
     dutyStatus: "off-duty", phone: "+91 90000 10011", joinYear: 2015,
     division: "d-markapur", range: "r-vp-south", beat: "b-vp-south-nagulavaram", teamId: "t1",
     stats: { patrols: 312, distanceKm: 3690, fieldHours: 4520, coveragePct: 96, observations: 132, incidents: 11 },

@@ -98,7 +98,7 @@ export function overlayGroups(gridSizeLabelStr: string): OverlayGroup[] {
       label: "Operations",
       rows: [
         { key: "routes", title: "Patrol Routes", subtitle: "Recorded traces, replay track & the LIVE window of active patrols" },
-        { key: "rangers", title: "Ranger Positions", subtitle: "Latest GPS fix per ranger on an ACTIVE patrol (GET /api/patrols/live)" },
+        { key: "rangers", title: "Officer Positions", subtitle: "Latest GPS fix per officer on an ACTIVE patrol (GET /api/patrols/live)" },
         { key: "markers", title: "Sightings & Incidents", subtitle: "Observation & incident points" },
         { key: "sos", title: "SOS Alerts", subtitle: "Live emergency feed (GET /api/alerts)" },
         { key: "zeropatrol", title: "Zero Patrol Zones", subtitle: "Beats with no patrols (red dash)" },

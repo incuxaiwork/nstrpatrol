@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Shared ranger intake form (PRD §7 — Create/Early-edit ranger).
+ * Shared officer intake form (PRD §7 — Create/Early-edit officer).
  * Used by /rangers/new and /rangers/[id]/edit. Assignment options come
  * from the backend GIS-derived hierarchy (`hierarchy.units()`) and the
  * teams service — never from static fixtures.
@@ -15,7 +15,7 @@ import { useAsyncData } from "@/lib/use-async";
 import { dutyStatusLabel } from "@/lib/nav";
 import type { DutyStatus, Ranger } from "@/lib/types";
 
-const designations = ["Forest Guard", "Assistant Forest Ranger", "Deputy Ranger", "Watchman"];
+const designations = ["Forest Guard", "Assistant Forest Officer", "Deputy Officer", "Watchman"];
 
 /** Credential fields are only collected when provisioning a NEW account
  *  (no `initial`). For edits (initial set) they are omitted — the existing
@@ -117,7 +117,7 @@ export default function RangerForm({
             <Field label="Designation" required>
               <Select value={designation} onChange={(e) => setDesignation(e.target.value)}>
                 {designations.map((d) => (
-                  <option key={d} value={d}>{d}</option>
+                  <option key={d} value={d}>{d.toUpperCase()}</option>
                 ))}
               </Select>
             </Field>
@@ -201,7 +201,7 @@ export default function RangerForm({
           <dl className="space-y-2.5 p-4 text-sm">
             <SummaryRow label="Name" value={name || "—"} />
             <SummaryRow label="Code" value={code || "auto"} />
-            <SummaryRow label="Designation" value={designation} />
+            <SummaryRow label="Designation" value={designation.toUpperCase()} />
             <SummaryRow label="Status" value={<Badge tone="neutral">{dutyStatusLabel[dutyStatus]}</Badge>} />
             <SummaryRow label="Area" value={areaLabel} />
             <SummaryRow label="Team" value={teamLabel} />

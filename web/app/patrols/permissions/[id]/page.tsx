@@ -158,18 +158,18 @@ export default function AuthorizationDetailPage() {
       <div className="grid gap-4 lg:grid-cols-3">
         <div className="space-y-4 lg:col-span-2">
           <Card>
-            <CardHeader title="Ranger" icon="users" subtitle="Authorization holder" />
+            <CardHeader title="Officer" icon="users" subtitle="Authorization holder" />
             <div className="flex items-center gap-3 p-4">
               {ranger && <Avatar name={ranger.name} size={44} />}
               <div className="min-w-0 flex-1">
                 <p className="font-medium text-ink">{ranger?.name ?? auth.rangerId}</p>
                 <p className="text-xs text-ink-soft">
-                  {ranger?.code} · {ranger?.designation}
+                  {ranger?.code} · {ranger?.designation?.toUpperCase()}
                 </p>
               </div>
               {ranger && (
                 <Link href={`/rangers/${ranger.id}`} className="text-xs font-medium text-forest-700 hover:underline">
-                  View ranger profile →
+                  View officer profile →
                 </Link>
               )}
             </div>
@@ -184,7 +184,7 @@ export default function AuthorizationDetailPage() {
                   <MiniArea label="Range" value={unitName(auth.homeRange)} />
                   <MiniArea label="Beat" value={unitName(auth.homeBeat)} />
                 </div>
-                <p className="mt-3 text-xs text-ink-soft">Normal jurisdiction — where {ranger?.name ?? "the ranger"} routinely patrols</p>
+                <p className="mt-3 text-xs text-ink-soft">Normal jurisdiction — where {ranger?.name ?? "the officer"} routinely patrols</p>
                 <div className="mt-4 rounded-card border border-warning/30 bg-warning-soft p-3">
                   <p className="text-xs font-medium text-[#8a4b00]">Authorized area</p>
                   <p className="mt-1 text-sm font-semibold text-ink">
@@ -276,7 +276,7 @@ export default function AuthorizationDetailPage() {
                 columns={[
                   { key: "code", header: "Patrol ID", render: (p) => <span className="font-mono text-xs font-medium text-forest-800">{p.code}</span> },
                   { key: "date", header: "Date", sortValue: (p) => new Date(p.startScheduled).getTime(), render: (p) => <span className="text-xs text-ink-soft">{formatDateTime(p.startScheduled)}</span> },
-                  { key: "ranger", header: "Ranger", render: (p) => <span className="text-ink-soft">{p.leader}</span> },
+                  { key: "ranger", header: "Officer", render: (p) => <span className="text-ink-soft">{p.leader}</span> },
                   { key: "area", header: "Area", render: (p) => <span className="text-xs text-ink-soft">{unitName(p.beat)}</span> },
                   { key: "duration", header: "Duration", sortValue: (p) => p.durationMin, render: (p) => <span className="text-ink-soft">{p.durationMin > 0 ? formatMinutes(p.durationMin) : "—"}</span> },
                   { key: "distance", header: "Distance", sortValue: (p) => p.distanceKm ?? -1, render: (p) => <span className="text-ink-soft">{p.distanceKm != null ? formatKm(p.distanceKm) : "—"}</span> },
@@ -317,7 +317,7 @@ export default function AuthorizationDetailPage() {
             <CardHeader title="Summary" icon="check" />
             <dl className="space-y-2.5 p-4 text-sm">
               <SummaryRow label="Authorization" value={<span className="font-mono">{auth.id}</span>} />
-              <SummaryRow label="Ranger" value={ranger?.name ?? auth.rangerId} />
+              <SummaryRow label="Officer" value={ranger?.name ?? auth.rangerId} />
               <SummaryRow label="Home" value={`${unitName(auth.homeBeat)}`} />
               <SummaryRow label="Authorized" value={`${unitName(auth.authDivision)} / ${unitName(auth.authRange)} / ${unitName(auth.authBeat)}`} />
               <SummaryRow label="Patrols under auth" value={String(patrolsByAuth.length)} />
@@ -347,7 +347,7 @@ export default function AuthorizationDetailPage() {
             confirmAction === "revoke"
               ? `${auth.id} will be revoked immediately. Patrols already conducted under it remain on record for audit.`
               : confirmAction === "reject"
-                ? `${auth.id} will be rejected. The ranger is notified that the request was not approved.`
+                ? `${auth.id} will be rejected. The officer is notified that the request was not approved.`
                 : `All patrols under ${auth.id} have concluded. The record stays available for audit.`
           }
           confirmLabel={

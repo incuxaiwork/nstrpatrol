@@ -580,9 +580,9 @@ export function RangerReportDialog({
     const s = report.summary;
     return (
       <ReportPreview
-        title={`Ranger Report — ${report.ranger.name}`}
+        title={`Officer Report — ${report.ranger.name}`}
         meta={report.meta}
-        filterSummary={{ ...report.filters, Ranger: `${report.ranger.code} · ${report.ranger.designation}`, Area: `${geoLabel(report.ranger.division)} / ${geoLabel(report.ranger.range)} / ${geoLabel(report.ranger.beat)}` }}
+        filterSummary={{ ...report.filters, Officer: `${report.ranger.code} · ${report.ranger.designation.toUpperCase()}`, Area: `${geoLabel(report.ranger.division)} / ${geoLabel(report.ranger.range)} / ${geoLabel(report.ranger.beat)}` }}
       >
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <ReportStat label="Patrols" value={s.patrols} />
@@ -648,10 +648,10 @@ export function RangerReportDialog({
     <ReportDialog<RangerReport>
       open={open}
       onClose={onClose}
-      title="Generate ranger report"
+      title="Generate officer report"
       note={`Work record for ${ranger.name} (${ranger.code}) — patrols, observations and incidents.`}
       canGenerate={isValidRange(filters.range)}
-      renderFilters={ready ? renderFilters : () => <LoadingState label="Loading ranger data…" />}
+      renderFilters={ready ? renderFilters : () => <LoadingState label="Loading officer data…" />}
       run={ready ? run : async () => undefined}
       renderResult={renderResult}
       exportData={(report) => ({
@@ -735,9 +735,9 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
         />
       </Field>
       <div className="grid grid-cols-2 gap-3">
-        <Field label={`Rangers in area (${inRegionRangers.length})`}>
+        <Field label={`Officers in area (${inRegionRangers.length})`}>
           <div className="max-h-40 space-y-1 overflow-y-auto rounded-field border border-line bg-white p-2">
-            {inRegionRangers.length === 0 && <p className="px-1 py-1 text-xs text-ink-faint">No rangers posted in this area.</p>}
+            {inRegionRangers.length === 0 && <p className="px-1 py-1 text-xs text-ink-faint">No officers posted in this area.</p>}
             {inRegionRangers.map((r) => (
               <label key={r.id} className="flex cursor-pointer items-center gap-2 rounded px-1 py-0.5 text-xs text-ink hover:bg-forest-50">
                 <input
@@ -792,7 +792,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
           <ReportStat label="Field time" value={`${s.totalHours.toFixed(1)} h`} />
           <ReportStat label="Observations" value={s.observations} />
           <ReportStat label="Incidents" value={s.incidents} />
-          <ReportStat label="Active rangers" value={s.activeRangers} />
+          <ReportStat label="Active officers" value={s.activeRangers} />
         </div>
         {beatsShown.length > 0 && (
           <ReportSection title="Coverage map">
@@ -842,13 +842,13 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
             ]}
           />
         </ReportSection>
-        <ReportSection title={`Ranger activity (${report.rangerRows.length})`}>
+        <ReportSection title={`Officer activity (${report.rangerRows.length})`}>
           <DataTable
             rows={report.rangerRows.map((r) => ({ id: r.ranger.id, ...r }))}
             dense
             onRowClick={(r) => router.push(`/rangers/${r.ranger.id}`)}
             columns={[
-              { key: "name", header: "Ranger", render: (r) => <span className="font-medium text-ink">{r.ranger.name}</span> },
+              { key: "name", header: "Officer", render: (r) => <span className="font-medium text-ink">{r.ranger.name}</span> },
               { key: "beat", header: "Beat", render: (r) => geoLabel(r.ranger.beat) },
               { key: "patrols", header: "Patrols", render: (r) => r.patrols },
               { key: "observations", header: "Observations", render: (r) => r.observations },
@@ -867,7 +867,7 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
       open={open}
       onClose={onClose}
       title="Generate region report"
-      note="Patrol, observation and ranger activity for the selected area — with coverage map."
+      note="Patrol, observation and officer activity for the selected area — with coverage map."
       canGenerate={isValidRange(filters.range)}
       renderFilters={ready ? renderFilters : () => <LoadingState label="Loading GIS data…" />}
       run={ready ? run : async () => undefined}

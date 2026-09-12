@@ -28,7 +28,7 @@ export default function EditRangerPage() {
     if (!ranger) return;
     setSubmitting(true);
     await rangers.update(params.id, values);
-    pushToast("success", "Ranger updated", `${values.name} record saved (mock store)`);
+    pushToast("success", "Officer updated", `${values.name} record saved (mock store)`);
     router.push(`/rangers/${params.id}`);
   };
 
@@ -38,7 +38,7 @@ export default function EditRangerPage() {
     return (
       <div className="rounded-card border border-line bg-white shadow-card">
         <EmptyState
-          title={`Ranger ${params.id} not found`}
+          title={`Officer ${params.id} not found`}
           description="The record may not exist in the mock data."
           action={
             <Link href="/rangers" className="inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700">
@@ -54,7 +54,7 @@ export default function EditRangerPage() {
     <div>
       <PageHeader
         title={`Edit ${ranger.name}`}
-        subtitle={`${ranger.code} · ${ranger.designation} · update personnel & assignment details`}
+        subtitle={`${ranger.code} · ${ranger.designation.toUpperCase()} · update personnel & assignment details`}
         actions={
           <Link
             href={`/rangers/${ranger.id}`}

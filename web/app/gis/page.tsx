@@ -221,9 +221,9 @@ function selectedDetail(
       title: marker.label,
       body: when ? `Last GPS fix ${when}` : "On patrol — no recent GPS fix time available",
       href: `/rangers/${marker.id}`,
-      cta: "Open ranger profile",
+      cta: "Open officer profile",
       tone: "neutral" as const,
-      tag: "Ranger position",
+      tag: "Officer position",
     };
   }
   // Observation / incident / SOS → that record's own observation page.
@@ -324,7 +324,7 @@ function GisWorkspace() {
   const [selectedGridIds, setSelectedGridIds] = useState<ReadonlySet<string>>(new Set());
   const [hoveredGridId, setHoveredGridId] = useState<string | null>(null);
 
-  const markersData = useAsyncData(() => gis.markers(), [], { cacheKey: "gis:markers" });
+  const markersData = useAsyncData(() => gis.markers(), [], { cacheKey: "gis:markers", pollInterval: 15000 });
   // LIVE tracking (GET /api/patrols/live) — ACTIVE patrols, latest valid fix
   // and bounded recent path, polled while this page is mounted only.
   const liveTracking = useLiveTracking();
@@ -397,9 +397,9 @@ function GisWorkspace() {
   }, [coverageData.data]);
 
   // Beat-level coverage for Zero Patrol Zones (isolated from main map regionFilter)
-  const beatCoverageData = useAsyncData<ApiBeatCoverage>(() => gis.beatCoverage(), [], { cacheKey: "gis:beatCoverage" });
+  const beatCoverageData = useAsyncData<ApiBeatCoverage>(() => gis.beatCoverage(), [], { cacheKey: "gis:beatCoverage", pollInterval: 30000 });
   // Raw incidents for Activity Heatmap hierarchical filtering (includes all types)
-  const rawIncidentsData = useAsyncData<ApiIncident[]>(() => api.incidents.list(), [], { cacheKey: "incidents:all" });
+  const rawIncidentsData = useAsyncData<ApiIncident[]>(() => api.incidents.list(), [], { cacheKey: "incidents:all", pollInterval: 15000 });
 
   // Zero-patrol filters — local to that card only, never touches the main map's regionFilter
   const [zpRangeId, setZpRangeId] = useState<string>("all");
@@ -427,7 +427,7 @@ function GisWorkspace() {
   // Live SOS alert feed (Part B) — powers the dedicated SOS map layer and
   // the ?sos= deep link. Strict remote; a failure surfaces as an inline
   // note, never as fabricated points.
-  const sosCasesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases" });
+  const sosCasesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases", pollInterval: 12000 });
   const sosCases = useMemo(() => sosCasesData.data ?? [], [sosCasesData.data]);
   const sosAlerts = useMemo(
     () =>
@@ -1581,7 +1581,7 @@ function SelectedCard({
 
         {isLive ? (
           <div className="mt-2.5 space-y-1.5 text-xs">
-            <InfoRow label="Ranger" value={detail.live.rangerName} />
+            <InfoRow label="Officer" value={detail.live.rangerName} />
             <InfoRow label="Beat" value={detail.live.beat ?? "Not available"} />
             <InfoRow
               label="Last GPS"

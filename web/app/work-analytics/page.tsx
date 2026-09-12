@@ -229,18 +229,18 @@ function RangerLeaderboard({
   rows: { userId: string; fullName: string; count: number; distanceKm: number; points: number }[];
 }) {
   const columns: Column<{ id: string; fullName: string; count: number; distanceKm: number; points: number }>[] = [
-    { key: "fullName", header: "Ranger" },
+    { key: "fullName", header: "Officer" },
     { key: "count", header: "Patrols", sortValue: (r) => r.count },
     { key: "distanceKm", header: "Distance (km)", sortValue: (r) => r.distanceKm, render: (r) => fmtKm(r.distanceKm) },
     { key: "points", header: "Points", sortValue: (r) => r.points, render: (r) => fmtCount(r.points) },
   ];
   return (
     <Card className="mt-4">
-      <CardHeader title="Ranger activity" icon="users" subtitle="By patrol count in window" />
+      <CardHeader title="Officer activity" icon="users" subtitle="By patrol count in window" />
       <DataTable
         columns={columns}
         rows={rows.map((r) => ({ id: r.userId, fullName: r.fullName, count: r.count, distanceKm: r.distanceKm, points: r.points }))}
-        empty={<NoActivity label="No ranger activity in this window." />}
+        empty={<NoActivity label="No officer activity in this window." />}
       />
     </Card>
   );

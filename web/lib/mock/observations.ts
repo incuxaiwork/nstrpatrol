@@ -122,7 +122,7 @@ export const mockNotifications: NotificationItem[] = [
   { id: "n3", kind: "warning", title: "Zero patrol zone flagged", body: "Tummalabailu beat shows no patrol coverage in 14 days.", time: minutesAgo(40), module: "GIS Intelligence", read: false },
   { id: "n4", kind: "info", title: "New observation OB-9001", body: "Tiger pock marks logged by Aarav Sharma.", time: minutesAgo(36), module: "Observations & Reports", read: false },
   { id: "n5", kind: "success", title: "Patrol completed", body: "Akkapalem combing operation completed with 92% coverage.", time: hoursAgo(6), module: "Patrol Operations", read: true },
-  { id: "n6", kind: "info", title: "Team Alpha went on duty", body: "4 of 6 members checked in at Tummurukota.", time: hoursAgo(8), module: "Ranger Management", read: true },
+  { id: "n6", kind: "info", title: "Team Alpha went on duty", body: "4 of 6 members checked in at Tummurukota.", time: hoursAgo(8), module: "Officer Management", read: true },
 ];
 
 export const searchIndex: SearchResult[] = [
@@ -133,7 +133,7 @@ export const searchIndex: SearchResult[] = [
   })),
   ...mockRangers.map((r) => ({
     kind: "ranger" as const, id: r.id, title: r.name,
-    subtitle: `${r.code} · ${r.designation}`,
+    subtitle: `${r.code} · ${r.designation.toUpperCase()}`,
     href: `/rangers/${r.id}`,
   })),
   ...mockObservations.map((o) => ({

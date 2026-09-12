@@ -87,8 +87,12 @@ interface GeoFeature { type: 'Feature'; id?: unknown; properties: Record<string,
 interface GeoFeatureCollection { type: 'FeatureCollection'; features: GeoFeature[]; }
 
 /* Paths are probed at request time so the same module works when running from
- * `src` (tsx) or compiled `dist` (node dist/index.js). */
+ * `src` (tsx) or compiled `dist` (node dist/index.js). In Docker the assets
+ * are at /app/mark_beat.json (COPY --from=build /app/assets/mark_beat.json). */
 const ASSET_DIR_CANDIDATES = [
+  resolve(__dirname, '../..'), // Docker: /app/dist/routes -> /app (contains mark_beat.json)
+  resolve(__dirname, '../../assets'), // Docker alt: /app/assets
+  resolve(__dirname, '../../../backend/assets'), // local dev from dist
   resolve(__dirname, '../../../mobile/app/src/main/assets'),
   resolve(__dirname, '../../mobile/app/src/main/assets'),
 ];
@@ -382,6 +386,40 @@ async function fallbackCompartments(): Promise<string> {
   return JSON.stringify({ type: 'FeatureCollection', features });
 }
 
+async function fallbackBoundary(): Promise<string> {
+  // Boundary fallback when ForestBoundary.geom is empty (PostGIS missing or not seeded).
+  // We have no dedicated boundary asset, so we derive it as the dissolved outline
+  // of all beats from mark_beat.json — same source the mobile app ships.
+  // The frontend renders every feature in the collection, so a single
+  // MultiPolygon with all outer rings is sufficient and matches the DB
+  // ST_AsGeoJSON(geom) shape.
+  const forest = await prisma.forest.findFirst({ select: { id: true, name: true, code: true } }).catch(() => null);
+  const beatsFC = await loadAssetGeoJson('mark_beat.json').catch(() => ({ type: 'FeatureCollection', features: [] } as any));
+  const allRings: number[][][][] = [];
+  for (const f of beatsFC.features) {
+    const g = f.geometry as any;
+    if (!g) continue;
+    if (g.type === 'Polygon') {
+      allRings.push([g.coordinates[0]]);
+    } else if (g.type === 'MultiPolygon') {
+      for (const poly of g.coordinates) allRings.push([poly[0]]);
+    }
+  }
+  // Filter degenerate rings
+  const valid = allRings.filter((poly) => poly[0]?.length >= 4);
+  const feature: GeoFeature = {
+    type: 'Feature',
+    id: forest?.id ?? 'forest-boundary',
+    geometry: { type: 'MultiPolygon', coordinates: valid },
+    properties: {
+      name: forest?.name ?? 'NSTR Forest',
+      forestId: forest?.id ?? '',
+      forestCode: forest?.code ?? 'NSTR',
+    },
+  };
+  return JSON.stringify({ type: 'FeatureCollection', features: valid.length ? [feature] : [] });
+}
+
 /**
  * GET /api/gis/beats
  * Forest beats as a GeoJSON FeatureCollection, properties shaped like the
@@ -650,31 +688,38 @@ const ASSET_KEY_PATTERN = /^[A-Za-z0-9._-]+$/;
  */
 gisRouter.get('/boundary', async (_req, res) => {
   const body = await cachedGeo('boundary', async () => {
-    const rows = await prisma.$queryRaw<{ geojson: string }[]>`
-      SELECT COALESCE(
-        json_build_object(
-          'type', 'FeatureCollection',
-          'features', json_agg(feature)
-        )::text,
-        '{"type":"FeatureCollection","features":[]}'
-      ) AS geojson
-      FROM (
-        SELECT json_build_object(
-          'type', 'Feature',
-          'id', fb.id,
-          'geometry', ST_AsGeoJSON(fb.geom)::json,
-          'properties', json_build_object(
-            'name', COALESCE(fb.name, f.name, ''),
-            'forestId', fb."forestId",
-            'forestCode', COALESCE(f.code, '')
-          )
-        ) AS feature
-        FROM "ForestBoundary" fb
-        LEFT JOIN "Forest" f ON f.id = fb."forestId"
-        WHERE fb.geom IS NOT NULL
-      ) t
-    `;
-    return rows[0]?.geojson ?? '{"type":"FeatureCollection","features":[]}';
+    let geojson: string | null = null;
+    try {
+      const rows = await prisma.$queryRaw<{ geojson: string }[]>`
+        SELECT COALESCE(
+          json_build_object(
+            'type', 'FeatureCollection',
+            'features', json_agg(feature)
+          )::text,
+          '{"type":"FeatureCollection","features":[]}'
+        ) AS geojson
+        FROM (
+          SELECT json_build_object(
+            'type', 'Feature',
+            'id', fb.id,
+            'geometry', ST_AsGeoJSON(fb.geom)::json,
+            'properties', json_build_object(
+              'name', COALESCE(fb.name, f.name, ''),
+              'forestId', fb."forestId",
+              'forestCode', COALESCE(f.code, '')
+            )
+          ) AS feature
+          FROM "ForestBoundary" fb
+          LEFT JOIN "Forest" f ON f.id = fb."forestId"
+          WHERE fb.geom IS NOT NULL
+        ) t
+      `;
+      geojson = rows[0]?.geojson ?? null;
+    } catch {
+      geojson = null; // PostGIS missing or geom column absent — fallback below
+    }
+    if (geojson != null && !isEmptyFeatureCollection(geojson)) return geojson;
+    return fallbackBoundary();
   });
   sendGeoResponse(res, body);
 });

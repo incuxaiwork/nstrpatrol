@@ -47,7 +47,7 @@ export type PatrolMethod =
 
 /**
  * Lifecycle of a special patrol authorization (PRD §6 — Patrol Permissions).
- * Rangers patrol their normal jurisdiction freely; anything outside it must
+ * Officers patrol their normal jurisdiction freely; anything outside it must
  * be covered by an authorization in one of these states.
  */
 export type AuthorizationStatus =

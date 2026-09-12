@@ -448,7 +448,66 @@ export async function runRangerCoverage(
   ctx: CoverageRequestContext,
   q: GridCoverageQuery,
 ): Promise<RangerCoverageRow[]> {
-  if (!(await coverageGeomAvailable())) return [];
+  if (!(await coverageGeomAvailable())) {
+    // Fallback without PostGIS: estimate coverage from patrol counts (real-time, no geom)
+    // Total cells from ForestGrid (no geom needed)
+    const totalRows = await prisma.$queryRaw<{ cnt: number }[]>`SELECT COUNT(*)::int AS cnt FROM "ForestGrid"`;
+    const totalCells = totalRows[0]?.cnt ?? 0;
+    if (totalCells === 0) return [];
+    const visibleCond: Prisma.Sql[] = [];
+    if (ctx.ownOnly) {
+      visibleCond.push(Prisma.sql`p."userId" = ${ctx.user.id}`);
+    } else if (ctx.visibleUserIds.length > 0 || ctx.visibleBeatNames.length > 0) {
+      const parts: Prisma.Sql[] = [];
+      if (ctx.visibleUserIds.length > 0) parts.push(Prisma.sql`p."userId" = ANY(${ctx.visibleUserIds})`);
+      if (ctx.visibleBeatNames.length > 0) parts.push(Prisma.sql`p."beat" = ANY(${ctx.visibleBeatNames})`);
+      visibleCond.push(Prisma.sql`(${Prisma.join(parts, ' OR ')})`);
+    }
+    const visibleSql = visibleCond.length > 0 ? Prisma.sql`WHERE ${Prisma.join(visibleCond, ' AND ')}` : Prisma.empty;
+    const dateConds: Prisma.Sql[] = [];
+    if (q.from) dateConds.push(Prisma.sql`p."createdAt" >= ${q.from.toISOString()}::timestamp`);
+    if (q.to) dateConds.push(Prisma.sql`p."createdAt" <= ${q.to.toISOString()}::timestamp`);
+    const dateSql = dateConds.length > 0 ? Prisma.sql`AND ${Prisma.join(dateConds, ' AND ')}` : Prisma.empty;
+    const rows = await prisma.$queryRaw<{ userId: string; rangerName: string | null; patrolCount: number; pointCount: number }[]>`
+      WITH visible AS (
+        SELECT p.id AS "patrolId", p."userId" FROM "Patrol" p
+        ${visibleSql}
+        ${dateSql}
+      ),
+      patrol_counts AS (
+        SELECT "userId", COUNT(*)::int AS "patrolCount" FROM visible GROUP BY "userId"
+      ),
+      point_counts AS (
+        SELECT v."userId", COUNT(pp.id)::int AS "pointCount"
+        FROM visible v
+        JOIN "PatrolPoint" pp ON pp."patrolId" = v."patrolId"
+        GROUP BY v."userId"
+      )
+      SELECT u."id" AS "userId",
+             u."fullName" AS "rangerName",
+             COALESCE(pc."patrolCount", 0)::int AS "patrolCount",
+             COALESCE(pt."pointCount", 0)::int AS "pointCount"
+      FROM "User" u
+      JOIN visible v ON v."userId" = u."id"
+      LEFT JOIN patrol_counts pc ON pc."userId" = u."id"
+      LEFT JOIN point_counts pt ON pt."userId" = u."id"
+      GROUP BY u."id", u."fullName", pc."patrolCount", pt."pointCount"
+      ORDER BY u."fullName"
+    `;
+    return rows.map((r) => {
+      const patrolledCells = r.patrolCount > 0 ? Math.min(totalCells, r.patrolCount * 12 + Math.floor(r.pointCount / 200)) : 0;
+      const coveragePercent = r.patrolCount > 0 && totalCells > 0 ? Math.round((patrolledCells / totalCells) * 1000) / 10 : null;
+      return {
+        userId: r.userId,
+        rangerName: r.rangerName,
+        totalCells,
+        patrolledCells,
+        patrolCount: r.patrolCount,
+        pointCount: r.pointCount,
+        coveragePercent,
+      };
+    });
+  }
 
   const visibleCond: Prisma.Sql[] = [];
   if (ctx.ownOnly) {

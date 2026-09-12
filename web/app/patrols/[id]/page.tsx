@@ -161,7 +161,7 @@ export default function PatrolDetailPage() {
           )}
 
           <Card>
-            <CardHeader title="Rangers" icon="users" subtitle={`${crew.length} rangers`} />
+            <CardHeader title="Officers" icon="users" subtitle={`${crew.length} officers`} />
             <div className="space-y-2.5 p-4">
               {crew.map((name, i) => (
                 <div key={name} className="flex items-center gap-2.5">

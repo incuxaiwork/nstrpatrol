@@ -11,6 +11,12 @@ interface UseAsyncDataOpts {
   cacheTtlMs?: number;
   /** Skip route cache entirely (e.g. live feeds). */
   skipCache?: boolean;
+  /** Poll interval in ms — when set, the loader re-runs on this interval
+   *  (visibility-aware: paused when document.hidden, immediate reload on
+   *  visibility return). 0 or undefined = no polling (one-shot). */
+  pollInterval?: number;
+  /** Whether polling is enabled (default true when pollInterval is set). */
+  pollEnabled?: boolean;
 }
 
 /**
@@ -91,6 +97,28 @@ export function useAsyncData<T>(
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);
+
+  // Polling — visibility-aware, immediate reload on visibility return
+  useEffect(() => {
+    const interval = opts?.pollInterval;
+    const enabled = opts?.pollEnabled ?? (interval != null && interval > 0);
+    if (!enabled || !interval || interval <= 0) return;
+    let id: ReturnType<typeof setInterval> | null = null;
+    const onVisibility = () => {
+      if (!document.hidden) reload();
+    };
+    const start = () => {
+      id = setInterval(() => {
+        if (!document.hidden) reload();
+      }, interval);
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    start();
+    return () => {
+      if (id) clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [opts?.pollInterval, opts?.pollEnabled, reload]);
 
   return { data, error, loading, reload };
 }

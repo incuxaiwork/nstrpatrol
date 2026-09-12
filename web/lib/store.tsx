@@ -185,6 +185,22 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const reloadNotifications = useCallback(() => setFeedReloadKey((k) => k + 1), []);
 
+  // Real-time: poll the alert feed every 15s (visibility-aware) so SOS
+  // and other notifications appear without a manual refresh.
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (!document.hidden) reloadNotifications();
+    }, 15000);
+    const onVisibility = () => {
+      if (!document.hidden) reloadNotifications();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [reloadNotifications]);
+
   const dismissToast = useCallback(
     (id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)),
     []

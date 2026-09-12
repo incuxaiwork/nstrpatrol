@@ -1011,7 +1011,7 @@ interface HoverCardState {
 }
 
 const HOVER_KIND_TITLES: Record<string, string> = {
-  ranger: "Ranger position",
+  ranger: "Officer position",
   observation: "Observation",
   incident: "Incident report",
   sos: "SOS alert",
@@ -1047,8 +1047,8 @@ function hoverCardFromProps(
   if (str(props.kind) === "live-ranger") {
     return {
       ...pos,
-      title: str(props.rangerName) ?? "Ranger on patrol",
-      tag: str(props.freshness) === "stale" ? "Live position — stale GPS" : "Live ranger position",
+      title: str(props.rangerName) ?? "Officer on patrol",
+      tag: str(props.freshness) === "stale" ? "Live position — stale GPS" : "Live officer position",
       rows: [
         row("Patrol", props.patrolLabel),
         row("Status", "Active"),
@@ -1068,7 +1068,7 @@ function hoverCardFromProps(
       title: str(props.label) ?? "Live patrol",
       tag: str(props.freshness) === "stale" ? "Live route — stale GPS" : "Live patrol route",
       rows: [
-        row("Ranger", props.rangerName),
+        row("Officer", props.rangerName),
         row("Started", props.startedAt, time),
         ["Latest GPS", str(props.endAt) ? time(props.endAt) ?? "—" : "—"],
         numRow("Path duration", props.durationMinutes as number | undefined, " min", 1),
@@ -1087,7 +1087,7 @@ function hoverCardFromProps(
       tag: `Patrol route${status ? ` · ${status}` : ""}`,
       rows: [
         row("Type", props.patrolType),
-        row("Ranger", props.rangerName),
+        row("Officer", props.rangerName),
         row("Start", props.startedAt, time),
         [ "End", str(props.endedAt) ? time(props.endedAt) ?? "—" : "active"],
         numRow("Duration", props.durationMinutes as number | undefined, " min", 1),
@@ -2192,7 +2192,7 @@ function activeLegendRows(s: ForestLayerState): { color: string; label: string; 
     rows.push({ color: "#B3261E", label: "Replay played (red) + person", isPoint: false });
   }
   if (s.rangers) {
-    rows.push({ color: "#FF8F00", label: "Ranger position — live GPS", isPoint: true });
+    rows.push({ color: "#FF8F00", label: "Officer position — live GPS", isPoint: true });
   }
   if (s.markers) {
     rows.push({ color: "#B3261E", label: "Observation / sighting", isPoint: true });
@@ -2276,7 +2276,7 @@ export function MapSidebarFacts({
   return (
     <div className="space-y-4">
       <div>
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Rangers in field</p>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Officers in field</p>
         <div className="space-y-1.5">
           {rangers
             .filter((r) => r.dutyStatus === "field")
@@ -2289,7 +2289,7 @@ export function MapSidebarFacts({
               </Link>
             ))}
           {rangers.filter((r) => r.dutyStatus === "field").length === 0 && (
-            <p className="px-1.5 py-1 text-xs text-ink-soft">No rangers currently in field</p>
+            <p className="px-1.5 py-1 text-xs text-ink-soft">No officers currently in field</p>
           )}
         </div>
       </div>
