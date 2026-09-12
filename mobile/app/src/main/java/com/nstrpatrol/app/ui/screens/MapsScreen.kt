@@ -76,6 +76,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.lastKnownLocation
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.ForestBeatModel
@@ -913,22 +914,36 @@ fun MapsScreen(
                     contentDescription = "Recenter Location",
                     onClick = {
                         currentMap?.let { m ->
+                            // Prefer the live patrol position, then the actual
+                            // GPS / mocked-GPS fix, then the debug override,
+                            // and only fall back to the region default as a last
+                            // resort so the map centres on the ranger, not the
+                            // viewport centre.
                             val targetPos = if (patrolPoints.isNotEmpty()) {
                                 val lastPt = patrolPoints.last()
                                 LatLng(lastPt.latitude, lastPt.longitude)
                             } else {
-                                LatLng(15.92, 79.15)
+                                val gpsLoc = lastKnownLocation(context)
+                                val debugLoc = com.nstrpatrol.app.debug.DebugLocation.get(context)
+                                when {
+                                    gpsLoc != null ->
+                                        LatLng(gpsLoc.latitude, gpsLoc.longitude)
+                                    debugLoc != null ->
+                                        LatLng(debugLoc.first, debugLoc.second)
+                                    else ->
+                                        LatLng(15.92, 79.15)
+                                }
                             }
                             try {
-                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, 12.8), 1000)
+                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, if (patrolPoints.isNotEmpty()) 16.0 else 14.0), 1000)
                             } catch (e: Exception) {
                                 m.cameraPosition = CameraPosition.Builder()
                                     .target(targetPos)
-                                    .zoom(12.8)
+                                    .zoom(if (patrolPoints.isNotEmpty()) 16.0 else 14.0)
                                     .build()
                             }
                             followPatrol = true
-                            Toast.makeText(context, "Recentered map view", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Recentered to your location", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
@@ -1591,23 +1606,9 @@ private const val EMPTY_FC = "{\"type\":\"FeatureCollection\",\"features\":[]}"
 internal fun buildCurrentPositionGeoJson(p: PatrolPointEntity): String =
     "{\"type\":\"FeatureCollection\",\"features\":[{\"type\":\"Feature\",\"geometry\":{\"type\":\"Point\",\"coordinates\":[${p.longitude},${p.latitude}]},\"properties\":{}}]}"
 
-private fun computeDistance(points: List<PatrolPointEntity>): Double {
-    if (points.size < 2) return 0.0
-    var total = 0.0
-    for (i in 1 until points.size) {
-        val p1 = points[i - 1]
-        val p2 = points[i]
-        val dLat = Math.toRadians(p2.latitude - p1.latitude)
-        val dLon = Math.toRadians(p2.longitude - p1.longitude)
-        val a = sin(dLat / 2).let { it * it } +
-            cos(Math.toRadians(p1.latitude)) *
-            cos(Math.toRadians(p2.latitude)) *
-            sin(dLon / 2).let { it * it }
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
-        total += 6_371_000.0 * c
-    }
-    return total
-}
+/** Shared hardened track computation (jitter/teleport/plausibility filtered). */
+private fun computeDistance(points: List<PatrolPointEntity>): Double =
+    com.nstrpatrol.app.time.ActivitySummary.haversineDistance(points)
 
 @Composable
 private fun CoordinatesChip(

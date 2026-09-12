@@ -7,6 +7,7 @@
     <string name="nav_reports">रिपोर्ट</string>
     <string name="nav_settings">सेटिंग्स</string>
     <string name="action_save_details">विवरण सहेजें</string>
+    <string name="action_start_patrol">गश्त शुरू करें</string>
     <string name="action_back">वापस</string>
     <string name="action_submit">जमा करें</string>
     <string name="action_cancel">रद्द करें</string>

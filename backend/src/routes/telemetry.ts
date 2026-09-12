@@ -153,8 +153,8 @@ const modelMap: DataMap = {
 for (const key of Object.keys(schemas) as EndpointKey[]) {
   const schema = schemas[key];
   telemetryRouter.post(`/${key}`, validateBody(schema.max(MAX_BATCH)), async (req, res) => {
-    const created = await ingestEntity(key, req.body, req.user!);
-    res.status(201).json({ inserted: created.length, records: created });
+    const inserted = await ingestEntity(key, req.body, req.user!);
+    res.status(201).json({ inserted });
   });
 }
 
@@ -166,16 +166,44 @@ export async function ingestEntity(
   key: EndpointKey,
   input: unknown,
   user: { id: string; role: string; isAdmin: boolean },
-): Promise<{ id: string }[]> {
+): Promise<number> {
   const schema = schemas[key] as z.ZodArray<z.ZodType<Record<string, unknown>>>;
-  const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string }[];
+  const records = schema.max(MAX_BATCH).parse(input) as { patrolId: string; timestamp: Date }[];
   await authorizePatrols(user, records);
 
-  const data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
-  const model = (prisma as unknown as Record<string, { createManyAndReturn: (args: { data: unknown[] }) => Promise<{ id: string }[]> }>)[
+  let data = records.map((r) => ({ ...r, syncStatus: 'SYNCED' as const }));
+  if (key === 'points' && data.length > 0) {
+    // Idempotent GPS ingest. The device omits per-point ids and re-uploads its
+    // whole PENDING set when a sync is interrupted (SyncManager flips
+    // syncStatus per patrol only after every chunk succeeds), so the same
+    // (patrolId, timestamp) fix can legitimately arrive twice. Drop fixes that
+    // are already stored — plus duplicates inside one batch — instead of
+    // double-counting them in paths, distance and coverage. Ordering,
+    // validity and ownership checks are unchanged.
+    const existing = await prisma.patrolPoint.findMany({
+      where: {
+        patrolId: { in: [...new Set(data.map((r) => r.patrolId))] },
+        timestamp: { in: data.map((r) => r.timestamp as Date) },
+      },
+      select: { patrolId: true, timestamp: true },
+    });
+    const seen = new Set(existing.map((e) => `${e.patrolId}|${e.timestamp.getTime()}`));
+    data = data.filter((r) => {
+      const k = `${r.patrolId}|${(r.timestamp as Date).getTime()}`;
+      if (seen.has(k)) return false;
+      seen.add(k);
+      return true;
+    });
+  }
+  if (data.length === 0) return 0;
+  // Prisma's createManyAndReturn generates SQL referencing a phantom 'new'
+  // column in PatrolPoint; use createMany (no RETURNING clause) and return the
+  // inserted count. The dedupe above still guarantees we never double-count.
+  const model = (prisma as unknown as Record<string, { createMany: (args: { data: unknown[] }) => Promise<{ count: number }> }>)[
     modelMap[key].model
   ];
-  return model.createManyAndReturn({ data });
+  const result = await model.createMany({ data });
+  return result.count;
 }
 
 telemetryRouter.post('/patrol/:id/aggregates', async (req, res) => {

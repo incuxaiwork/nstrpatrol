@@ -263,6 +263,14 @@ interface TelemetryDao {
     )
     suspend fun finalizeStaleActivePatrol(patrolId: String, endTime: Long)
 
+    /** Clears a stale endTime on an ACTIVE session (defense against orphan
+     *  recovery or sync races writing endTime without completing the patrol). */
+    @Query(
+        "UPDATE patrol_sessions SET endTime = NULL " +
+        "WHERE patrolId = :patrolId AND status = 'ACTIVE' AND endTime IS NOT NULL"
+    )
+    suspend fun clearActiveEndTime(patrolId: String)
+
     @Query("SELECT * FROM patrol_sessions WHERE syncStatus = 'PENDING'")
     suspend fun sessionsToSync(): List<PatrolSessionEntity>
 

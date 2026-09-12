@@ -143,11 +143,18 @@ object SyncManager {
             }
             // Idempotent: create first; if that fails (e.g. the patrol already
             // exists on the server from a prior attempt) fall back to completing
-            // it. Either success means the row is synced — otherwise it stays
-            // PENDING and is retried on the next sync.
+            // it — but ONLY for COMPLETED sessions. Never complete an ACTIVE
+            // session on the server via the sync push: the patrol may still be
+            // in progress on the device.
             val created = runCatching { withNetworkRetry { api.createPatrol(body); true } }.getOrElse { e -> fail(1, e); false }
             val completed = if (created) true
-            else runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBodyFor(session)); true } }.getOrElse { e -> fail(1, e); false }
+            else if (session.status == "COMPLETED") {
+                runCatching { withNetworkRetry { api.completePatrol(session.patrolId, completeBodyFor(session)); true } }.getOrElse { e -> fail(1, e); false }
+            } else {
+                // ACTIVE session that already exists on server — just mark
+                // synced so we don't keep retrying the create.
+                true
+            }
             if (created || completed) {
                 dao.updateSessionSyncStatus(session.patrolId, "SYNCED")
                 ok(1)

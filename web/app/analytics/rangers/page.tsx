@@ -12,15 +12,14 @@ import { BarChart } from "@/components/charts";
 import { ExportButton, type ExportKind } from "@/components/overlays";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { dutyStatusLabel, dutyStatusTone } from "@/lib/nav";
-import { unitName } from "@/lib/mock/hierarchy";
 import { formatKm } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import type { Ranger } from "@/lib/types";
 
 export default function RangerAnalyticsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => rangers.list());
-  const patrolStats = useAsyncData(() => analytics.monthly());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.list(), [], { cacheKey: "rangers:list" });
+  const patrolStats = useAsyncData(() => analytics.monthly(), [], { cacheKey: "analytics:monthly" });
 
   if (loading || !data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
@@ -28,15 +27,17 @@ export default function RangerAnalyticsPage() {
   const byPatrols = [...data].sort((a, b) => b.stats.patrols - a.stats.patrols);
   const byDistance = [...data].sort((a, b) => b.stats.distanceKm - a.stats.distanceKm);
   const byHours = [...data].sort((a, b) => b.stats.fieldHours - a.stats.fieldHours);
+  // Coverage is optional (no backend aggregate) — only rank rangers that have it.
+  const coverages = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `ranger-ranking-${stamp()}`, data.map((r) => ({
       code: r.code,
       name: r.name,
       designation: r.designation,
-      division: unitName(r.division),
-      range: unitName(r.range),
-      beat: unitName(r.beat),
+      division: r.division || "",
+      range: r.range || "",
+      beat: r.beat || "",
       dutyStatus: dutyStatusLabel[r.dutyStatus],
       patrols: r.stats.patrols,
       distanceKm: r.stats.distanceKm,
@@ -59,7 +60,7 @@ export default function RangerAnalyticsPage() {
         <KpiCard label="Rangers" value={data.length} icon="users" tone="forest" />
         <KpiCard label="Total patrols" value={data.reduce((a, r) => a + r.stats.patrols, 0)} icon="route" tone="info" />
         <KpiCard label="Total distance" value={fmt(data.reduce((a, r) => a + r.stats.distanceKm, 0))} icon="target" tone="khaki" />
-        <KpiCard label="Best coverage" value={Math.max(...data.map((r) => r.stats.coveragePct))} unit="%" icon="check" tone="success" />
+        <KpiCard label="Best coverage" value={coverages.length ? Math.max(...coverages) : "—"} unit={coverages.length ? "%" : undefined} icon="check" tone="success" />
       </div>
 
       <div className="mt-4 grid gap-4 xl:grid-cols-3">
@@ -111,11 +112,11 @@ export default function RangerAnalyticsPage() {
                 <span className="font-medium text-ink">{r.name}</span>
               </Link>
             ) },
-            { key: "unit", header: "Unit", render: (r) => <span className="text-ink-soft">{unitName(r.range)}</span> },
+            { key: "unit", header: "Unit", render: (r) => <span className="text-ink-soft">{r.range || "—"}</span> },
             { key: "patrols", header: "Patrols", sortValue: (r) => r.stats.patrols, render: (r) => <span className="text-ink">{r.stats.patrols}</span> },
             { key: "distance", header: "Distance", sortValue: (r) => r.stats.distanceKm, render: (r) => <span className="text-ink-soft">{formatKm(r.stats.distanceKm)}</span> },
             { key: "hours", header: "Field hours", sortValue: (r) => r.stats.fieldHours, render: (r) => <span className="text-ink-soft">{formatHours(r.stats.fieldHours)}</span> },
-            { key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct, render: (r) => <CoverageBadge pct={r.stats.coveragePct} /> },
+            { key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct ?? -1, render: (r) => <CoverageBadge pct={r.stats.coveragePct} /> },
             { key: "status", header: "Duty", sortValue: (r) => r.dutyStatus, render: (r) => <Badge tone={dutyStatusTone[r.dutyStatus]} dot>{dutyStatusLabel[r.dutyStatus]}</Badge> },
           ]}
           empty={<p className="py-8 text-center text-sm text-ink-soft">No rangers on record.</p>}
@@ -148,7 +149,8 @@ function LeaderCard({ title, subtitle, rows }: { title: string; subtitle: string
   );
 }
 
-function CoverageBadge({ pct }: { pct: number }) {
+function CoverageBadge({ pct }: { pct?: number }) {
+  if (pct == null) return <span className="text-xs text-ink-faint">—</span>;
   return <Badge tone={pct >= 80 ? "success" : pct >= 60 ? "warning" : "danger"}>{pct}%</Badge>;
 }
 

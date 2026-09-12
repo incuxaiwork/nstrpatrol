@@ -157,9 +157,11 @@ fun PatrolReportScreen(
             // samples and falls back to the cloud per-mode breakdown — local
             // points/modes are absent for patrols pulled from another device.
             val localDominant = if (samples.isEmpty()) null else ActivitySummary.isVehicleDominant(dao, patrolId)
+            val reportDistance = computeReportDistance(points)
+                .takeIf { it > 0.0 } ?: (dao.patrolSession(patrolId)?.totalDistanceMeters ?: 0.0)
             estimatedSteps = ActivitySummary.estimateSteps(
                 recordedSteps = metrics.steps,
-                distanceMeters = computeReportDistance(points),
+                distanceMeters = reportDistance,
                 localVehicleDominant = localDominant,
                 cloudVehicleDominant = ActivitySummary.isCloudVehicleDominant(backendStatsModes)
             )
@@ -193,7 +195,12 @@ fun PatrolReportScreen(
     }
 
     val session = localSession ?: backendSession
+    // Prefer the live recomputation, but fall back to the stored session
+    // distance: completed patrols whose points are absent on this device
+    // (cloud pulls, wiped rows, single-point tracks) otherwise show 0 m
+    // while the patrol card correctly shows the recorded distance.
     val totalDistance = computeReportDistance(points)
+        .takeIf { it > 0.0 } ?: (session?.totalDistanceMeters ?: 0.0)
     val s = session
     val isActive = (s?.status == "ACTIVE" || s?.status == "IN PROGRESS") && !locallyEnded
 
@@ -387,7 +394,7 @@ fun PatrolReportScreen(
                         .padding(14.dp)
                 ) {
                     DetailRow("Start time", IndiaTime.full(s.startTime))
-                    if (s.endTime != null) {
+                    if (s.endTime != null && s.status != "ACTIVE") {
                         DetailRow("End time", IndiaTime.full(s.endTime))
                     }
                     DetailRow("Sync status", s.syncStatus)
@@ -639,23 +646,9 @@ private fun MovementMismatchBanner(detectedLabel: String, selectedMethod: String
     }
 }
 
-private fun computeReportDistance(points: List<PatrolPointEntity>): Double {
-    if (points.size < 2) return 0.0
-    var total = 0.0
-    for (i in 1 until points.size) {
-        val p1 = points[i - 1]
-        val p2 = points[i]
-        val dLat = Math.toRadians(p2.latitude - p1.latitude)
-        val dLon = Math.toRadians(p2.longitude - p1.longitude)
-        val a = kotlin.math.sin(dLat / 2).let { it * it } +
-            kotlin.math.cos(Math.toRadians(p1.latitude)) *
-            kotlin.math.cos(Math.toRadians(p2.latitude)) *
-            kotlin.math.sin(dLon / 2).let { it * it }
-        val c = 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
-        total += 6_371_000.0 * c
-    }
-    return total
-}
+/** Shared hardened track computation (jitter/teleport/plausibility filtered). */
+private fun computeReportDistance(points: List<PatrolPointEntity>): Double =
+    com.nstrpatrol.app.time.ActivitySummary.haversineDistance(points)
 
 /** Builds a display-only session from a backend patrol detail payload. */
 private fun patrolSessionFromBackend(o: org.json.JSONObject): PatrolSessionEntity {
