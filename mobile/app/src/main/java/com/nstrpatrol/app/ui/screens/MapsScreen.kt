@@ -76,6 +76,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.lastKnownLocation
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.ForestBeatModel
@@ -913,22 +914,36 @@ fun MapsScreen(
                     contentDescription = "Recenter Location",
                     onClick = {
                         currentMap?.let { m ->
+                            // Prefer the live patrol position, then the actual
+                            // GPS / mocked-GPS fix, then the debug override,
+                            // and only fall back to the region default as a last
+                            // resort so the map centres on the ranger, not the
+                            // viewport centre.
                             val targetPos = if (patrolPoints.isNotEmpty()) {
                                 val lastPt = patrolPoints.last()
                                 LatLng(lastPt.latitude, lastPt.longitude)
                             } else {
-                                LatLng(15.92, 79.15)
+                                val gpsLoc = lastKnownLocation(context)
+                                val debugLoc = com.nstrpatrol.app.debug.DebugLocation.get(context)
+                                when {
+                                    gpsLoc != null ->
+                                        LatLng(gpsLoc.latitude, gpsLoc.longitude)
+                                    debugLoc != null ->
+                                        LatLng(debugLoc.first, debugLoc.second)
+                                    else ->
+                                        LatLng(15.92, 79.15)
+                                }
                             }
                             try {
-                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, 12.8), 1000)
+                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, if (patrolPoints.isNotEmpty()) 16.0 else 14.0), 1000)
                             } catch (e: Exception) {
                                 m.cameraPosition = CameraPosition.Builder()
                                     .target(targetPos)
-                                    .zoom(12.8)
+                                    .zoom(if (patrolPoints.isNotEmpty()) 16.0 else 14.0)
                                     .build()
                             }
                             followPatrol = true
-                            Toast.makeText(context, "Recentered map view", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Recentered to your location", Toast.LENGTH_SHORT).show()
                         }
                     }
                 )
