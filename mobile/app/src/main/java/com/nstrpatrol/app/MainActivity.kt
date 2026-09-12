@@ -57,6 +57,7 @@ import com.nstrpatrol.app.data.PatrolTimer
 import com.nstrpatrol.app.data.PhotoStore
 import com.nstrpatrol.app.data.SettingsStore
 import com.nstrpatrol.app.data.SyncController
+import com.nstrpatrol.app.data.SyncManager
 import com.nstrpatrol.app.data.SyncScheduler
 import com.nstrpatrol.app.data.db.NstrDatabase
 import com.nstrpatrol.app.data.map.BackendApiClient
@@ -560,8 +561,20 @@ fun NstrApp() {
         Route.Settings -> SettingsScreen(
             settings = settings,
             onLogout = {
-                auth.logout()
-                nav.resetTo(Route.Login)
+                // Best-effort flush of this officer's pending uploads BEFORE
+                // the token is cleared, so their data lands under their own
+                // name instead of leaking into the next login's sync. Then
+                // logout keeps lastUserId so the next login wipes any
+                // leftovers on an actual account switch.
+                syncScope.launch {
+                    runCatching {
+                        SyncManager.syncNow(database.telemetryDao(), api, auth.deviceId())
+                    }
+                    withContext(Dispatchers.Main) {
+                        auth.logout()
+                        nav.resetTo(Route.Login)
+                    }
+                }
             },
             onOpenGpsDiagnostics = { nav.navigateTo(Route.GpsDiagnostics) },
             onTabSelected = nav::selectTab,

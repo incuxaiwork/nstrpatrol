@@ -31,6 +31,24 @@ object AppConfig {
     const val METRICS_SAMPLE_INTERVAL_MS = 5000L
     const val DEFAULT_RANGER_WEIGHT_KG = 70.0
 
+    // GPS motion gating — separates real travel from satellite drift/teleports.
+    /** Per-tick raw displacement (m) suggesting motion (before latching). */
+    const val GPS_TICK_DISP_M = 2.5
+    /** Consecutive raw-moving ticks required to latch GPS motion on. */
+    const val GPS_LATCH_TICKS = 2
+    /** Consecutive stationary ticks required to latch motion off. */
+    const val GPS_STILL_TICKS = 2
+    /** Cumulative raw displacement (m, teleport ticks excluded) that latches motion immediately. */
+    const val GPS_LATCH_CUMULATIVE_M = 10.0
+    /** Single-tick jumps at/above this with poor accuracy are teleports, never motion. */
+    const val GPS_TELEPORT_M = 30.0
+    /** Fixes worse than this accuracy (m) are unusable for point recording. */
+    const val GPS_MAX_FIX_ACCURACY_M = 50.0
+    /** Accuracy above which jumps need speed corroboration. */
+    const val GPS_POOR_ACCURACY_M = 20.0
+    /** Speed (km/h) that corroborates motion despite poor accuracy. */
+    const val GPS_MOVING_SPEED_KMH = 5.0
+
     // Coverage-event thresholds
     /** A STILL stretch this long inside a patrol triggers DEVICE_STATIONARY. */
     const val DEVICE_STATIONARY_THRESHOLD_MS = 300_000L

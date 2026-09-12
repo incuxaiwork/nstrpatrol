@@ -17,7 +17,7 @@ const divisions = [
 ];
 
 export default function DivisionAnalyticsPage() {
-  const comparison = useAsyncData(() => analytics.comparison());
+  const comparison = useAsyncData(() => analytics.comparison(), [], { cacheKey: "analytics:comparison" });
 
   if (comparison.loading || !comparison.data) return <SkeletonRows rows={6} />;
   if (comparison.error) return <ErrorState message={comparison.error.message} onRetry={comparison.reload} />;

@@ -109,9 +109,14 @@ class AuthSession(context: Context) {
      * Throws on wrong credentials / network failure.
      */
     suspend fun login(email: String, password: String, db: NstrDatabase? = null): AuthUser = withContext(Dispatchers.IO) {
-        // If a different user was previously logged in, wipe local data so
-        // User B doesn't see User A's patrols/sensors/incidents.
-        val previousUserId = currentUser?.id
+        // If a different user previously owned this device's local data, wipe
+        // it so User B neither sees nor syncs User A's patrols under their
+        // own token. lastUserId survives logout() (which only drops tokens),
+        // so A -> logout -> B is detected — the old currentUser check missed
+        // it because logout had already cleared the cached user.
+        val previousUserId = prefs.getString("lastUserId", null) ?: currentUser?.id
+        // Snapshot before the prefs below are overwritten with the new user.
+        val hadCachedSession = currentUser != null
         val body = JSONObject()
             .put("email", email.trim())
             .put("password", password)
@@ -125,12 +130,29 @@ class AuthSession(context: Context) {
             .putString("accessToken", accessToken)
             .putString("refreshToken", refreshToken)
             .putString("user", userJson)
+            .putString("lastUserId", user.id)
             .apply()
         client.setAccessToken(accessToken)
         // Clear local Room DB if switching to a different user.
         if (previousUserId != null && previousUserId != user.id && db != null) {
             Log.i("AuthSession", "User switch ($previousUserId -> ${user.id}) — clearing local data")
+            PhotoStore.clearAll()
             db.clearAllTables()
+        } else if (previousUserId == null && !hadCachedSession && db != null) {
+            // One-time heal for logged-out devices mixed before lastUserId
+            // existed: rows with no recorded owner and no cached session can't
+            // be attributed to this login, so drop them instead of
+            // showing/syncing them under a wrong name. Skipped when the DB is
+            // already empty (normal first login), and skipped when a session
+            // is cached (single-user phone — rows are theirs).
+            val dao = db.telemetryDao()
+            if (dao.countSessions() > 0 || dao.countPoints() > 0 ||
+                dao.countIncidents() > 0 || dao.countReadings() > 0
+            ) {
+                Log.i("AuthSession", "Unattributed local data found — clearing on first tracked login")
+                PhotoStore.clearAll()
+                db.clearAllTables()
+            }
         }
         deviceScope.launch { registerDevice() }
         user
@@ -270,9 +292,20 @@ class AuthSession(context: Context) {
         fallback
     }
 
-    /** Clears the stored session and bearer token; preserves local data for reuse. */
+    /**
+     * Clears tokens and the cached user. Records the outgoing owner's id as
+     * lastUserId so a same-user re-login is recognized (data kept) while a
+     * different account logging in next triggers the ownership wipe.
+     * Per-handset device/face keys are untouched.
+     */
     fun logout() {
-        prefs.edit().clear().apply()
+        val outgoingId = currentUser?.id
+        val edit = prefs.edit()
+            .remove("accessToken")
+            .remove("refreshToken")
+            .remove("user")
+        if (outgoingId != null) edit.putString("lastUserId", outgoingId)
+        edit.apply()
         client.setAccessToken(null)
     }
 

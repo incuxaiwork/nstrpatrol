@@ -187,7 +187,14 @@ object ActivitySummary {
         )
     }
 
-    private fun haversineDistance(points: List<com.nstrpatrol.app.data.db.PatrolPointEntity>): Double {
+    /**
+     * Single source of truth for track distance, shared by the stored-metric
+     * computation, patrol cards, report screen and map overlay. Same hardened
+     * rules as the recorder: jitter, accuracy-circle noise, teleports and
+     * GPS-disagreeing segments never count — so a card can never resurrect
+     * drift that recording (or completion) filtered out.
+     */
+    internal fun haversineDistance(points: List<com.nstrpatrol.app.data.db.PatrolPointEntity>): Double {
         if (points.size < 2) return 0.0
         var total = 0.0
         for (i in 1 until points.size) {
@@ -195,12 +202,23 @@ object ActivitySummary {
             val p2 = points[i]
             val dist = singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
             val dt = p2.timestamp - p1.timestamp
-            val speedKmh = if (dt > 0) (dist / 1000.0) / (dt / 3_600_000.0) else 0.0
+            // Same-timestamp duplicates (forced end-point racing an in-flight
+            // sample) contribute nothing.
+            if (dt <= 0) continue
+            val speedKmh = (dist / 1000.0) / (dt / 3_600_000.0)
+            // GPS-reported speed corroboration (either endpoint; absent = 0).
+            val gpsKmh = maxOf(p1.speed ?: 0f, p2.speed ?: 0f) * 3.6
             // Same jitter filter as recorder: ignore tiny jumps that crept in before the fix
             if (dist < AppConfig.JITTER_DISTANCE_M && speedKmh < 1.0) continue
             if (dist < 5.0 && speedKmh < 0.5) continue
             val acc = minOf(p1.accuracy ?: Float.MAX_VALUE, p2.accuracy ?: Float.MAX_VALUE).toDouble()
             if (dist < acc * 0.5 && speedKmh < 2.0 && dist < 8.0) continue
+            // Teleport: big jump on a poor fix without speed proof.
+            if (dist >= AppConfig.GPS_TELEPORT_M && acc > AppConfig.GPS_POOR_ACCURACY_M && gpsKmh < AppConfig.GPS_MOVING_SPEED_KMH) continue
+            // Implausible segment: implied speed far above GPS speed.
+            if (speedKmh > 12.0 && gpsKmh < speedKmh * 0.5) continue
+            // Re-acquisition jump after silence on a poor fix.
+            if (dist >= 100.0 && acc > 30.0 && gpsKmh < 8.0) continue
             total += dist
         }
         return total

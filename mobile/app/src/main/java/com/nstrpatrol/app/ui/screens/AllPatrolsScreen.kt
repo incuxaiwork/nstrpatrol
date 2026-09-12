@@ -253,11 +253,13 @@ private fun SessionPatrolCard(
     LaunchedEffect(session.patrolId, session.totalDistanceMeters, session.pointCount) {
         // Live fallback: stored totalDistanceMeters is 0 for ACTIVE patrols and for
         // stale finalized sessions (pointCount only). Compute from actual GPS points
-        // so the card never shows 0 m when a track exists.
+        // so the card never shows 0 m when a track exists. Uses the shared
+        // hardened computation (same as stored metrics) so drift/teleport
+        // points can never inflate the card.
         val needsLive = session.status == "ACTIVE" || session.totalDistanceMeters == 0.0
         if (needsLive) {
             val points = withContext(Dispatchers.IO) { dao.patrolPointsOrdered(session.patrolId) }
-            val live = haversineDistance(points)
+            val live = com.nstrpatrol.app.time.ActivitySummary.haversineDistance(points)
             if (live > 0) displayDistance = maxOf(displayDistance, live)
         }
     }
@@ -355,24 +357,6 @@ private fun FilterChip(label: String, count: String, selected: Boolean, onClick:
 }
 
 private const val EARTH_RADIUS_M = 6_371_000.0
-
-private fun haversineDistance(points: List<PatrolPointEntity>): Double {
-    if (points.size < 2) return 0.0
-    var total = 0.0
-    for (i in 1 until points.size) {
-        val p1 = points[i - 1]
-        val p2 = points[i]
-        val dist = singleHaversine(p1.latitude, p1.longitude, p2.latitude, p2.longitude)
-        val dt = p2.timestamp - p1.timestamp
-        val speedKmh = if (dt > 0) (dist / 1000.0) / (dt / 3_600_000.0) else 0.0
-        if (dist < 3.0 && speedKmh < 1.0) continue
-        if (dist < 5.0 && speedKmh < 0.5) continue
-        val acc = minOf(p1.accuracy ?: Float.MAX_VALUE, p2.accuracy ?: Float.MAX_VALUE).toDouble()
-        if (dist < acc * 0.5 && speedKmh < 2.0 && dist < 8.0) continue
-        total += dist
-    }
-    return total
-}
 
 private fun singleHaversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val dLat = Math.toRadians(lat2 - lat1)

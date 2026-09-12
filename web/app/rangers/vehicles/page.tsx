@@ -24,7 +24,7 @@ const statusLabel: Record<Vehicle["status"], string> = {
 };
 
 export default function VehiclesPage() {
-  const { data, error, loading, reload } = useAsyncData(() => rangers.vehicles());
+  const { data, error, loading, reload } = useAsyncData(() => rangers.vehicles(), [], { cacheKey: "rangers:vehicles" });
 
   if (loading || !data) return <SkeletonRows rows={5} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;

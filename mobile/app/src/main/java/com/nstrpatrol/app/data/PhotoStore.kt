@@ -45,6 +45,11 @@ object PhotoStore {
         store.remove(slot)
     }
 
+    /** Clear all in-memory photo drafts (e.g. on account switch) without deleting files. */
+    fun clearAll() {
+        store.clear()
+    }
+
     fun remove(slot: String) = clear(slot)
 
     /** Remove a single photo from active draft slot without deleting the file. */
