@@ -55,8 +55,8 @@ export default function SosControlRoomPage() {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | SosStatus>("ALL");
 
-  const casesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases" });
-  const feedData = useAsyncData(() => sosService.feed(), [], { cacheKey: "sos:feed" });
+  const casesData = useAsyncData(() => sosService.cases(), [], { cacheKey: "sos:cases", pollInterval: 12000 });
+  const feedData = useAsyncData(() => sosService.feed(), [], { cacheKey: "sos:feed", pollInterval: 12000 });
 
   const cases = casesData.data ?? [];
   const filteredCases = statusFilter === "ALL"

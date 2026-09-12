@@ -30,7 +30,7 @@ export const jurisdictionLabel: Record<JurisdictionState, string> = {
   "authorized-exception": "Outside normal jurisdiction · Authorized",
   "pending-review": "Outside normal jurisdiction · Pending review",
   "requires-review": "Outside normal jurisdiction · Requires review",
-  unknown: "Jurisdiction unknown · Ranger home not on record",
+  unknown: "Jurisdiction unknown · Officer home not on record",
 };
 
 export const jurisdictionTone: Record<JurisdictionState, BadgeTone> = {

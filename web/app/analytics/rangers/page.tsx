@@ -1,6 +1,6 @@
 "use client";
 
-/** Ranger analytics (PRD §10.4) — crew performance leaderboards */
+/** Officer analytics (PRD §10.4) — crew performance leaderboards */
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -31,7 +31,7 @@ export default function RangerAnalyticsPage() {
   const coverages = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
 
   const handleExport = (kind: ExportKind) => {
-    exportRows(kind, `ranger-ranking-${stamp()}`, data.map((r) => ({
+    exportRows(kind, `officer-ranking-${stamp()}`, data.map((r) => ({
       code: r.code,
       name: r.name,
       designation: r.designation,
@@ -51,13 +51,13 @@ export default function RangerAnalyticsPage() {
   return (
     <div>
       <PageHeader
-        title="Ranger Analytics"
+        title="Officer Analytics"
         subtitle="Individual contribution: patrols, distance, field hours and cover"
         actions={<ExportButton onExport={handleExport} />}
       />
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-        <KpiCard label="Rangers" value={data.length} icon="users" tone="forest" />
+        <KpiCard label="Officers" value={data.length} icon="users" tone="forest" />
         <KpiCard label="Total patrols" value={data.reduce((a, r) => a + r.stats.patrols, 0)} icon="route" tone="info" />
         <KpiCard label="Total distance" value={fmt(data.reduce((a, r) => a + r.stats.distanceKm, 0))} icon="target" tone="khaki" />
         <KpiCard label="Best coverage" value={coverages.length ? Math.max(...coverages) : "—"} unit={coverages.length ? "%" : undefined} icon="check" tone="success" />
@@ -99,14 +99,14 @@ export default function RangerAnalyticsPage() {
       </div>
 
       <Card className="mt-4">
-        <CardHeader title="All rangers (ranking)" icon="list" />
+        <CardHeader title="All officers (ranking)" icon="list" />
         <DataTable
           rows={data}
           loading={loading}
           onRowClick={(r) => router.push(`/rangers/${r.id}`)}
           columns={[
             { key: "code", header: "Code", sortValue: (r) => r.code, render: (r) => <span className="font-mono text-xs text-forest-800">{r.code}</span> },
-            { key: "name", header: "Ranger", sortValue: (r) => r.name, render: (r) => (
+            { key: "name", header: "Officer", sortValue: (r) => r.name, render: (r) => (
               <Link href={`/rangers/${r.id}`} className="flex items-center gap-2.5">
                 <Avatar name={r.name} size={26} />
                 <span className="font-medium text-ink">{r.name}</span>
@@ -119,7 +119,7 @@ export default function RangerAnalyticsPage() {
             { key: "coverage", header: "Coverage", sortValue: (r) => r.stats.coveragePct ?? -1, render: (r) => <CoverageBadge pct={r.stats.coveragePct} /> },
             { key: "status", header: "Duty", sortValue: (r) => r.dutyStatus, render: (r) => <Badge tone={dutyStatusTone[r.dutyStatus]} dot>{dutyStatusLabel[r.dutyStatus]}</Badge> },
           ]}
-          empty={<p className="py-8 text-center text-sm text-ink-soft">No rangers on record.</p>}
+          empty={<p className="py-8 text-center text-sm text-ink-soft">No officers on record.</p>}
         />
       </Card>
     </div>
@@ -137,7 +137,7 @@ function LeaderCard({ title, subtitle, rows }: { title: string; subtitle: string
             <Avatar name={x.r.name} size={28} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-ink">{x.r.name}</p>
-              <p className="text-xs text-ink-soft">{x.r.designation}</p>
+              <p className="text-xs text-ink-soft">{x.r.designation.toUpperCase()}</p>
             </div>
             <span className="text-sm font-semibold text-forest-800">
               {x.v.toLocaleString("en-IN")} <span className="text-xs font-normal text-ink-soft">{x.unit}</span>

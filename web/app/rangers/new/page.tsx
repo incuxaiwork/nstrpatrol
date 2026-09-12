@@ -43,7 +43,7 @@ export default function NewRangerPage() {
     <div>
       <PageHeader
         title="Provision User Account"
-        subtitle="Create a ranger and their platform sign-in credentials in one step"
+        subtitle="Create an officer and their platform sign-in credentials in one step"
         actions={
           <button
             onClick={() => router.push("/rangers")}

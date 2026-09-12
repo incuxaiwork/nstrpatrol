@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { prisma } from '../db/prisma';
 import { requireAuth } from '../middleware/auth';
 import { validateBody, validateQuery } from '../middleware/validate';
@@ -22,6 +24,10 @@ const PATROL_LIST_TTL_MS = process.env.NODE_ENV === 'test' ? 0 : 10_000;
 
 function patrolListCacheKey(userId: string, q: Record<string, unknown>): string {
   return `${userId}:${q.mine ?? ''}:${q.status ?? ''}:${q.forestId ?? ''}`;
+}
+
+export function clearPatrolListCache(): void {
+  patrolListCache.clear();
 }
 
 /* ------------------------------------------------------------------ */
@@ -58,12 +64,74 @@ export interface PatrolGeography {
 
 type GeographyCore = Omit<PatrolGeography, 'beat' | 'division'>;
 
+/* ------------------------------------------------------------------ */
+/* Beat geometry fallback (bundled mark_beat.json) for patrols with    */
+/* no Patrol.beat and no user assignment but with GPS points. Re-uses  */
+/* the same asset as gisRouter fallback, so no DB geom dependency.     */
+/* ------------------------------------------------------------------ */
+
+const PATROL_ASSET_DIR_CANDIDATES = [
+  resolve(__dirname, '../../../mobile/app/src/main/assets'),
+  resolve(__dirname, '../../mobile/app/src/main/assets'),
+];
+
+let _patrolBeatFeatures: any[] | null = null;
+async function loadPatrolBeatFeatures(): Promise<any[]> {
+  if (_patrolBeatFeatures !== null) return _patrolBeatFeatures;
+  for (const d of PATROL_ASSET_DIR_CANDIDATES) {
+    try {
+      const raw = await readFile(resolve(d, 'mark_beat.json'), 'utf-8');
+      const fc = JSON.parse(raw);
+      _patrolBeatFeatures = fc.features ?? [];
+      return _patrolBeatFeatures as any[];
+    } catch { /* try next */ }
+  }
+  _patrolBeatFeatures = [];
+  return _patrolBeatFeatures as any[];
+}
+
+function patrolPointInPolygon(lng: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) {
+      inside = !inside;
+    }
+  }
+  return inside;
+}
+
+function patrolPointInGeometry(lng: number, lat: number, geom: any): boolean {
+  if (!geom) return false;
+  if (geom.type === 'Polygon') return patrolPointInPolygon(lng, lat, geom.coordinates[0]);
+  if (geom.type === 'MultiPolygon') return geom.coordinates.some((poly: number[][][]) => patrolPointInPolygon(lng, lat, poly[0]));
+  return false;
+}
+
+async function resolveBeatFromPoint(lng: number, lat: number): Promise<string | null> {
+  const features = await loadPatrolBeatFeatures();
+  for (const f of features) {
+    if (patrolPointInGeometry(lng, lat, f.geometry)) {
+      const name = String(f.properties?.Beat ?? '').trim();
+      if (name) return name;
+    }
+  }
+  return null;
+}
+
 async function resolvePatrolGeographyIndex(
   patrols: { id: string; beat: string | null; userId: string }[],
-): Promise<{ index: Map<string, GeographyCore>; patrolIdToBeatName: Map<string, string>; patrolIdToRangeId: Map<string, string> }> {
+): Promise<{
+  index: Map<string, GeographyCore>;
+  patrolIdToBeatName: Map<string, string>;
+  patrolIdToRangeId: Map<string, string>;
+  rangeIdToCore: Map<string, GeographyCore & { range: string | null }>;
+}> {
   const index = new Map<string, GeographyCore>();
   const patrolIdToBeatName = new Map<string, string>();
   const patrolIdToRangeId = new Map<string, string>();
+  const rangeIdToCore = new Map<string, GeographyCore & { range: string | null }>();
   // Collect beat names from patrols that have them
   const beatNames = [...new Set(patrols.map((p) => p.beat).filter((b): b is string => Boolean(b)))];
   // For patrols with no beat, fall back to the ranger's assigned beat/range
@@ -76,15 +144,27 @@ async function resolvePatrolGeographyIndex(
     });
     const beatIds = [...new Set(users.map((u) => u.beatId).filter((b): b is string => Boolean(b)))];
     const rangeIdsFromUsers = [...new Set(users.map((u) => u.rangeId).filter((r): r is string => Boolean(r)))];
-    // Also collect range names for those rangeIds to ensure they're in the index
-    let rangeNamesFromIds: string[] = [];
+    // Pre-load range details for user rangeIds — used for honest range-only fallback
+    // even when no beat in the batch belongs to that range. This avoids the old
+    // "loop over index.values() to find rangeId" fragility.
     if (rangeIdsFromUsers.length > 0) {
       const rangesFromUsers = await prisma.range.findMany({
         where: { id: { in: rangeIdsFromUsers } },
-        select: { id: true, name: true },
+        select: { id: true, name: true, subDivisionId: true },
       });
-      rangeNamesFromIds = rangesFromUsers.map((r) => r.name);
-      for (const n of rangeNamesFromIds) if (!beatNames.includes(n)) beatNames.push(n);
+      const subIds = [...new Set(rangesFromUsers.map((r) => r.subDivisionId).filter((s): s is string => Boolean(s)))];
+      const subs = subIds.length ? await prisma.subDivision.findMany({ where: { id: { in: subIds } }, select: { id: true, name: true } }) : [];
+      const subById = new Map(subs.map((s) => [s.id, s]));
+      for (const r of rangesFromUsers) {
+        const sub = r.subDivisionId ? subById.get(r.subDivisionId) : undefined;
+        rangeIdToCore.set(r.id, {
+          beatId: null,
+          rangeId: r.id,
+          range: r.name,
+          subDivisionId: sub?.id ?? null,
+          subDivision: sub?.name ?? null,
+        });
+      }
       // Map userId -> rangeId for fallback
       const userIdToRangeId = new Map(users.map((u) => [u.id, u.rangeId ?? null]));
       for (const p of patrolsNeedingUserBeat) {
@@ -108,7 +188,46 @@ async function resolvePatrolGeographyIndex(
       }
     }
   }
-  if (beatNames.length === 0) return { index, patrolIdToBeatName, patrolIdToRangeId };
+
+  // ── Second-tier fallback: first PatrolPoint beat-intersection for patrols
+  // still without a beat or range assignment but with GPS points. Uses the
+  // bundled mark_beat.json geometry (same file as gis fallback) so no PostGIS
+  // dependency. Batched: one DISTINCT ON query for all remaining patrols.
+  const stillNeeding = patrols.filter(
+    (p) => !p.beat && !patrolIdToBeatName.has(p.id) && !patrolIdToRangeId.has(p.id),
+  );
+  if (stillNeeding.length > 0) {
+    try {
+      const ids = stillNeeding.map((p) => p.id);
+      // First valid point per patrol (DISTINCT ON)
+      const firstPoints = await prisma.$queryRaw<{ patrolId: string; latitude: number; longitude: number }[]>`
+        SELECT DISTINCT ON ("patrolId") "patrolId", latitude, longitude
+        FROM "PatrolPoint"
+        WHERE "patrolId" = ANY(${ids}::text[])
+          AND latitude IS NOT NULL AND longitude IS NOT NULL
+          AND NOT (latitude = 0 AND longitude = 0)
+        ORDER BY "patrolId", timestamp ASC
+      `;
+      for (const fp of firstPoints) {
+        if (!Number.isFinite(fp.latitude) || !Number.isFinite(fp.longitude)) continue;
+        const beatName = await resolveBeatFromPoint(fp.longitude, fp.latitude);
+        if (beatName) {
+          if (!beatNames.includes(beatName)) beatNames.push(beatName);
+          patrolIdToBeatName.set(fp.patrolId, beatName);
+          // The beat's range will be resolved via the main Beat→Range join below,
+          // so patrolIdToRangeId will be populated via index later. No need to set here.
+        }
+      }
+    } catch {
+      // Non-fatal: point fallback is best-effort; user assignment fallback already ran.
+    }
+  }
+
+  if (beatNames.length === 0) {
+    // Still return rangeIdToCore so geographyFor can serve range-only patrols
+    // even when the batch has zero beat names (e.g., single patrol with only user range).
+    return { index, patrolIdToBeatName, patrolIdToRangeId, rangeIdToCore };
+  }
 
   const beats = await prisma.beat.findMany({
     where: { name: { in: beatNames } },
@@ -121,7 +240,7 @@ async function resolvePatrolGeographyIndex(
         select: { id: true, name: true, subDivisionId: true },
       })
     : [];
-  const subDivisionIds = [...new Set(ranges.map((r) => r.subDivisionId).filter((s): s is string => Boolean(s)))];
+  const subDivisionIds = [...new Set([...ranges.map((r) => r.subDivisionId), ...[...rangeIdToCore.values()].map((c) => c.subDivisionId)].filter((s): s is string => Boolean(s)))];
   const subdivisions = subDivisionIds.length
     ? await prisma.subDivision.findMany({ where: { id: { in: subDivisionIds } }, select: { id: true, name: true } })
     : [];
@@ -139,7 +258,24 @@ async function resolvePatrolGeographyIndex(
       subDivision: subdivision?.name ?? null,
     });
   }
-  return { index, patrolIdToBeatName, patrolIdToRangeId };
+  // Also ensure rangeIdToCore entries have complete subDivision info
+  // (in case they were created earlier with partial data)
+  for (const [rid, core] of rangeIdToCore.entries()) {
+    if (!core.subDivisionId && core.range) {
+      const r = rangeByName.get(core.range);
+      if (r?.subDivisionId) {
+        const sub = subDivisionById.get(r.subDivisionId);
+        rangeIdToCore.set(rid, {
+          beatId: null,
+          rangeId: rid,
+          range: r.name,
+          subDivisionId: sub?.id ?? null,
+          subDivision: sub?.name ?? null,
+        });
+      }
+    }
+  }
+  return { index, patrolIdToBeatName, patrolIdToRangeId, rangeIdToCore };
 }
 
 function geographyFor(
@@ -147,6 +283,7 @@ function geographyFor(
   index: Map<string, GeographyCore>,
   patrolIdToBeatName?: Map<string, string>,
   patrolIdToRangeId?: Map<string, string>,
+  rangeIdToCore?: Map<string, GeographyCore & { range: string | null }>,
 ): PatrolGeography {
   // Primary: patrol's own beat
   let beatName: string | null = patrol.beat ?? null;
@@ -159,11 +296,28 @@ function geographyFor(
       core = index.get(fallbackName);
     }
   }
-  // If still no core but we have a fallback rangeId (user has range but no beat), build a minimal core
+  // If still no core but we have a fallback rangeId (user has range but no beat),
+  // use the pre-loaded rangeIdToCore map — honest and not dependent on index
+  // having a beat for that range. This fixes the "Range — but index empty" bug.
   if (!core && patrolIdToRangeId) {
     const fallbackRangeId = patrolIdToRangeId.get(patrol.id);
     if (fallbackRangeId) {
-      // Try to find the range name from the index (any beat that has this rangeId)
+      // Prefer the direct range lookup
+      if (rangeIdToCore) {
+        const rc = rangeIdToCore.get(fallbackRangeId);
+        if (rc) {
+          return {
+            beat: beatName,
+            beatId: null,
+            range: rc.range ?? null,
+            rangeId: fallbackRangeId,
+            subDivision: rc.subDivision ?? null,
+            subDivisionId: rc.subDivisionId ?? null,
+            division: DIVISION_PT_MARKAPUR,
+          };
+        }
+      }
+      // Legacy fallback: try to find range name from index (any beat that has this rangeId)
       for (const c of index.values()) {
         if (c.rangeId === fallbackRangeId) {
           return {
@@ -177,12 +331,8 @@ function geographyFor(
           };
         }
       }
-      // Fallback: the index has no beat for this range (e.g., patrol batch has no beats for that range),
-      // so the range name wasn't loaded. Return the rangeId and let the frontend resolve the name
-      // via the hierarchy, or at least show the rangeId. We could also do a direct DB lookup
-      // here, but that would require an async call. For now, return the rangeId with null name
-      // and let the frontend handle it via unitName. The patrol list will at least show the rangeId
-      // which the frontend can map to a display name via the hierarchy.
+      // Last resort: return the rangeId with null name — will be resolved by frontend hierarchy
+      // (should rarely happen now that rangeIdToCore is populated)
       return {
         beat: beatName,
         beatId: null,
@@ -457,7 +607,7 @@ patrolsRouter.get('/', validateQuery(patrolListQuery), async (req, res) => {
     const s = statsMap.get(p.id);
     return {
       ...p,
-      geography: geographyFor(p, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId),
+      geography: geographyFor(p, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId, geoResult.rangeIdToCore),
       stats: s ?? null,
     };
   }));
@@ -734,7 +884,7 @@ patrolsRouter.get('/:id', async (req, res) => {
 
   res.json({
     ...patrol,
-    geography: geographyFor(patrol, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId),
+    geography: geographyFor(patrol, geoResult.index, geoResult.patrolIdToBeatName, geoResult.patrolIdToRangeId, geoResult.rangeIdToCore),
     detectedMethod,
     stats: { points: pointCount, distanceKm, durationSeconds, steps, moveMinutes: movingMinutes, modes },
   });

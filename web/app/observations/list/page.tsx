@@ -141,7 +141,7 @@ function ObservationsList() {
             options={Object.entries(observationStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
           <FilterSelect label="Severity" value={severity} onChange={(v) => { setSeverity(v); setPage(1); }}
             options={Object.entries(severityLabel).map(([v, l]) => ({ value: v, label: l }))} />
-          <FilterSelect label="Ranger" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
+          <FilterSelect label="Officer" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
             options={rangerOptions} />
           <FilterSelect label="Recorded" value={period} onChange={(v) => { setPeriod(v); setPage(1); }}
             options={[

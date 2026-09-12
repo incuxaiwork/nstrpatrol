@@ -66,7 +66,7 @@ export default function RangerDetailPage() {
     <div>
       <PageHeader
         title={ranger.name}
-        subtitle={`${ranger.code} · ${ranger.designation} · joined ${ranger.joinYear}`}
+        subtitle={`${ranger.code} · ${ranger.designation.toUpperCase()} · joined ${ranger.joinYear}`}
         actions={
           <>
             <Badge tone={dutyStatusTone[ranger.dutyStatus]} dot>{dutyStatusLabel[ranger.dutyStatus]}</Badge>
@@ -140,11 +140,11 @@ export default function RangerDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Coverage vs beat target" icon="target" subtitle="Per-ranger coverage has no backend aggregate yet" />
+            <CardHeader title="Coverage vs beat target" icon="target" subtitle="Per-officer coverage has no backend aggregate yet" />
             <div className="space-y-3 p-5">
               {s.coveragePct == null ? (
                 <p className="text-sm text-ink-soft">
-                  Coverage unavailable — the backend does not publish per-ranger coverage.
+                  Coverage unavailable — the backend does not publish per-officer coverage.
                 </p>
               ) : (
                 <>
@@ -229,7 +229,7 @@ export default function RangerDetailPage() {
           </Card>
 
           <Card>
-            <CardHeader title="Recent activity" icon="history" subtitle="Latest events involving this ranger (mock)" />
+            <CardHeader title="Recent activity" icon="history" subtitle="Latest events involving this officer (mock)" />
             <div className="p-5">
               <Timeline
                 items={[
@@ -319,7 +319,7 @@ export default function RangerDetailPage() {
             <CardHeader title="Duty & contact" icon="info" />
             <dl className="space-y-2.5 p-4 text-sm">
               <DetailRow label="Duty status" value={<Badge tone={dutyStatusTone[ranger.dutyStatus]} dot>{dutyStatusLabel[ranger.dutyStatus]}</Badge>} />
-              <DetailRow label="Designation" value={ranger.designation} />
+              <DetailRow label="Designation" value={ranger.designation.toUpperCase()} />
               <DetailRow label="Division" value={geoLabel(ranger.division)} />
               <DetailRow label="Range" value={geoLabel(ranger.range)} />
               <DetailRow label="Beat" value={geoLabel(ranger.beat)} />
@@ -358,12 +358,12 @@ export default function RangerDetailPage() {
         open={removeOpen}
         onClose={() => setRemoveOpen(false)}
         danger
-        title="Remove ranger"
+        title="Remove officer"
         message={`Remove ${ranger.name} (${ranger.code}) from the directory? Historical patrol and authorization records are kept.`}
-        confirmLabel="Remove ranger"
+        confirmLabel="Remove officer"
         onConfirm={async () => {
           await rangers.remove(ranger.id);
-          pushToast("warning", "Ranger removed", `${ranger.name} removed from the directory (mock store)`);
+          pushToast("warning", "Officer removed", `${ranger.name} removed from the directory (mock store)`);
           router.push("/rangers");
         }}
       />
@@ -390,7 +390,7 @@ function NotFound({ what, id }: { what: string; id: string }) {
       </p>
       <p className="max-w-sm text-xs text-ink-soft">It may not exist in the mock records.</p>
       <Link href="/rangers" className="inline-flex h-8 items-center gap-1.5 rounded-field bg-forest-800 px-3 text-xs font-medium text-white hover:bg-forest-700">
-        <Icon name="chevronLeft" size={12} /> Back to rangers
+        <Icon name="chevronLeft" size={12} /> Back to officers
       </Link>
     </div>
   );

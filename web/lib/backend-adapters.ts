@@ -604,7 +604,10 @@ export function patrolFromApi(
     status: (p.status ? patrolStatusMap[p.status] : undefined) ?? "ongoing",
     objective: p.description ?? "",
     // Authoritative server-resolved geography only. Unresolved levels stay
-    // "" (rendered "—"), never guessed.
+    // "" (rendered "—"), never guessed. If range is null but rangeId is set
+    // (e.g., patrol with no beat but user has range), the UI will resolve the
+    // display name via hierarchy/useAsyncData elsewhere; keep it empty here
+    // so the table shows "—" only when truly no geography.
     division: p.geography?.division ?? "",
     subDivision: p.geography?.subDivision ?? "",
     range: p.geography?.range ?? "",
@@ -788,8 +791,8 @@ export function rangerFromApi(
   return {
     id: u.id,
     code: u.id.slice(0, 8).toUpperCase(),
-    name: u.fullName ?? "Unnamed ranger",
-    designation: u.cader ?? "Forest Ranger",
+    name: u.fullName ?? "Unnamed officer",
+    designation: u.cader?.toUpperCase() ?? "FOREST OFFICER",
     dutyStatus: u.isActive === false ? "offline" : onPatrol ? "field" : "off-duty",
     phone: u.phone ?? undefined,
     joinYear: u.createdAt ? new Date(u.createdAt).getFullYear() : new Date().getFullYear(),
@@ -832,7 +835,7 @@ export function alertFromApi(a: ApiAlert): NotificationItem {
     return {
       ...base,
       kind: "critical",
-      title: `SOS — ${a.ranger ?? "Ranger"}`,
+      title: `SOS — ${a.ranger ?? "Officer"}`,
       body:
         a.details ??
         (a.latitude != null

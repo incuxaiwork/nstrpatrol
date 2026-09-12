@@ -27,12 +27,12 @@ export const navModules: NavItem[] = [
   },
   {
     key: "rangers",
-    label: "Ranger Management",
+    label: "Officer Management",
     href: "/rangers",
     icon: "users",
     children: [
-      { label: "Ranger Directory", href: "/rangers" },
-      { label: "Create Ranger", href: "/rangers/new" },
+      { label: "Officer Directory", href: "/rangers" },
+      { label: "Create Officer", href: "/rangers/new" },
       { label: "Teams", href: "/rangers/teams" },
       { label: "Vehicles", href: "/rangers/vehicles" },
       { label: "Weapons", href: "/rangers/weapons" },
@@ -57,7 +57,7 @@ export const navModules: NavItem[] = [
     icon: "chart",
     children: [
       { label: "Forest Analytics", href: "/analytics" },
-      { label: "Ranger Analytics", href: "/analytics/rangers" },
+      { label: "Officer Analytics", href: "/analytics/rangers" },
       { label: "Beat Analytics", href: "/analytics/beats" },
       { label: "Range Analytics", href: "/analytics/ranges" },
       { label: "Division Analytics", href: "/analytics/divisions" },

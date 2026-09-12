@@ -29,7 +29,7 @@ import { mapBeatsRaw } from "@/lib/mock/gis";
 import type { PatrolType } from "@/lib/types";
 
 const APPROVER = "V. Kulkarni · Super Admin";
-const STEP_LABELS = ["Select ranger", "Select area", "Details", "Review", "Approval"];
+const STEP_LABELS = ["Select officer", "Select area", "Details", "Review", "Approval"];
 
 export default function CreateAuthorizationPage() {
   return (
@@ -146,7 +146,7 @@ function CreateAuthorizationWizard() {
     // Approving requires a ranger; saving a draft is allowed on any step and
     // does not demand a fully-formed record (#6).
     if (status === "active" && !ranger) {
-      pushToast("error", "Cannot approve yet", "Select a ranger and complete the authorization first.");
+      pushToast("error", "Cannot approve yet", "Select an officer and complete the authorization first.");
       return;
     }
     const payload = {
@@ -205,7 +205,7 @@ function CreateAuthorizationWizard() {
     <div>
       <PageHeader
         title={editId ? "Edit Authorization" : "Create Authorization"}
-        subtitle={editId ? `Amend draft ${editId} and continue the approval flow` : "Grant a ranger special permission to patrol outside their normal jurisdiction"}
+        subtitle={editId ? `Amend draft ${editId} and continue the approval flow` : "Grant an officer special permission to patrol outside their normal jurisdiction"}
         actions={
           editId && editing.data ? (
             <Badge tone={editing.data.status === "draft" ? "neutral" : "info"}>
@@ -264,7 +264,7 @@ function CreateAuthorizationWizard() {
                       <p className="font-medium text-ink">{r.name}</p>
                       {selected && <Icon name="check" size={14} className="text-forest-700" />}
                     </div>
-                    <p className="mt-0.5 text-xs text-ink-soft">{r.code} · {r.designation}</p>
+                    <p className="mt-0.5 text-xs text-ink-soft">{r.code} · {r.designation.toUpperCase()}</p>
                     <p className="mt-1.5 text-xs text-ink-soft">
                       Normal jurisdiction: <span className="font-medium text-ink">{unitName(r.division)} / {unitName(r.range)} / {unitName(r.beat)}</span>
                     </p>
@@ -299,7 +299,7 @@ function CreateAuthorizationWizard() {
             </Card>
             <div className="space-y-4">
               <Card>
-                <CardHeader title="Authorized area" icon="map" subtitle="Where the ranger may patrol under this authorization" />
+                <CardHeader title="Authorized area" icon="map" subtitle="Where the officer may patrol under this authorization" />
                 <div className="grid gap-4 p-4">
                   <Field label="Division" required>
                     <Select value={authDivision} onChange={(e) => { setAuthDivision(e.target.value); setAuthRange(""); setAuthBeat(""); }}>
@@ -394,7 +394,7 @@ function CreateAuthorizationWizard() {
             <Card>
               <CardHeader title="Review" icon="eye" subtitle="Confirm the authorization before approval" />
               <dl className="space-y-2.5 p-4 text-sm">
-                <Row label="Ranger" value={`${ranger.name} · ${ranger.code}`} />
+                <Row label="Officer" value={`${ranger.name} · ${ranger.code}`} />
                 <Row label="Normal jurisdiction" value={`${unitName(ranger.division)} / ${unitName(ranger.range)} / ${unitName(ranger.beat)}`} />
                 <Row label="Authorized area" value={authArea} tone="warn" />
                 <Row label="Reason" value={reason} />
@@ -420,15 +420,15 @@ function CreateAuthorizationWizard() {
             <Card>
               <div className="p-6 text-center">
                 <Icon name="users" size={28} className="mx-auto text-ink-faint" />
-                <p className="mt-3 text-sm font-medium text-ink">No ranger selected</p>
+                <p className="mt-3 text-sm font-medium text-ink">No officer selected</p>
                 <p className="mx-auto mt-1 max-w-sm text-sm text-ink-soft">
-                  Select a ranger on Step 1 before reviewing this authorization.
+                  Select an officer on Step 1 before reviewing this authorization.
                 </p>
                 <button
                   onClick={() => setStep(1)}
                   className="mt-4 inline-flex h-9 items-center gap-1.5 rounded-field bg-forest-800 px-4 text-sm font-medium text-white shadow-card hover:bg-forest-700"
                 >
-                  <Icon name="chevronLeft" size={14} /> Back to ranger selection
+                  <Icon name="chevronLeft" size={14} /> Back to officer selection
                 </button>
               </div>
             </Card>
@@ -445,8 +445,8 @@ function CreateAuthorizationWizard() {
               </h2>
               <p className="mx-auto mt-1 max-w-md text-sm text-ink-soft">
                 {editId
-                  ? "Save keeps the current status. Approving immediately activates the authorization for the ranger in the mobile application."
-                  : "Approving makes the authorization immediately visible to the ranger in the mobile application. Saving as draft keeps it out of the field until submitted and approved."}
+                  ? "Save keeps the current status. Approving immediately activates the authorization for the officer in the mobile application."
+                  : "Approving makes the authorization immediately visible to the officer in the mobile application. Saving as draft keeps it out of the field until submitted and approved."}
               </p>
               <div className="mt-5 flex justify-center gap-3">
                 <button

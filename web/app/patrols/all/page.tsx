@@ -112,7 +112,7 @@ export default function AllPatrolsPage() {
     <div>
       <PageHeader
         title="All Patrols"
-        subtitle="Monitor and review patrol activity recorded by rangers in the field"
+        subtitle="Monitor and review patrol activity recorded by officers in the field"
         actions={
           <Link
             href="/patrols/permissions"
@@ -126,7 +126,7 @@ export default function AllPatrolsPage() {
       <Card>
         <div className="flex items-center justify-between gap-3 border-b border-line px-4 py-2">
           <p className="text-xs text-ink-soft">
-            {filtered.length} patrol{filtered.length === 1 ? "" : "s"} · jurisdiction-validated against ranger home areas and authorizations
+            {filtered.length} patrol{filtered.length === 1 ? "" : "s"} · jurisdiction-validated against officer home areas and authorizations
           </p>
           <ViewSwitcher value={view} onChange={(v) => { setView(v); setPage(1); }} />
         </div>
@@ -153,7 +153,7 @@ export default function AllPatrolsPage() {
             options={rangeOptions.map((r) => ({ value: r, label: r }))} />
           <FilterSelect label="Beat" value={beat} onChange={(v) => { setBeat(v); setPage(1); }}
             options={beatOptions.map((b) => ({ value: b, label: b }))} />
-          <FilterSelect label="Ranger" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
+          <FilterSelect label="Officer" value={ranger} onChange={(v) => { setRanger(v); setPage(1); }}
             options={roster.data.map((r) => ({ value: r.id, label: r.name }))} />
           <FilterSelect label="Date" value={dateRange} onChange={(v) => { setDateRange(v); setPage(1); }}
             options={[
@@ -180,7 +180,7 @@ export default function AllPatrolsPage() {
                   render: (r) => <span className="font-mono text-xs font-medium text-forest-800">{r.patrol.code}</span>,
                 },
                 {
-                  key: "ranger", header: "Ranger", sortValue: (r) => r.patrol.leader,
+                  key: "ranger", header: "Officer", sortValue: (r) => r.patrol.leader,
                   render: (r) => (
                     <div>
                       <p className="font-medium text-ink">{r.patrol.leader}</p>
@@ -212,7 +212,7 @@ export default function AllPatrolsPage() {
                       <IconLink href={`/patrols/${r.patrol.id}`} icon="eye" label="View" />
                       <IconLink href={`/patrols/${r.patrol.id}/replay`} icon="play" label="Replay" />
                       <IconLink href="/gis" icon="map" label="Open GIS" />
-                      {rangerByPatrol(r.patrol) && <IconLink href={`/rangers/${rangerByPatrol(r.patrol)!.id}`} icon="users" label="View ranger" />}
+                      {rangerByPatrol(r.patrol) && <IconLink href={`/rangers/${rangerByPatrol(r.patrol)!.id}`} icon="users" label="View officer" />}
                       {r.jurisdiction.authorization && <IconLink href={`/patrols/permissions/${r.jurisdiction.authorization.id}`} icon="lock" label="View authorization" />}
                       <IconLink href="/patrols/reports" icon="file" label="Report" />
                     </span>

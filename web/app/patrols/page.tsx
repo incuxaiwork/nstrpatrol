@@ -57,8 +57,8 @@ function monthEndIST(): string {
 
 export default function PatrolsPage() {
   const router = useRouter();
-  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list" });
-  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "patrols:roster" });
+  const { data, error, loading, reload } = useAsyncData(() => patrols.list(), [], { cacheKey: "patrols:list", pollInterval: 15000 });
+  const roster = useAsyncData(() => rangers.list(), [], { cacheKey: "patrols:roster", pollInterval: 15000 });
   const hierarchyData = useAsyncData(() => hierarchy.units(), [], { cacheKey: "patrols:hierarchy" });
 
   /* ── Filter state — all default to "" (= All) ── */
@@ -208,7 +208,7 @@ export default function PatrolsPage() {
           <SearchInput
             value={search}
             onChange={setSearch}
-            placeholder="Search by patrol, title, or ranger…"
+            placeholder="Search by patrol, title, or officer…"
             className="w-72"
           />
           <div className="flex items-center gap-3">
@@ -291,7 +291,7 @@ export default function PatrolsPage() {
           </label>
 
           <FilterSelect
-            label="Ranger"
+            label="Officer"
             value={ranger}
             onChange={(v) => { setRanger(v); setPage(1); }}
             options={rangerOptions}
@@ -315,7 +315,7 @@ export default function PatrolsPage() {
               ),
             },
             {
-              key: "ranger", header: "Ranger",
+              key: "ranger", header: "Officer",
               sortValue: (r) => r.leader,
               render: (r) => <span className="text-sm text-ink">{r.leader || "—"}</span>,
             },

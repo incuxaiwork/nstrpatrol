@@ -47,7 +47,7 @@ export default function PatrolPermissionsPage() {
     approve: {
       title: "Approve this authorization?",
       label: "Approve authorization",
-      message: "The authorization becomes active immediately and the ranger can patrol the authorized area.",
+      message: "The authorization becomes active immediately and the officer can patrol the authorized area.",
     },
     revoke: {
       title: "Revoke this authorization?",
@@ -59,7 +59,7 @@ export default function PatrolPermissionsPage() {
       title: "Reject this authorization?",
       label: "Reject authorization",
       danger: true,
-      message: "The ranger will be notified that the request was not approved.",
+      message: "The officer will be notified that the request was not approved.",
     },
     complete: {
       title: "Mark this authorization complete?",
@@ -154,7 +154,7 @@ export default function PatrolPermissionsPage() {
           <input
             value={query}
             onChange={(e) => { setQuery(e.target.value); setPage(1); }}
-            placeholder="Search ID, ranger or reason…"
+            placeholder="Search ID, officer or reason…"
             className="ml-auto h-9 w-56 rounded-field border border-line bg-white px-3 text-sm text-ink outline-none placeholder:text-ink-faint focus:border-forest-600"
           />
         </FilterBar>
@@ -169,13 +169,13 @@ export default function PatrolPermissionsPage() {
               render: (a) => <span className="font-mono text-xs font-medium text-forest-800">{a.id}</span>,
             },
             {
-              key: "ranger", header: "Ranger", sortValue: (a) => rangerOf(a.rangerId)?.name ?? "",
+              key: "ranger", header: "Officer", sortValue: (a) => rangerOf(a.rangerId)?.name ?? "",
               render: (a) => {
                 const r = rangerOf(a.rangerId);
                 return (
                   <div>
                     <p className="font-medium text-ink">{r?.name ?? a.rangerId}</p>
-                    <p className="text-xs text-ink-soft">{r?.designation}</p>
+                    <p className="text-xs text-ink-soft">{r?.designation?.toUpperCase()}</p>
                   </div>
                 );
               },
