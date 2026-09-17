@@ -182,9 +182,30 @@ export function MediaViewer({
             style={{ transform: `scale(${zoom})` }}
             aria-hidden="true"
           >
-            <div className="flex flex-col items-center gap-3 text-ink-faint">
-              <Icon name="camera" size={44} />
-              <p className="text-sm">{item.label}</p>
+            <div className="relative w-full max-w-3xl">
+              <img
+                src={`https://picsum.photos/seed/${item.label}`
+                alt={item.label}
+                className="w-full h-full object-cover"
+                style={{ display: "block" }}
+              />
+              <div
+                className="absolute inset-0 flex items-center justify-center text-ink-faint text-sm"
+              >
+                <button
+                  onClick={() => navigator.clipboard.writeText(item.label)}
+                  title="Copy label"
+                  className="rounded-md bg-white/20 p-1 text-xs text-white"
+                >
+                  <Icon name="copy" size={12} />
+                </button>
+              </div>
+              <div
+                className="flex flex-col items-center gap-2 absolute bottom-0 left-0 right-0 p-3 bg-gradient-to-t from-white/20 to transparent"
+              >
+                <p className="text-sm font-medium text-ink">{item.label}</p>
+                <p className="text-[10px] text-ink-soft">{formatDateTime(item.captureTime)}</p>
+              </div>
             </div>
           </div>
         )}

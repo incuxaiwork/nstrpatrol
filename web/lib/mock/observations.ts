@@ -17,6 +17,31 @@ export const patrolStatusLabel = (s: PatrolStatus): string =>
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
 const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
+/**
+ * The four report categories defined in the PRD (docs/NSTR_Patrol_Feature_Overview.txt §4.1).
+ * Everything else in the codebase keyed by categoryMeta is legacy/extra and is not offered
+ * as a filter.
+ */
+export const PATROL_REPORT_CATEGORIES = [
+  "human-impact",
+  "mortality",
+  "wildlife",
+  "water-body",
+] as const satisfies readonly Observation["category"][];
+
+export const PATROL_REPORT_SUBCATEGORIES: Record<
+  (typeof PATROL_REPORT_CATEGORIES)[number],
+  string[]
+> = {
+  "human-impact": ["Poaching / trapping", "Fire hazard", "Encroachment", "Theft"],
+  mortality: ["Natural death"],
+  wildlife: ["Direct sighting", "Indirect sign"],
+  "water-body": ["Water hole"],
+};
+
+export type PatrolReportSubcategory = (typeof PATROL_REPORT_SUBCATEGORIES)[keyof typeof PATROL_REPORT_SUBCATEGORIES][number];
+
+
 export const categoryMeta: Record<
   Observation["category"],
   { label: string; plural: string; color: string }

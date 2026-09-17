@@ -15,7 +15,7 @@ import { ExportButton, type ExportKind } from "@/components/overlays";
 import { Icon } from "@/components/icons";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
-import { categoryMeta } from "@/lib/mock/observations";
+import { categoryMeta, PATROL_REPORT_CATEGORIES, PATROL_REPORT_SUBCATEGORIES } from "@/lib/mock/observations";
 import { timeAgo } from "@/lib/utils";
 import { exportRows, stamp } from "@/lib/export";
 import { ReportButton } from "@/components/reports/ReportButton";
@@ -55,18 +55,13 @@ function ObservationsList() {
     return PERIOD_ANCHOR_MS - (hours[period] ?? 0) * 3_600_000;
   }, [period]);
 
-  const subcategoryOptions = useMemo(() => {
-    if (!data) return [];
-    const seen = new Set<string>();
-    const out: { value: string; label: string }[] = [];
-    data.forEach((o) => {
-      if (o.subcategory && !seen.has(o.subcategory)) {
-        seen.add(o.subcategory);
-        out.push({ value: o.subcategory, label: o.subcategory });
-      }
-    });
-    return out;
-  }, [data]);
+  const subcategoryOptions = useMemo(
+    () =>
+      (PATROL_REPORT_SUBCATEGORIES[category as keyof typeof PATROL_REPORT_SUBCATEGORIES] ?? []).map(
+        (s) => ({ value: s, label: s })
+      ),
+    [category]
+  );
 
   const rangerOptions = useMemo(() => {
     if (!data) return [];
@@ -134,7 +129,7 @@ function ObservationsList() {
       <Card>
         <FilterBar onClear={() => { setCategory(""); setSubcategory(""); setStatus(""); setSeverity(""); setRanger(""); setPeriod(""); setPage(1); }}>
           <FilterSelect label="Category" value={category} onChange={(v) => { setCategory(v); setSubcategory(""); setPage(1); }}
-            options={Object.entries(categoryMeta).map(([v, m]) => ({ value: v, label: m.label }))} />
+            options={PATROL_REPORT_CATEGORIES.map((v) => ({ value: v, label: categoryMeta[v].label }))} />
           <FilterSelect label="Subcategory" value={subcategory} onChange={(v) => { setSubcategory(v); setPage(1); }}
             options={subcategoryOptions} />
           <FilterSelect label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }}

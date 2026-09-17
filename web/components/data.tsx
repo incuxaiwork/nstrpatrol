@@ -163,11 +163,13 @@ export function FilterSelect({
   value,
   onChange,
   options,
+  disabled,
 }: {
   label: string;
   value: string;
   onChange(v: string): void;
   options: { value: string; label: string }[];
+  disabled?: boolean;
 }) {
   return (
     <label className="flex flex-col gap-1">
@@ -175,7 +177,9 @@ export function FilterSelect({
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-8 rounded-field border border-line-strong bg-white px-2 text-xs focus:border-forest-600 focus:outline-none"
+        disabled={disabled}
+        title={disabled ? "Select a range first" : undefined}
+        className="h-8 rounded-field border border-line-strong bg-white px-2 text-xs focus:border-forest-600 focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
       >
         <option value="">All</option>
         {options.map((o) => (
