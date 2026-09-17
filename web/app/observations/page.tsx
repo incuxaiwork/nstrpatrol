@@ -121,7 +121,7 @@ export default function ObservationsDashboardPage() {
               actions={<Link href="/observations/list" className="text-xs font-medium text-forest-700 hover:underline">Full list →</Link>}
             />
             <FilterBar onClear={() => { setCategory(""); setSubcategory(""); setStatus(""); setSeverity(""); }}>
-              <FilterSelect label="Category" value={category} onChange={setCategory}
+              <FilterSelect label="Category" value={category} onChange={(v) => { setCategory(v); setSubcategory(""); }}
                 options={PATROL_REPORT_CATEGORIES.map((v) => ({ value: v, label: categoryMeta[v].label }))} />
               <FilterSelect label="Subcategory" value={subcategory} onChange={setSubcategory}
                 disabled={!category}
