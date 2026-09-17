@@ -16,7 +16,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { Donut, DonutLegend } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
-import { categoryMeta } from "@/lib/mock/observations";
+import { categoryMeta, PATROL_REPORT_CATEGORIES, PATROL_REPORT_SUBCATEGORIES } from "@/lib/mock/observations";
 import { timeAgo } from "@/lib/utils";
 
 
@@ -34,18 +34,28 @@ export default function ObservationsDashboardPage() {
   const { data, error, loading, reload } = useAsyncData(() => observations.list(), [], { cacheKey: "observations:list" });
 
   const [category, setCategory] = useState("");
+  const [subcategory, setSubcategory] = useState("");
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
+
+  const subcategoryOptions = useMemo(
+    () =>
+      (PATROL_REPORT_SUBCATEGORIES[category as keyof typeof PATROL_REPORT_SUBCATEGORIES] ?? []).map(
+        (s) => ({ value: s, label: s })
+      ),
+    [category]
+  );
 
   const filtered = useMemo(() => {
     if (!data) return [];
     return data.filter(
       (o) =>
         (!category || o.category === category) &&
+        (!subcategory || o.subcategory === subcategory) &&
         (!status || o.status === status) &&
         (!severity || o.severity === severity)
     );
-  }, [data, category, status, severity]);
+  }, [data, category, subcategory, status, severity]);
 
   if (loading || !data) return <SkeletonRows rows={7} />;
   if (error) return <ErrorState message={error.message} onRetry={reload} />;
@@ -110,9 +120,12 @@ export default function ObservationsDashboardPage() {
               icon="binoculars"
               actions={<Link href="/observations/list" className="text-xs font-medium text-forest-700 hover:underline">Full list →</Link>}
             />
-            <FilterBar onClear={() => { setCategory(""); setStatus(""); setSeverity(""); }}>
+            <FilterBar onClear={() => { setCategory(""); setSubcategory(""); setStatus(""); setSeverity(""); }}>
               <FilterSelect label="Category" value={category} onChange={setCategory}
-                options={Object.entries(categoryMeta).map(([v, m]) => ({ value: v, label: m.label }))} />
+                options={PATROL_REPORT_CATEGORIES.map((v) => ({ value: v, label: categoryMeta[v].label }))} />
+              <FilterSelect label="Subcategory" value={subcategory} onChange={setSubcategory}
+                disabled={!category}
+                options={subcategoryOptions} />
               <FilterSelect label="Status" value={status} onChange={setStatus}
                 options={Object.entries(observationStatusLabel).map(([v, l]) => ({ value: v, label: l }))} />
               <FilterSelect label="Severity" value={severity} onChange={setSeverity}

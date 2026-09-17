@@ -58,16 +58,13 @@ export default function RangersPage() {
 
   const pageRows = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  if (loading || !data) return <SkeletonRows rows={8} />;
-  if (error) return <ErrorState message={error.message} onRetry={reload} />;
-
-  const inField = data.filter((r) => r.dutyStatus === "field").length;
-  const onDuty = data.filter((r) => r.dutyStatus === "on-duty").length;
+  const inField = (data ?? []).filter((r) => r.dutyStatus === "field").length;
+  const onDuty = (data ?? []).filter((r) => r.dutyStatus === "on-duty").length;
   // Avg Coverage KPI: prefer the backend coverage/rangers aggregate (#27) so
   // the number reflects real GPS/PostGIS attribution; fall back to averaging
   // whatever per-ranger coverage the roster carries, else "—".
   const backendAvg = cov.data?.summary?.avgCoverage ?? null;
-  const coverageValues = data.map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
+  const coverageValues = (data ?? []).map((r) => r.stats.coveragePct).filter((c): c is number => c != null);
   const avgCoverage =
     backendAvg != null
       ? backendAvg
@@ -193,6 +190,9 @@ export default function RangersPage() {
     }
     return m;
   }, [patrolsData.data, data]);
+
+  if (loading || !data) return <SkeletonRows rows={8} />;
+  if (error) return <ErrorState message={error.message} onRetry={reload} />;
 
   const handleExport = (kind: ExportKind) => {
     exportRows(kind, `officers-${stamp()}`, filtered.map((r) => ({
