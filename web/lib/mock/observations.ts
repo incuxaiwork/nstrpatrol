@@ -11,6 +11,17 @@ import {
 import { mockPatrols } from "@/lib/mock/patrols";
 import { mockRangers, mockTeams } from "@/lib/mock/people";
 
+export const patrolStatusLabel = (s: PatrolStatus): string =>
+  ({ planned: "Planned", assigned: "Assigned", ongoing: "Ongoing", completed: "Completed", cancelled: "Cancelled", delayed: "Delayed" })[s];
+
+const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
+
+/**
+ * The four report categories defined in the PRD (docs/NSTR_Patrol_Feature_Overview.txt §4.1).
+ * Everything else in the codebase keyed by categoryMeta is legacy/extra and is not offered
+ * as a filter.
+ */
 export const PATROL_REPORT_CATEGORIES = [
   "human-impact",
   "mortality",
@@ -28,11 +39,8 @@ export const PATROL_REPORT_SUBCATEGORIES: Record<
   "water-body": ["Water hole"],
 };
 
-export const patrolStatusLabel = (s: PatrolStatus): string =>
-  ({ planned: "Planned", assigned: "Assigned", ongoing: "Ongoing", completed: "Completed", cancelled: "Cancelled", delayed: "Delayed" })[s];
+export type PatrolReportSubcategory = (typeof PATROL_REPORT_SUBCATEGORIES)[keyof typeof PATROL_REPORT_SUBCATEGORIES][number];
 
-const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
-const hoursAgo = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
 
 export const categoryMeta: Record<
   Observation["category"],

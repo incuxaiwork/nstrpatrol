@@ -47,7 +47,10 @@ data class GisLayerState(
     val showMBTiles: Boolean = true,
     val showSatellite: Boolean = true,
     val showStreet: Boolean = true,
-    val showTrack: Boolean = true
+    val showTrack: Boolean = true,
+    val showGrid: Boolean = false,
+    val gridSizeKm2: Double = 1.0,
+    val is3DModeEnabled: Boolean = false
 )
 
 /** Backend version snapshot used to decide whether a re-fetch is worthwhile. */
@@ -424,6 +427,71 @@ class ForestGisRepository(private val context: Context) {
         return false
     }
 
+    /**
+     * Calculates geodesic polygon area in Hectares from a GeoJSON Feature JSONObject.
+     */
+    private fun calculateGeometryAreaHa(feature: JSONObject): Double {
+        val geom = feature.optJSONObject("geometry") ?: return 0.0
+        val type = geom.optString("type")
+        val coords = geom.optJSONArray("coordinates") ?: return 0.0
+
+        val rings = ArrayList<List<Pair<Double, Double>>>()
+        try {
+            if (type == "Polygon") {
+                if (coords.length() > 0) {
+                    val outer = coords.optJSONArray(0)
+                    if (outer != null) rings.add(parseCoordRing(outer))
+                }
+            } else if (type == "MultiPolygon") {
+                for (m in 0 until coords.length()) {
+                    val poly = coords.optJSONArray(m) ?: continue
+                    if (poly.length() > 0) {
+                        val outer = poly.optJSONArray(0)
+                        if (outer != null) rings.add(parseCoordRing(outer))
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            return 0.0
+        }
+
+        if (rings.isEmpty()) return 0.0
+
+        var totalAreaSqM = 0.0
+        for (ring in rings) {
+            if (ring.size < 3) continue
+            var sumLat = 0.0
+            for (pt in ring) sumLat += pt.second
+            val refLat = sumLat / ring.size
+
+            val latScale = 111139.0
+            val lonScale = 111139.0 * kotlin.math.cos(Math.toRadians(refLat))
+
+            var ringArea = 0.0
+            val n = ring.size
+            for (i in 0 until n) {
+                val p1 = ring[i]
+                val p2 = ring[(i + 1) % n]
+                val x1 = p1.first * lonScale
+                val y1 = p1.second * latScale
+                val x2 = p2.first * lonScale
+                val y2 = p2.second * latScale
+                ringArea += (x1 * y2 - x2 * y1)
+            }
+            totalAreaSqM += Math.abs(ringArea) / 2.0
+        }
+        return totalAreaSqM / 10000.0
+    }
+
+    private fun parseCoordRing(ringArray: org.json.JSONArray): List<Pair<Double, Double>> {
+        val list = ArrayList<Pair<Double, Double>>(ringArray.length())
+        for (k in 0 until ringArray.length()) {
+            val pt = ringArray.optJSONArray(k) ?: continue
+            list.add(Pair(pt.optDouble(0), pt.optDouble(1)))
+        }
+        return list
+    }
+
     private fun parseBeats(geoJson: String) {
         val root = JSONObject(geoJson)
         val features = root.optJSONArray("features") ?: return
@@ -439,6 +507,17 @@ class ForestGisRepository(private val context: Context) {
                 propMap[k] = props.optString(k, "")
             }
 
+            val rawAreaStr = props.optString("Area_ha", "0.00")
+            val rawAreaVal = rawAreaStr.toDoubleOrNull() ?: 0.0
+            val areaFormatted = if (rawAreaVal > 0.0) {
+                String.format(java.util.Locale.US, "%,.2f ha (%,.2f km²)", rawAreaVal, rawAreaVal / 100.0)
+            } else {
+                val computedHa = calculateGeometryAreaHa(feature)
+                if (computedHa > 0.0) {
+                    String.format(java.util.Locale.US, "%,.2f ha (%,.2f km²)", computedHa, computedHa / 100.0)
+                } else "0.00 ha"
+            }
+
             val beat = ForestBeatModel(
                 id = props.optString("OBJECTID_1", "BEAT-${i + 1}"),
                 name = props.optString("Beat", "UNNAMED BEAT"),
@@ -447,7 +526,7 @@ class ForestGisRepository(private val context: Context) {
                 division = props.optString("Division", "DD MARKAPUR"),
                 circle = props.optString("Circle", "PT Circle"),
                 district = props.optString("District", "PALNADU"),
-                areaHa = props.optString("Area_ha", "0.00"),
+                areaHa = areaFormatted,
                 rawProperties = propMap,
                 rawJson = feature.toString()
             )
@@ -474,6 +553,17 @@ class ForestGisRepository(private val context: Context) {
                     propMap[k] = props.optString(k, "")
                 }
 
+                val rawAreaStr = props.optString("AREA_HA", "0.00")
+                val rawAreaVal = rawAreaStr.toDoubleOrNull() ?: 0.0
+                val areaFormatted = if (rawAreaVal > 0.0) {
+                    String.format(java.util.Locale.US, "%,.2f ha (%,.2f km²)", rawAreaVal, rawAreaVal / 100.0)
+                } else {
+                    val computedHa = calculateGeometryAreaHa(feature)
+                    if (computedHa > 0.0) {
+                        String.format(java.util.Locale.US, "%,.2f ha (%,.2f km²)", computedHa, computedHa / 100.0)
+                    } else "0.00 ha"
+                }
+
                 val comp = ForestCompartmentModel(
                     id = props.optString("OBJECTID_1", "COMP-${i + 1}"),
                     compNo = props.optString("COMP_NO", "N/A"),
@@ -484,7 +574,7 @@ class ForestGisRepository(private val context: Context) {
                     section = props.optString("SECTION", "N/A"),
                     circle = props.optString("CIRCLE", "N/A"),
                     district = props.optString("DISTRICT", "N/A"),
-                    areaHa = props.optString("AREA_HA", "0.00"),
+                    areaHa = areaFormatted,
                     rawProperties = propMap
                 )
                 newComps.add(comp)

@@ -400,8 +400,8 @@ export function ObservationsReportDialog({ open, onClose }: { open: boolean; onC
             }
           >
             <option value="">All categories</option>
-            {Object.entries(categoryMeta).map(([v, m]) => (
-              <option key={v} value={v}>{m.label}</option>
+            {PATROL_REPORT_CATEGORIES.map((v) => (
+              <option key={v} value={v}>{categoryMeta[v].label}</option>
             ))}
           </Select>
         </Field>
@@ -762,8 +762,8 @@ export function RegionReportDialog({ open, onClose }: { open: boolean; onClose()
       <Field label="Observation category">
         <Select value={filters.category} onChange={(e) => setFilters((f) => ({ ...f, category: e.target.value as ObservationCategory | "" }))}>
           <option value="">All categories</option>
-          {Object.entries(categoryMeta).map(([v, m]) => (
-            <option key={v} value={v}>{m.label}</option>
+          {PATROL_REPORT_CATEGORIES.map((v) => (
+            <option key={v} value={v}>{categoryMeta[v].label}</option>
           ))}
         </Select>
       </Field>

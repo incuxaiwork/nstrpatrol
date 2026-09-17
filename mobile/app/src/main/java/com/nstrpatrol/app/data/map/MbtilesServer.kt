@@ -107,9 +107,11 @@ class MbtilesServer(private val context: Context, private val port: Int = 8888) 
         }
 
         if (tileData != null && tileData.isNotEmpty()) {
+            val isPng = tileData.size > 8 && tileData[0] == 0x89.toByte() && tileData[1] == 0x50.toByte()
+            val contentType = if (isPng) "image/png" else "image/jpeg"
             val bos = BufferedOutputStream(outputStream)
             val header = ("HTTP/1.1 200 OK\r\n" +
-                    "Content-Type: image/png\r\n" +
+                    "Content-Type: $contentType\r\n" +
                     "Content-Length: ${tileData.size}\r\n" +
                     "Access-Control-Allow-Origin: *\r\n" +
                     "Cache-Control: public, max-age=31536000\r\n\r\n").toByteArray()
@@ -131,15 +133,14 @@ class MbtilesServer(private val context: Context, private val port: Int = 8888) 
 
     private fun prepareMbtilesFile(): File? {
         val file = File(context.filesDir, "NSTR.mbtiles")
-        if (file.exists() && file.length() > 0) return file
+        val assetSize = try {
+            context.assets.open("NSTR.mbtiles").use { it.available().toLong() }
+        } catch (_: Exception) { 0L }
 
-        // 1. Download the atlas from the backend (stored in PostGIS).
-        if (BackendApiClient().downloadTo("/api/gis/assets/NSTR.mbtiles", file)) {
-            Log.d("MbtilesServer", "Downloaded NSTR.mbtiles from backend to ${file.absolutePath}")
+        if (file.exists() && file.length() > 0 && (assetSize == 0L || file.length() == assetSize)) {
             return file
         }
 
-        // 2. Fall back to the bundled asset.
         return copyFromAssets(file)
     }
 

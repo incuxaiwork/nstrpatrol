@@ -8,6 +8,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.gestures.detectTransformGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.zIndex
@@ -33,7 +35,6 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Warning
@@ -63,7 +64,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalContext
@@ -76,10 +76,15 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nstrpatrol.app.data.PatrolTimer
+import com.nstrpatrol.app.data.lastKnownLocation
 import com.nstrpatrol.app.data.db.PatrolPointEntity
 import com.nstrpatrol.app.data.db.TelemetryDao
 import com.nstrpatrol.app.data.map.ForestBeatModel
 import com.nstrpatrol.app.data.map.ForestCompartmentModel
+import com.nstrpatrol.app.data.map.ForestGridEngine
+import com.nstrpatrol.app.data.map.GridCellInfo
+import androidx.compose.material.icons.filled.GridOn
+import androidx.compose.material.icons.filled.GridView
 import com.nstrpatrol.app.data.map.ForestGisRepository
 import com.nstrpatrol.app.data.map.GisLayerState
 import com.nstrpatrol.app.data.map.MbtilesServer
@@ -144,9 +149,8 @@ fun MapsScreen(
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             mbtilesServer.start()
+            gisRepo.loadGisData()
         }
-        // Assets load instantly; backend syncs in background.
-        gisRepo.loadGisData()
     }
 
     DisposableEffect(Unit) {
@@ -158,6 +162,7 @@ fun MapsScreen(
     // Map UI state
     var selectedBeat by remember { mutableStateOf<ForestBeatModel?>(null) }
     var selectedCompartment by remember { mutableStateOf<ForestCompartmentModel?>(null) }
+    var selectedGridCell by remember { mutableStateOf<GridCellInfo?>(null) }
     var layerState by remember { mutableStateOf(GisLayerState()) }
     var showLayerDialog by remember { mutableStateOf(false) }
     var showLegend by remember { mutableStateOf(true) }
@@ -165,7 +170,6 @@ fun MapsScreen(
 
     var miniMapRef by remember { mutableStateOf<MapLibreMap?>(null) }
     var mapInitError by remember { mutableStateOf(false) }
-    var styleReady by remember { mutableStateOf(false) }
 
     // When true the camera auto-follows the live patrol track; a user drag/zoom
     // gesture switches it off so they can inspect the map freely.
@@ -235,37 +239,37 @@ fun MapsScreen(
         }
     }
 
-    // Fill beat & compartment sources once GIS data is loaded AND the map style
-    // is ready. This handles two scenarios:
-    //   - Fast path (assets): data loads before style → fires when styleReady changes
-    //   - Slow path (backend): style loads before data → fires when isDataLoaded changes
-    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef, styleReady) {
-        if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
+    // Fill beat & compartment sources once GIS data is loaded.
+    LaunchedEffect(gisRepo.isDataLoaded, miniMapRef) {
+        if (!gisRepo.isDataLoaded) return@LaunchedEffect
         val beatGeo = gisRepo.beatGeoJsonString
         val compGeo = gisRepo.compartmentGeoJsonString
         miniMapRef?.style?.let { style ->
             if (beatGeo.isNotEmpty()) {
-                style.getSourceAs<GeoJsonSource>("beats-geojson-source")?.setGeoJson(beatGeo)
+                (style.getSource("beats-geojson-source") as? GeoJsonSource)?.setGeoJson(beatGeo)
             }
             if (compGeo.isNotEmpty()) {
-                style.getSourceAs<GeoJsonSource>("comp-geojson-source")?.setGeoJson(compGeo)
+                (style.getSource("comp-geojson-source") as? GeoJsonSource)?.setGeoJson(compGeo)
             }
+            applyLayerVisibility(style, layerState)
         }
     }
 
-    // Push updated GIS data to MapLibre when backend sync completes.
-    // Keys on source + counts so it re-fires when data actually changes.
-    LaunchedEffect(gisRepo.source, gisRepo.beatsList.size, gisRepo.compartmentsList.size) {
-        if (!gisRepo.isDataLoaded || !styleReady) return@LaunchedEffect
-        val beatGeo = gisRepo.beatGeoJsonString
-        val compGeo = gisRepo.compartmentGeoJsonString
+    // REACTIVE DYNAMIC GRID GENERATOR & PATROL INTERSECTION
+    LaunchedEffect(layerState.showGrid, layerState.gridSizeKm2, patrolPoints, gisRepo.isDataLoaded, miniMapRef) {
         miniMapRef?.style?.let { style ->
-            if (beatGeo.isNotEmpty()) {
-                style.getSourceAs<GeoJsonSource>("beats-geojson-source")?.setGeoJson(beatGeo)
+            if (layerState.showGrid) {
+                val beatGeo = gisRepo.beatGeoJsonString
+                withContext(Dispatchers.Default) {
+                    val allGridsGeo = ForestGridEngine.generateAllGridsGeoJson(layerState.gridSizeKm2, beatGeo)
+                    val patrolledGridsGeo = ForestGridEngine.generatePatrolledGridsGeoJson(layerState.gridSizeKm2, patrolPoints, beatGeo)
+                    withContext(Dispatchers.Main) {
+                        (style.getSource("grid-all-source") as? GeoJsonSource)?.setGeoJson(allGridsGeo)
+                        (style.getSource("grid-patrolled-source") as? GeoJsonSource)?.setGeoJson(patrolledGridsGeo)
+                    }
+                }
             }
-            if (compGeo.isNotEmpty()) {
-                style.getSourceAs<GeoJsonSource>("comp-geojson-source")?.setGeoJson(compGeo)
-            }
+            applyLayerVisibility(style, layerState)
         }
     }
 
@@ -314,12 +318,19 @@ fun MapsScreen(
                     factory = { ctx ->
                         try {
                             MapLibre.getInstance(ctx)
+                            MapLibre.setConnected(true)
                         } catch (e: Exception) {
                             mapInitError = true
                         }
 
                         val mapView = MapView(ctx)
                         mapView.onCreate(null)
+                        mapView.onStart()
+                        mapView.onResume()
+                        var lastTouchY1 = 0f
+                        var lastTouchY2 = 0f
+                        var isTwoFingerDrag = false
+
                         mapView.setOnTouchListener { v, event ->
                             when (event.actionMasked) {
                                 android.view.MotionEvent.ACTION_DOWN,
@@ -328,10 +339,57 @@ fun MapsScreen(
                                     v.parent?.requestDisallowInterceptTouchEvent(true)
                                 }
                             }
+
+                            val map = miniMapRef
+                            if (map != null && event.pointerCount >= 2) {
+                                when (event.actionMasked) {
+                                    android.view.MotionEvent.ACTION_POINTER_DOWN -> {
+                                        if (event.pointerCount >= 2) {
+                                            lastTouchY1 = event.getY(0)
+                                            lastTouchY2 = event.getY(1)
+                                            isTwoFingerDrag = true
+                                        }
+                                    }
+                                    android.view.MotionEvent.ACTION_MOVE -> {
+                                        if (isTwoFingerDrag && event.pointerCount >= 2) {
+                                            val currentY1 = event.getY(0)
+                                            val currentY2 = event.getY(1)
+                                            val dy1 = currentY1 - lastTouchY1
+                                            val dy2 = currentY2 - lastTouchY2
+
+                                            // Both fingers moving vertically in same direction -> Tilt gesture
+                                            if ((dy1 < -3f && dy2 < -3f) || (dy1 > 3f && dy2 > 3f)) {
+                                                val avgDy = (dy1 + dy2) / 2f
+                                                val tiltDelta = -avgDy * 0.22 // Drag up -> Tilt up into 3D
+                                                val currentTilt = map.cameraPosition.tilt
+                                                val newTilt = (currentTilt + tiltDelta).coerceIn(0.0, 60.0)
+
+                                                map.cameraPosition = CameraPosition.Builder()
+                                                    .target(map.cameraPosition.target)
+                                                    .zoom(map.cameraPosition.zoom)
+                                                    .tilt(newTilt)
+                                                    .bearing(map.cameraPosition.bearing)
+                                                    .build()
+
+                                                val is3D = newTilt > 10.0
+                                                if (layerState.is3DModeEnabled != is3D) {
+                                                    layerState = layerState.copy(is3DModeEnabled = is3D)
+                                                }
+                                            }
+                                            lastTouchY1 = currentY1
+                                            lastTouchY2 = currentY2
+                                        }
+                                    }
+                                    android.view.MotionEvent.ACTION_POINTER_UP,
+                                    android.view.MotionEvent.ACTION_UP,
+                                    android.view.MotionEvent.ACTION_CANCEL -> {
+                                        isTwoFingerDrag = false
+                                    }
+                                }
+                            }
                             false
                         }
                         mapView.getMapAsync { map ->
-                            miniMapRef = map
                             try {
                                 map.uiSettings.apply {
                                     isZoomGesturesEnabled = true
@@ -340,6 +398,9 @@ fun MapsScreen(
                                     isTiltGesturesEnabled = true
                                     isDoubleTapGesturesEnabled = true
                                     isQuickZoomGesturesEnabled = true
+                                    isCompassEnabled = false
+                                    isLogoEnabled = false
+                                    isAttributionEnabled = false
                                 }
 
                                 // A manual pan/zoom gesture releases camera
@@ -353,29 +414,30 @@ fun MapsScreen(
                                 val tileUrl = mbtilesServer.tileUrlFormat
                                 val tileSet = TileSet("2.1.0", tileUrl)
                                 tileSet.minZoom = 1f
-                                tileSet.maxZoom = 14f
+                                tileSet.maxZoom = 13f
                                 val rasterSource = RasterSource("mbtiles-raster-source", tileSet, 256)
 
                                 val satelliteTileSet = TileSet(
                                     "2.1.0",
-                                    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+                                    "https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}"
                                 )
-                                satelliteTileSet.minZoom = 1f
-                                satelliteTileSet.maxZoom = 19f
+                                satelliteTileSet.minZoom = 0f
+                                satelliteTileSet.maxZoom = 21f
                                 val satelliteSource = RasterSource("satellite-raster-source", satelliteTileSet, 256)
 
                                 val streetTileSet = TileSet(
                                     "2.1.0",
-                                    "https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                                    "https://mt1.google.com/vt/lyrs=p&x={x}&y={y}&z={z}"
                                 )
-                                streetTileSet.minZoom = 1f
-                                streetTileSet.maxZoom = 19f
+                                streetTileSet.minZoom = 0f
+                                streetTileSet.maxZoom = 20f
                                 val streetSource = RasterSource("street-raster-source", streetTileSet, 256)
 
                                 val styleJson = """
                                     {
                                       "version": 8,
                                       "name": "NSTR Offline Style",
+                                      "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
                                       "sources": {},
                                       "layers": [
                                         {
@@ -394,21 +456,42 @@ fun MapsScreen(
                                     style.addSource(satelliteSource)
                                     style.addSource(streetSource)
 
-                                    // Beat & compartment sources: push immediately if
-                                    // GIS data is already loaded (assets are fast), or
-                                    // start empty and let the LaunchedEffect fill them
-                                    // later when the backend/cache loads finish.
-                                    val beatInit = if (gisRepo.isDataLoaded) gisRepo.beatGeoJsonString else ""
-                                    val compInit = if (gisRepo.isDataLoaded) gisRepo.compartmentGeoJsonString else ""
-                                    style.addSource(GeoJsonSource("beats-geojson-source",
-                                        if (beatInit.isNotEmpty()) beatInit else EMPTY_FEATURE_COLLECTION))
-                                    style.addSource(GeoJsonSource("comp-geojson-source",
-                                        if (compInit.isNotEmpty()) compInit else EMPTY_FEATURE_COLLECTION))
+                                    val beatGeo = gisRepo.beatGeoJsonString.ifEmpty {
+                                        try {
+                                            context.assets.open("mark_beat.json").bufferedReader().use { it.readText() }
+                                        } catch (_: Exception) { EMPTY_FEATURE_COLLECTION }
+                                    }
+                                    val compGeo = gisRepo.compartmentGeoJsonString.ifEmpty {
+                                        try {
+                                            context.assets.open("mark_comp.json").bufferedReader().use { it.readText() }
+                                        } catch (_: Exception) { EMPTY_FEATURE_COLLECTION }
+                                    }
+                                    val trackGeo = buildPatrolTrackGeoJson(patrolPoints)
+                                    val currentGeo = if (patrolPoints.isNotEmpty()) buildCurrentPositionGeoJson(patrolPoints.last()) else EMPTY_FEATURE_COLLECTION
+
+                                    val allGridsGeo = ForestGridEngine.generateAllGridsGeoJson(layerState.gridSizeKm2, beatGeo)
+                                    val patrolledGridsGeo = ForestGridEngine.generatePatrolledGridsGeoJson(layerState.gridSizeKm2, patrolPoints, beatGeo)
+
+                                    val beatCentroidsGeo = ForestGridEngine.generateBeatCentroidsGeoJson(beatGeo)
+
+                                    style.addSource(GeoJsonSource("beats-geojson-source", beatGeo))
+                                    style.addSource(GeoJsonSource("beats-centroids-source", beatCentroidsGeo))
+                                    style.addSource(GeoJsonSource("comp-geojson-source", compGeo))
+                                    style.addSource(GeoJsonSource("grid-all-source", allGridsGeo))
+                                    style.addSource(GeoJsonSource("grid-patrolled-source", patrolledGridsGeo))
+                                    style.addSource(GeoJsonSource("patrol-track-source", trackGeo))
+                                    style.addSource(GeoJsonSource("patrol-current-source", currentGeo))
 
                                     // 1. MBTiles Basemap Layer (offline fallback base)
-                                    style.addLayer(RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source"))
+                                    style.addLayer(
+                                        RasterLayer("mbtiles-raster-layer", "mbtiles-raster-source").apply {
+                                            setProperties(
+                                                PropertyFactory.visibility(if (layerState.showMBTiles) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
 
-                                    // 1b. Satellite Imagery Layer (online, overlays offline base)
+                                    // 1b. Satellite Imagery Layer (online Esri World Imagery)
                                     style.addLayer(
                                         RasterLayer("satellite-raster-layer", "satellite-raster-source").apply {
                                             setProperties(
@@ -417,7 +500,7 @@ fun MapsScreen(
                                         }
                                     )
 
-                                    // 1c. Street Map Layer (online Esri World Street Map)
+                                    // 1c. Street / Terrain Map Layer (online Esri World Topo Map)
                                     style.addLayer(
                                         RasterLayer("street-raster-layer", "street-raster-source").apply {
                                             setProperties(
@@ -426,11 +509,11 @@ fun MapsScreen(
                                         }
                                     )
 
-                                    // 2. Beats Fill Layer (Light green tint)
+                                    // 2. Beats Fill Layer (Light forest green tint)
                                     style.addLayer(
                                         FillLayer("beats-fill-layer", "beats-geojson-source").apply {
                                             setProperties(
-                                                PropertyFactory.fillColor(AndroidColor.parseColor("#1E4620")),
+                                                PropertyFactory.fillColor(AndroidColor.parseColor("#2E7D32")),
                                                 PropertyFactory.fillOpacity(0.12f),
                                                 PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
                                             )
@@ -441,53 +524,87 @@ fun MapsScreen(
                                     style.addLayer(
                                         FillLayer("comp-fill-layer", "comp-geojson-source").apply {
                                             setProperties(
-                                                PropertyFactory.fillColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.fillOpacity(0.15f),
+                                                PropertyFactory.fillColor(AndroidColor.parseColor("#FF9800")),
+                                                PropertyFactory.fillOpacity(0.06f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
                                     )
 
-                                    // 4. Compartments Line Layer (Solid crisp amber line for clear visibility)
+                                    // 4. Compartments Line Layer (Clean, thin, elegant amber boundary line)
                                     style.addLayer(
                                         LineLayer("comp-line-layer", "comp-geojson-source").apply {
                                             setProperties(
                                                 PropertyFactory.lineColor(AndroidColor.parseColor("#E65100")),
-                                                PropertyFactory.lineWidth(1.6f),
-                                                PropertyFactory.lineOpacity(0.85f),
+                                                PropertyFactory.lineWidth(1.1f),
+                                                PropertyFactory.lineOpacity(0.90f),
                                                 PropertyFactory.visibility(if (layerState.showCompartments) Property.VISIBLE else Property.NONE)
                                             )
                                         }
                                     )
 
-                                    // 5. Beats Line Layer (Bold dark green boundary)
+                                    val badgeBitmap = createBeatBadgeBitmap(context)
+                                    style.addImage("beat-badge-bg", badgeBitmap)
+
+                                    // 5a. Beats Subtle White Casing (For crisp contrast without bulky thickness)
+                                    style.addLayer(
+                                        LineLayer("beats-casing-layer", "beats-geojson-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#FFFFFF")),
+                                                PropertyFactory.lineWidth(2.6f),
+                                                PropertyFactory.lineOpacity(0.80f),
+                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+
+                                    // 5b. Beats Boundary Line Layer (Refined forest green line)
                                     style.addLayer(
                                         LineLayer("beats-line-layer", "beats-geojson-source").apply {
                                             setProperties(
-                                                PropertyFactory.lineColor(AndroidColor.parseColor("#1E4620")),
-                                                PropertyFactory.lineWidth(2.8f),
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#1B5E20")),
+                                                PropertyFactory.lineWidth(1.6f),
+                                                PropertyFactory.lineOpacity(1.0f),
                                                 PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
                                             )
                                         }
                                     )
 
-                                    // 6. Beat Name Label Layer
+                                    // 5c. Dynamic GIS Grid Layers (Rendered beneath labels)
+                                    // 5c-1. Patrolled / Visited Grid Cell Fill (Vibrant green overlay)
                                     style.addLayer(
-                                        SymbolLayer("beats-label-layer", "beats-geojson-source").apply {
-                                            minZoom = 9.0f
+                                        FillLayer("grid-patrolled-fill-layer", "grid-patrolled-source").apply {
                                             setProperties(
-                                                PropertyFactory.textField("{Beat}"),
-                                                PropertyFactory.textSize(12f),
-                                                PropertyFactory.textColor(AndroidColor.parseColor("#1E4620")),
-                                                PropertyFactory.textHaloColor(AndroidColor.parseColor("#FFFFFF")),
-                                                PropertyFactory.textHaloWidth(2.0f),
-                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                                PropertyFactory.fillColor(AndroidColor.parseColor("#4CAF50")),
+                                                PropertyFactory.fillOpacity(0.32f),
+                                                PropertyFactory.visibility(if (layerState.showGrid) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+                                    // 5c-2. Patrolled Grid Cell Outline
+                                    style.addLayer(
+                                        LineLayer("grid-patrolled-line-layer", "grid-patrolled-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#2E7D32")),
+                                                PropertyFactory.lineWidth(2.2f),
+                                                PropertyFactory.lineOpacity(0.95f),
+                                                PropertyFactory.visibility(if (layerState.showGrid) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+                                    // 5c-3. Full Grid Mesh Wireframe (Crisp blueprint navy line)
+                                    style.addLayer(
+                                        LineLayer("grid-wire-layer", "grid-all-source").apply {
+                                            setProperties(
+                                                PropertyFactory.lineColor(AndroidColor.parseColor("#1565C0")),
+                                                PropertyFactory.lineWidth(1.2f),
+                                                PropertyFactory.lineOpacity(0.75f),
+                                                PropertyFactory.visibility(if (layerState.showGrid) Property.VISIBLE else Property.NONE)
                                             )
                                         }
                                     )
 
-                                    // 7. Live Patrol Track (path line + point dots) from local points
-                                    style.addSource(GeoJsonSource("patrol-track-source", EMPTY_FEATURE_COLLECTION))
+                                    // 6. Live Patrol Track (path line + point dots) from local points
                                     style.addLayer(
                                         LineLayer("patrol-track-line-layer", "patrol-track-source").apply {
                                             setProperties(
@@ -510,10 +627,30 @@ fun MapsScreen(
                                         }
                                     )
 
+                                    // 7. Beats Label Layer (Dark Forest Green Pill Badge with White Border & Bold White Text on Centroid - ALWAYS ON TOP)
+                                    style.addLayer(
+                                        SymbolLayer("beats-label-layer", "beats-centroids-source").apply {
+                                            setProperties(
+                                                PropertyFactory.iconImage("beat-badge-bg"),
+                                                PropertyFactory.iconTextFit(Property.ICON_TEXT_FIT_BOTH),
+                                                PropertyFactory.iconTextFitPadding(arrayOf(4f, 8f, 4f, 8f)),
+                                                PropertyFactory.iconAllowOverlap(true),
+                                                PropertyFactory.iconIgnorePlacement(true),
+                                                PropertyFactory.textField("{Beat}"),
+                                                PropertyFactory.textSize(10f),
+                                                PropertyFactory.textColor(AndroidColor.parseColor("#FFFFFF")),
+                                                PropertyFactory.textLetterSpacing(0.04f),
+                                                PropertyFactory.textTransform(Property.TEXT_TRANSFORM_UPPERCASE),
+                                                PropertyFactory.textAllowOverlap(true),
+                                                PropertyFactory.textIgnorePlacement(true),
+                                                PropertyFactory.textOptional(false),
+                                                PropertyFactory.textAnchor(Property.TEXT_ANCHOR_CENTER),
+                                                PropertyFactory.visibility(if (layerState.showBeats) Property.VISIBLE else Property.NONE)
+                                            )
+                                        }
+                                    )
+
                                     // 10. Live current-position marker ("you are here")
-                                    // so the ranger can see where they are right now
-                                    // even when the GPS fix is outside the forest.
-                                    style.addSource(GeoJsonSource("patrol-current-source", EMPTY_FEATURE_COLLECTION))
                                     style.addLayer(
                                         CircleLayer("patrol-current-halo-layer", "patrol-current-source").apply {
                                             setProperties(
@@ -540,11 +677,17 @@ fun MapsScreen(
                                         .zoom(11.8)
                                         .build()
 
-                                    // Signal that the style + all layers are ready.
-                                    styleReady = true
-
-                                    // Tap listener for map features (Beats & Compartments)
+                                    // Tap listener for map features (Grid, Beats, Compartments)
                                     map.addOnMapClickListener { latLng ->
+                                        if (layerState.showGrid) {
+                                            val cell = ForestGridEngine.getCellAt(latLng.longitude, latLng.latitude, layerState.gridSizeKm2, patrolPoints)
+                                            if (cell != null) {
+                                                selectedGridCell = cell
+                                                selectedBeat = null
+                                                selectedCompartment = null
+                                                return@addOnMapClickListener true
+                                            }
+                                        }
                                         val pointF = map.projection.toScreenLocation(latLng)
 
                                         // 1. Check Beat tap
@@ -572,6 +715,8 @@ fun MapsScreen(
                                         }
                                         true
                                     }
+
+                                    miniMapRef = map
                                 }
                             } catch (e: Exception) {
                                 mapInitError = true
@@ -584,7 +729,11 @@ fun MapsScreen(
 
                 // Manage MapView Lifecycle
                 DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, _ -> }
+                    val observer = LifecycleEventObserver { _, event ->
+                        miniMapRef?.let {
+                            // MapView handles lifecycle events
+                        }
+                    }
                     lifecycleOwner.lifecycle.addObserver(observer)
                     onDispose {
                         lifecycleOwner.lifecycle.removeObserver(observer)
@@ -640,6 +789,85 @@ fun MapsScreen(
                     }
                 )
 
+                // Grid Overlay Quick Toggle
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (layerState.showGrid) ForestGreen else Surface.copy(alpha = 0.95f))
+                        .border(1.dp, if (layerState.showGrid) ForestGreen else OutlineCard, CircleShape)
+                        .clickable {
+                            val newGridState = !layerState.showGrid
+                            val newState = layerState.copy(showGrid = newGridState)
+                            layerState = newState
+                            miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                            Toast.makeText(
+                                context,
+                                if (newGridState) "GIS Grid Overlay Enabled (${layerState.gridSizeKm2} km²)" else "Grid Overlay Disabled",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Filled.GridView,
+                        contentDescription = "Grid",
+                        tint = if (layerState.showGrid) Color.White else ForestGreen,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // 3D / 2D Perspective Toggle
+                Box(
+                    modifier = Modifier
+                        .size(38.dp)
+                        .clip(CircleShape)
+                        .background(if (layerState.is3DModeEnabled) ForestGreen else Surface.copy(alpha = 0.95f))
+                        .border(1.dp, if (layerState.is3DModeEnabled) ForestGreen else OutlineCard, CircleShape)
+                        .clickable {
+                            currentMap?.let { m ->
+                                val enable3D = !layerState.is3DModeEnabled
+                                val currentTarget = m.cameraPosition.target
+                                val targetTilt = if (enable3D) 58.0 else 0.0
+                                val targetBearing = if (enable3D) (if (m.cameraPosition.bearing != 0.0) m.cameraPosition.bearing else -20.0) else 0.0
+                                try {
+                                    m.animateCamera(
+                                        CameraUpdateFactory.newCameraPosition(
+                                            CameraPosition.Builder()
+                                                .target(currentTarget)
+                                                .zoom(m.cameraPosition.zoom)
+                                                .tilt(targetTilt)
+                                                .bearing(targetBearing)
+                                                .build()
+                                        ),
+                                        900
+                                    )
+                                } catch (e: Exception) {
+                                    m.cameraPosition = CameraPosition.Builder()
+                                        .target(currentTarget)
+                                        .zoom(m.cameraPosition.zoom)
+                                        .tilt(targetTilt)
+                                        .bearing(targetBearing)
+                                        .build()
+                                }
+                                layerState = layerState.copy(is3DModeEnabled = enable3D)
+                                Toast.makeText(
+                                    context,
+                                    if (enable3D) "3D Perspective Mode Enabled" else "2D Flat Mode Enabled",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (layerState.is3DModeEnabled) "2D" else "3D",
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (layerState.is3DModeEnabled) Color.White else ForestGreen
+                    )
+                }
+
                 // Layers
                 FloatingControlButton(
                     icon = Icons.Filled.Layers,
@@ -674,6 +902,7 @@ fun MapsScreen(
                                     .tilt(0.0)
                                     .build()
                             }
+                            layerState = layerState.copy(is3DModeEnabled = false)
                             Toast.makeText(context, "Compass reset to North", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -685,33 +914,37 @@ fun MapsScreen(
                     contentDescription = "Recenter Location",
                     onClick = {
                         currentMap?.let { m ->
+                            // Prefer the live patrol position, then the actual
+                            // GPS / mocked-GPS fix, then the debug override,
+                            // and only fall back to the region default as a last
+                            // resort so the map centres on the ranger, not the
+                            // viewport centre.
                             val targetPos = if (patrolPoints.isNotEmpty()) {
                                 val lastPt = patrolPoints.last()
                                 LatLng(lastPt.latitude, lastPt.longitude)
                             } else {
-                                LatLng(15.92, 79.15)
+                                val gpsLoc = lastKnownLocation(context)
+                                val debugLoc = com.nstrpatrol.app.debug.DebugLocation.get(context)
+                                when {
+                                    gpsLoc != null ->
+                                        LatLng(gpsLoc.latitude, gpsLoc.longitude)
+                                    debugLoc != null ->
+                                        LatLng(debugLoc.first, debugLoc.second)
+                                    else ->
+                                        LatLng(15.92, 79.15)
+                                }
                             }
                             try {
-                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, 12.8), 1000)
+                                m.animateCamera(CameraUpdateFactory.newLatLngZoom(targetPos, if (patrolPoints.isNotEmpty()) 16.0 else 14.0), 1000)
                             } catch (e: Exception) {
                                 m.cameraPosition = CameraPosition.Builder()
                                     .target(targetPos)
-                                    .zoom(12.8)
+                                    .zoom(if (patrolPoints.isNotEmpty()) 16.0 else 14.0)
                                     .build()
                             }
                             followPatrol = true
-                            Toast.makeText(context, "Recentered map view", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Recentered to your location", Toast.LENGTH_SHORT).show()
                         }
-                    }
-                )
-
-                // Refresh GIS Data from Backend
-                FloatingControlButton(
-                    icon = Icons.Filled.Refresh,
-                    contentDescription = "Refresh Map Data",
-                    onClick = {
-                        gisRepo.forceRefresh()
-                        Toast.makeText(context, "Refreshing map data...", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -751,6 +984,10 @@ fun MapsScreen(
                             Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFE65100), isDashed = false, label = "Compartment Boundary")
                             Spacer(Modifier.height(4.dp))
+                            LegendItem(color = Color(0xFF1565C0), isDashed = true, label = "GIS Grid Mesh (${layerState.gridSizeKm2} km²)")
+                            Spacer(Modifier.height(4.dp))
+                            LegendItem(color = Color(0xFF4CAF50), isRaster = true, label = "Patrolled Grid Cell")
+                            Spacer(Modifier.height(4.dp))
                             LegendItem(color = Color(0xFFFFEB3B), isDashed = false, isPoint = true, label = "My Patrol Track")
                         }
                     }
@@ -776,21 +1013,6 @@ fun MapsScreen(
                 .fillMaxWidth()
         ) {
             MapContent(modifier = Modifier.fillMaxSize())
-
-            // GIS SYNC STATUS BADGE (Top-Left, below coordinates when patrolling)
-            if (!isRunning) {
-                SyncStatusBadge(
-                    source = gisRepo.source,
-                    lastSyncTime = gisRepo.lastSyncTime,
-                    beatCount = gisRepo.beatsList.size,
-                    compCount = gisRepo.compartmentsList.size,
-                    isSyncing = gisRepo.isSyncing,
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(12.dp)
-                )
-            }
-
             val liveLat = patrolPoints.lastOrNull()?.latitude ?: liveTelemetry.latitude
             val liveLon = patrolPoints.lastOrNull()?.longitude ?: liveTelemetry.longitude
             if (isRunning && liveLat != null && liveLon != null) {
@@ -864,7 +1086,7 @@ fun MapsScreen(
                 DetailItemRow("Section", b.section)
                 DetailItemRow("Circle", b.circle)
                 DetailItemRow("District", b.district)
-                DetailItemRow("Area (ha)", b.areaHa)
+                DetailItemRow("Total Area", b.areaHa)
                 DetailItemRow("Patrol Status", "Active Forest Beat")
 
                 Spacer(Modifier.height(20.dp))
@@ -878,6 +1100,70 @@ fun MapsScreen(
                     shape = RoundedCornerShape(8.dp)
                 ) {
                     Text("CLOSE DETAILS", fontWeight = FontWeight.Bold, color = Color.White)
+                }
+                Spacer(Modifier.height(12.dp))
+            }
+        }
+    }
+
+    // GRID CELL DETAILS BOTTOM SHEET
+    if (selectedGridCell != null) {
+        val cell = selectedGridCell!!
+        ModalBottomSheet(
+            onDismissRequest = { selectedGridCell = null },
+            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+            containerColor = Surface
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "GIS PATROL GRID CELL",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ForestGreen
+                        )
+                        Text(
+                            text = cell.id,
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = TextPrimary
+                        )
+                    }
+                    IconButton(onClick = { selectedGridCell = null }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                DetailItemRow("Grid Cell Identifier", cell.id)
+                DetailItemRow("Grid Mesh Column / Row", "Col ${cell.col}, Row ${cell.row}")
+                DetailItemRow("Cell Area", "${cell.areaKm2} sq km")
+                DetailItemRow("Patrol Status", if (cell.isPatrolled) "PATROLLED / TRAVERSED" else "UNPATROLLED")
+                DetailItemRow("GPS Fixes in Cell", "${cell.patrolPointsCount} points")
+                DetailItemRow("Bounding Box", String.format(java.util.Locale.US, "[%.3f, %.3f] to [%.3f, %.3f]", cell.minLon, cell.minLat, cell.maxLon, cell.maxLat))
+                DetailItemRow("Center Coordinate", String.format(java.util.Locale.US, "%.5f°N, %.5f°E", cell.centerLat, cell.centerLon))
+
+                Spacer(Modifier.height(20.dp))
+
+                Button(
+                    onClick = { selectedGridCell = null },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = ForestGreen),
+                    shape = RoundedCornerShape(8.dp)
+                ) {
+                    Text("CLOSE GRID DETAILS", fontWeight = FontWeight.Bold, color = Color.White)
                 }
                 Spacer(Modifier.height(12.dp))
             }
@@ -931,7 +1217,7 @@ fun MapsScreen(
                 DetailItemRow("Section", c.section)
                 DetailItemRow("Circle", c.circle)
                 DetailItemRow("District", c.district)
-                DetailItemRow("Area (ha)", c.areaHa)
+                DetailItemRow("Total Area", c.areaHa)
                 DetailItemRow("Compartment ID", c.id)
 
                 Spacer(Modifier.height(20.dp))
@@ -961,26 +1247,150 @@ fun MapsScreen(
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 16.dp)
             ) {
-                Text(
-                    text = "Map Layers",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Map Layers",
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+                    IconButton(onClick = { showLayerDialog = false }) {
+                        Icon(Icons.Filled.Close, contentDescription = "Close", tint = TextSecondary)
+                    }
+                }
                 Spacer(Modifier.height(14.dp))
 
+                LayerToggleRow(
+                    title = "3D Perspective Mode",
+                    subtitle = "Dynamic terrain tilt (58°) & 3D perspective",
+                    checked = layerState.is3DModeEnabled,
+                    onChecked = { checked ->
+                        miniMapRef?.let { m ->
+                            val currentTarget = m.cameraPosition.target
+                            val targetTilt = if (checked) 58.0 else 0.0
+                            val targetBearing = if (checked) (if (m.cameraPosition.bearing != 0.0) m.cameraPosition.bearing else -20.0) else 0.0
+                            try {
+                                m.animateCamera(
+                                    CameraUpdateFactory.newCameraPosition(
+                                        CameraPosition.Builder()
+                                            .target(currentTarget)
+                                            .zoom(m.cameraPosition.zoom)
+                                            .tilt(targetTilt)
+                                            .bearing(targetBearing)
+                                            .build()
+                                    ),
+                                    900
+                                )
+                            } catch (e: Exception) {
+                                m.cameraPosition = CameraPosition.Builder()
+                                    .target(currentTarget)
+                                    .zoom(m.cameraPosition.zoom)
+                                    .tilt(targetTilt)
+                                    .bearing(targetBearing)
+                                    .build()
+                            }
+                        }
+                        layerState = layerState.copy(is3DModeEnabled = checked)
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
                 LayerToggleRow(
                     title = "MBTiles Offline Basemap",
                     subtitle = "Raster tile atlas (NSTR.mbtiles)",
                     checked = layerState.showMBTiles,
                     onChecked = { checked ->
-                        val newState = layerState.copy(showMBTiles = checked)
+                        val newState = if (checked) {
+                            layerState.copy(showMBTiles = true, showSatellite = false, showStreet = false)
+                        } else {
+                            layerState.copy(showMBTiles = false)
+                        }
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
                 )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Satellite Imagery",
+                    subtitle = "Online Google Satellite Hybrid imagery",
+                    checked = layerState.showSatellite,
+                    onChecked = { checked ->
+                        val newState = if (checked) {
+                            layerState.copy(showSatellite = true, showMBTiles = false, showStreet = false)
+                        } else {
+                            layerState.copy(showSatellite = false, showMBTiles = true)
+                        }
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "Street & Terrain Map",
+                    subtitle = "Online Google Terrain map with roads & contours",
+                    checked = layerState.showStreet,
+                    onChecked = { checked ->
+                        val newState = if (checked) {
+                            layerState.copy(showStreet = true, showMBTiles = false, showSatellite = false)
+                        } else {
+                            layerState.copy(showStreet = false, showMBTiles = true)
+                        }
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
+                Spacer(Modifier.height(8.dp))
+                LayerToggleRow(
+                    title = "GIS Patrol Grid Overlay",
+                    subtitle = "Dynamic ${layerState.gridSizeKm2} km² mesh with path coverage",
+                    checked = layerState.showGrid,
+                    onChecked = { checked ->
+                        val newState = layerState.copy(showGrid = checked)
+                        layerState = newState
+                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                    }
+                )
+                if (layerState.showGrid) {
+                    Spacer(Modifier.height(6.dp))
+                    Text("Grid Cell Size (sq km):", fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ForestGreen, modifier = Modifier.padding(start = 4.dp))
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        listOf(0.25, 1.0, 2.0, 5.0, 10.0).forEach { size ->
+                            val isSel = layerState.gridSizeKm2 == size
+                            val label = if (size < 1.0) "0.25 km²" else "${size.toInt()} km²"
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSel) ForestGreen else Surface)
+                                    .border(1.dp, if (isSel) ForestGreen else OutlineCard, RoundedCornerShape(6.dp))
+                                    .clickable {
+                                        val newState = layerState.copy(gridSizeKm2 = size)
+                                        layerState = newState
+                                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
+                                    }
+                                    .padding(vertical = 6.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 10.sp,
+                                    fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (isSel) Color.White else TextPrimary
+                                )
+                            }
+                        }
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
                 LayerToggleRow(
                     title = "Forest Beat Boundaries",
@@ -999,28 +1409,6 @@ fun MapsScreen(
                     checked = layerState.showCompartments,
                     onChecked = { checked ->
                         val newState = layerState.copy(showCompartments = checked)
-                        layerState = newState
-                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-                LayerToggleRow(
-                    title = "Satellite Imagery",
-                    subtitle = "Online Esri World Imagery (offline MBTiles fallback)",
-                    checked = layerState.showSatellite,
-                    onChecked = { checked ->
-                        val newState = layerState.copy(showSatellite = checked)
-                        layerState = newState
-                        miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
-                    }
-                )
-                Spacer(Modifier.height(8.dp))
-                LayerToggleRow(
-                    title = "Street Map",
-                    subtitle = "Online Esri World Street Map (roads & labels)",
-                    checked = layerState.showStreet,
-                    onChecked = { checked ->
-                        val newState = layerState.copy(showStreet = checked)
                         layerState = newState
                         miniMapRef?.style?.let { applyLayerVisibility(it, newState) }
                     }
@@ -1170,8 +1558,13 @@ private fun applyLayerVisibility(style: Style?, state: GisLayerState) {
     style.getLayer("satellite-raster-layer")?.setProperties(PropertyFactory.visibility(satelliteVis))
     style.getLayer("street-raster-layer")?.setProperties(PropertyFactory.visibility(streetVis))
     style.getLayer("beats-fill-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
+    style.getLayer("beats-casing-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-line-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
     style.getLayer("beats-label-layer")?.setProperties(PropertyFactory.visibility(beatsVis))
+    val gridVis = if (state.showGrid) Property.VISIBLE else Property.NONE
+    style.getLayer("grid-patrolled-fill-layer")?.setProperties(PropertyFactory.visibility(gridVis))
+    style.getLayer("grid-patrolled-line-layer")?.setProperties(PropertyFactory.visibility(gridVis))
+    style.getLayer("grid-wire-layer")?.setProperties(PropertyFactory.visibility(gridVis))
     style.getLayer("comp-fill-layer")?.setProperties(PropertyFactory.visibility(compVis))
     style.getLayer("comp-line-layer")?.setProperties(PropertyFactory.visibility(compVis))
     style.getLayer("patrol-track-line-layer")?.setProperties(PropertyFactory.visibility(trackVis))
@@ -1252,88 +1645,36 @@ private fun CoordinatesChip(
     }
 }
 
-@Composable
-private fun SyncStatusBadge(
-    source: String,
-    lastSyncTime: Long,
-    beatCount: Int,
-    compCount: Int,
-    isSyncing: Boolean,
-    modifier: Modifier = Modifier
-) {
-    val sourceLabel = when (source) {
-        "backend" -> "Live"
-        "cache" -> "Cached"
-        "assets" -> "Offline"
-        else -> "—"
-    }
-    val sourceColor = when (source) {
-        "backend" -> ForestGreen
-        "cache" -> Color(0xFFF57C00)
-        "assets" -> TextSecondary
-        else -> TextSecondary
-    }
-    val timeAgo = if (lastSyncTime > 0) {
-        val diff = System.currentTimeMillis() - lastSyncTime
-        when {
-            diff < 60_000 -> "Just now"
-            diff < 3_600_000 -> "${diff / 60_000}m ago"
-            diff < 86_400_000 -> "${diff / 3_600_000}h ago"
-            else -> "${diff / 86_400_000}d ago"
-        }
-    } else "Never"
+/**
+ * Creates a high-contrast dark forest green pill badge with a crisp white border,
+ * matching the authoritative forest GIS map styling.
+ */
+private fun createBeatBadgeBitmap(context: Context): android.graphics.Bitmap {
+    val density = context.resources.displayMetrics.density
+    val width = (64 * density).toInt().coerceAtLeast(1)
+    val height = (28 * density).toInt().coerceAtLeast(1)
+    val bitmap = android.graphics.Bitmap.createBitmap(width, height, android.graphics.Bitmap.Config.ARGB_8888)
+    val canvas = android.graphics.Canvas(bitmap)
 
-    Card(
-        modifier = modifier,
-        shape = RoundedCornerShape(8.dp),
-        colors = CardDefaults.cardColors(containerColor = Surface.copy(alpha = 0.92f)),
-        border = androidx.compose.foundation.BorderStroke(1.dp, OutlineCard)
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            if (isSyncing) {
-                Icon(
-                    Icons.Filled.Refresh,
-                    contentDescription = null,
-                    tint = ForestGreen,
-                    modifier = Modifier
-                        .size(12.dp)
-                        .then(
-                            Modifier.graphicsLayer {
-                                rotationZ = (System.currentTimeMillis() / 10) % 360f
-                            }
-                        )
-                )
-            }
-            Text(
-                text = sourceLabel,
-                color = sourceColor,
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Text(
-                text = "·",
-                color = TextSecondary,
-                fontSize = 10.sp
-            )
-            Text(
-                text = "$beatCount beats · $compCount comps",
-                color = TextSecondary,
-                fontSize = 10.sp
-            )
-            Text(
-                text = "·",
-                color = TextSecondary,
-                fontSize = 10.sp
-            )
-            Text(
-                text = timeAgo,
-                color = TextSecondary,
-                fontSize = 10.sp
-            )
-        }
+    val strokeWidth = 1.6f * density
+    val halfStroke = strokeWidth / 2f
+    val rect = android.graphics.RectF(halfStroke + 1f, halfStroke + 1f, width - halfStroke - 1f, height - halfStroke - 1f)
+    val cornerRadius = 6f * density
+
+    // 1. Dark Forest Green Fill (#154C27)
+    val fillPaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.parseColor("#154C27")
+        style = android.graphics.Paint.Style.FILL
     }
+    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, fillPaint)
+
+    // 2. Pure White Border (#FFFFFF)
+    val strokePaint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+        color = AndroidColor.WHITE
+        style = android.graphics.Paint.Style.STROKE
+        this.strokeWidth = strokeWidth
+    }
+    canvas.drawRoundRect(rect, cornerRadius, cornerRadius, strokePaint)
+
+    return bitmap
 }

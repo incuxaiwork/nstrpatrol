@@ -129,7 +129,7 @@ function ObservationsList() {
       <Card>
         <FilterBar onClear={() => { setCategory(""); setSubcategory(""); setStatus(""); setSeverity(""); setRanger(""); setPeriod(""); setPage(1); }}>
           <FilterSelect label="Category" value={category} onChange={(v) => { setCategory(v); setSubcategory(""); setPage(1); }}
-            options={Object.entries(categoryMeta).map(([v, m]) => ({ value: v, label: m.label }))} />
+            options={PATROL_REPORT_CATEGORIES.map((v) => ({ value: v, label: categoryMeta[v].label }))} />
           <FilterSelect label="Subcategory" value={subcategory} onChange={(v) => { setSubcategory(v); setPage(1); }}
             options={subcategoryOptions} />
           <FilterSelect label="Status" value={status} onChange={(v) => { setStatus(v); setPage(1); }}
