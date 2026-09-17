@@ -11,6 +11,23 @@ import {
 import { mockPatrols } from "@/lib/mock/patrols";
 import { mockRangers, mockTeams } from "@/lib/mock/people";
 
+export const PATROL_REPORT_CATEGORIES = [
+  "human-impact",
+  "mortality",
+  "wildlife",
+  "water-body",
+] as const satisfies readonly Observation["category"][];
+
+export const PATROL_REPORT_SUBCATEGORIES: Record<
+  (typeof PATROL_REPORT_CATEGORIES)[number],
+  string[]
+> = {
+  "human-impact": ["Poaching / trapping", "Fire hazard", "Encroachment", "Theft"],
+  mortality: ["Natural death"],
+  wildlife: ["Direct sighting", "Indirect sign"],
+  "water-body": ["Water hole"],
+};
+
 export const patrolStatusLabel = (s: PatrolStatus): string =>
   ({ planned: "Planned", assigned: "Assigned", ongoing: "Ongoing", completed: "Completed", cancelled: "Cancelled", delayed: "Delayed" })[s];
 

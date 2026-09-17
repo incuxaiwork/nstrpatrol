@@ -61,7 +61,7 @@ import {
   type RangerReport,
   type RegionReport,
 } from "@/lib/reports/report-utils";
-import { categoryMeta } from "@/lib/mock/observations";
+import { categoryMeta, PATROL_REPORT_CATEGORIES, PATROL_REPORT_SUBCATEGORIES } from "@/lib/mock/observations";
 import { patrolStatusTone } from "@/lib/nav";
 import { patrolTypeLabels, patrolMethodLabels } from "@/lib/mock/patrols";
 import { geoLabel } from "@/lib/utils";
@@ -364,18 +364,9 @@ export function ObservationsReportDialog({ open, onClose }: { open: boolean; onC
   });
 
   const subcategoryOptions = useMemo(() => {
-    if (!obsData.data) return [];
-    const seen = new Set<string>();
-    const out: string[] = [];
-    for (const o of obsData.data) {
-      if (filters.category && o.category !== filters.category) continue;
-      if (o.subcategory && !seen.has(o.subcategory)) {
-        seen.add(o.subcategory);
-        out.push(o.subcategory);
-      }
-    }
-    return out;
-  }, [obsData.data, filters.category]);
+    if (!filters.category) return [];
+    return PATROL_REPORT_SUBCATEGORIES[filters.category as keyof typeof PATROL_REPORT_SUBCATEGORIES] ?? [];
+  }, [filters.category]);
 
   const recorderOptions = useMemo(() => {
     if (!obsData.data) return [];

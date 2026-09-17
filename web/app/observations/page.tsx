@@ -16,7 +16,7 @@ import { Icon, type IconName } from "@/components/icons";
 import { Donut, DonutLegend } from "@/components/charts";
 import { SkeletonRows, ErrorState } from "@/components/ui/loading";
 import { severityLabel, severityTone, observationStatusLabel, observationStatusTone } from "@/lib/nav";
-import { categoryMeta } from "@/lib/mock/observations";
+import { categoryMeta, PATROL_REPORT_CATEGORIES, PATROL_REPORT_SUBCATEGORIES } from "@/lib/mock/observations";
 import { timeAgo } from "@/lib/utils";
 
 
@@ -36,6 +36,14 @@ export default function ObservationsDashboardPage() {
   const [category, setCategory] = useState("");
   const [status, setStatus] = useState("");
   const [severity, setSeverity] = useState("");
+
+  const subcategoryOptions = useMemo(
+    () =>
+      (PATROL_REPORT_SUBCATEGORIES[category as keyof typeof PATROL_REPORT_SUBCATEGORIES] ?? []).map(
+        (s) => ({ value: s, label: s })
+      ),
+    [category]
+  );
 
   const filtered = useMemo(() => {
     if (!data) return [];
