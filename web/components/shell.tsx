@@ -6,7 +6,7 @@
  * Includes notification center and profile menu.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
@@ -103,6 +103,11 @@ function NotificationsMenu() {
   const { notifications, unreadCount, markAllRead, notificationsError, reloadNotifications } = useApp();
   const router = useRouter();
   const [open, setOpen] = useState(false);
+  // Mark everything read the moment the menu opens — the badge only exists to
+  // draw attention, so once the user is looking at the feed it's redundant.
+  useEffect(() => {
+    if (open) markAllRead();
+  }, [open, markAllRead]);
   const toneFor = (kind: string) =>
     kind === "critical" ? "danger" : kind === "warning" ? "warning" : kind === "success" ? "success" : "info";
 
