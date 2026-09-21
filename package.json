@@ -1,5 +1,13 @@
 {
+  "scripts": {
+    "dev": "concurrently -n web,api -c green,cyan \"npm run dev --prefix web\" \"npm run start:dev --prefix backend\"",
+    "dev:web": "npm run dev --prefix web",
+    "dev:api": "npm run start:dev --prefix backend"
+  },
   "dependencies": {
     "exceljs": "^4.4.0"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   }
 }

@@ -149,6 +149,17 @@ export function MediaViewer({
             <>
               <ViewerButton label="Zoom out" icon="zoomOut" onClick={() => setZoom((z) => Math.max(0.5, z - 0.25))} />
               <ViewerButton label="Zoom in" icon="zoomIn" onClick={() => setZoom((z) => Math.min(3, z + 0.25))} />
+              {item.src ? (
+                <a
+                  href={item.src}
+                  download={item.label}
+                  aria-label="Download photo"
+                  title="Download"
+                  className="flex size-8 items-center justify-center rounded-md bg-white/10 text-white hover:bg-white/20"
+                >
+                  <Icon name="download" size={15} />
+                </a>
+              ) : null}
             </>
           )}
           <button
@@ -180,12 +191,19 @@ export function MediaViewer({
           <div
             className="flex aspect-video max-h-full w-full max-w-3xl items-center justify-center overflow-hidden rounded-card border border-white/10 bg-[#e8e4da]"
             style={{ transform: `scale(${zoom})` }}
-            aria-hidden="true"
           >
-            <div className="flex flex-col items-center gap-3 text-ink-faint">
-              <Icon name="camera" size={44} />
-              <p className="text-sm">{item.label}</p>
-            </div>
+            {item.src ? (
+              <img
+                src={item.src}
+                alt={item.label}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="flex flex-col items-center gap-3 text-ink-faint">
+                <Icon name="camera" size={44} />
+                <p className="text-sm">{item.label}</p>
+              </div>
+            )}
           </div>
         )}
       </div>

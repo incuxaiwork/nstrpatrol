@@ -75,10 +75,26 @@ export default function ObservationDetailPage() {
                 <button
                   key={i}
                   onClick={() => setMediaIndex(i)}
-                  className="flex aspect-video flex-col items-center justify-center gap-1.5 rounded-card border border-line bg-surface text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
+                  className="relative flex aspect-video flex-col items-center justify-center gap-1.5 overflow-hidden rounded-card border border-line bg-surface text-ink-soft transition-colors hover:border-forest-600 hover:text-forest-800"
                 >
-                  <Icon name={m.type === "photo" ? "camera" : "radio"} size={20} />
-                  <span className="px-2 text-center text-xs">{m.label}</span>
+                  {m.type === "photo" && m.src ? (
+                    <>
+                      <img
+                        src={m.src}
+                        alt={m.label}
+                        loading="lazy"
+                        className="absolute inset-0 h-full w-full object-cover"
+                      />
+                      <span className="absolute inset-x-0 bottom-0 bg-zinc-950/60 px-2 py-1 text-center text-[11px] text-white">
+                        {m.label}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Icon name={m.type === "photo" ? "camera" : "radio"} size={20} />
+                      <span className="px-2 text-center text-xs">{m.label}</span>
+                    </>
+                  )}
                 </button>
               ))}
               {(obs.media ?? []).length === 0 && (

@@ -5,6 +5,7 @@
  */
 
 import type { GeoJsonFeatureCollection, ApiAlert } from "@/lib/api";
+import { uploads } from "@/lib/api";
 import type {
   Observation,
   ObservationCategory,
@@ -745,12 +746,12 @@ export function observationFromApi(i: {
     // fabricated (0, 0) pin in the Gulf of Guinea.
     lat: i.latitude ?? null,
     lng: i.longitude ?? null,
-    media: (i.photos ?? []).map((src, n) => {
-      void src;
+    media: (i.photos ?? []).map((key, n) => {
       return {
         type: "photo" as const,
         label: `Photo ${n + 1}`,
         captureTime: i.occurredAt ?? i.reportedAt ?? new Date().toISOString(),
+        src: uploads.urlFor(key),
       };
     }),
   };

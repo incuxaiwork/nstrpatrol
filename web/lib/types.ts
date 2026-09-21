@@ -336,6 +336,8 @@ export interface ObservationMedia {
   type: "photo" | "audio";
   label: string;
   captureTime: string;
+  /** Resolved viewable URL for photos (backend /api/uploads key). Absent for mock/audio items. */
+  src?: string;
 }
 
 export interface Observation {
